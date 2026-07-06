@@ -2095,6 +2095,19 @@ export const useWorkflowStore = defineStore("workflow", () => {
         ]);
         const ownerOptionalOperations = new Set(["getUserIssues", "inviteUser"]);
 
+        // When this GitHub node is attached to an agent as a tool, fields the
+        // agent fills at runtime ("Agent will provide this at runtime.") are
+        // intentionally left blank in the editor. Skip required-field checks
+        // for those so validation does not block running the workflow.
+        const isAgentToolNode = edges.value.some(
+          (e) => e.source === node.id && e.targetHandle === "tool-input",
+        );
+        const agentProvidedFields = new Set<string>(
+          isAgentToolNode ? (node.data.agentProvidedFields ?? []) : [],
+        );
+        const fieldAgentProvided = (fieldKey: string): boolean =>
+          agentProvidedFields.has(fieldKey);
+
         if (!node.data.credentialId || !isValidUUID(node.data.credentialId)) {
           errors.push({
             nodeId: node.id,
@@ -2113,6 +2126,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
         }
         if (
           !ownerOptionalOperations.has(operation ?? "") &&
+          !fieldAgentProvided("githubOwner") &&
           (!node.data.githubOwner || node.data.githubOwner.trim() === "")
         ) {
           errors.push({
@@ -2124,6 +2138,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
         }
         if (
           !repoOptionalOperations.has(operation ?? "") &&
+          !fieldAgentProvided("githubRepo") &&
           (!node.data.githubRepo || node.data.githubRepo.trim() === "")
         ) {
           errors.push({
@@ -2135,6 +2150,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
         }
         if (
           operation === "inviteUser" &&
+          !(fieldAgentProvided("githubOrganization") && fieldAgentProvided("githubInviteEmail")) &&
           (
             !node.data.githubOrganization ||
             node.data.githubOrganization.trim() === "" ||
@@ -2157,6 +2173,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
             operation === "createComment" ||
             operation === "lockIssue"
           ) &&
+          !fieldAgentProvided("githubIssueNumber") &&
           (!node.data.githubIssueNumber || node.data.githubIssueNumber.trim() === "")
         ) {
           errors.push({
@@ -2168,6 +2185,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
         }
         if (
           operation === "createComment" &&
+          !fieldAgentProvided("githubCommentBody") &&
           (!node.data.githubCommentBody || node.data.githubCommentBody.trim() === "")
         ) {
           errors.push({
@@ -2182,6 +2200,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
             operation === "createIssue" ||
             operation === "createPullRequest"
           ) &&
+          !fieldAgentProvided("githubTitle") &&
           (!node.data.githubTitle || node.data.githubTitle.trim() === "")
         ) {
           errors.push({
@@ -2193,6 +2212,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
         }
         if (
           operation === "createPullRequest" &&
+          !(fieldAgentProvided("githubHead") && fieldAgentProvided("githubBase")) &&
           (
             !node.data.githubHead ||
             node.data.githubHead.trim() === "" ||
@@ -2214,6 +2234,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
             operation === "listReviews" ||
             operation === "updateReview"
           ) &&
+          !fieldAgentProvided("githubPullRequestNumber") &&
           (!node.data.githubPullRequestNumber ||
             node.data.githubPullRequestNumber.trim() === "")
         ) {
@@ -2226,6 +2247,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
         }
         if (
           (operation === "getReview" || operation === "updateReview") &&
+          !fieldAgentProvided("githubReviewId") &&
           (!node.data.githubReviewId || node.data.githubReviewId.trim() === "")
         ) {
           errors.push({
@@ -2237,6 +2259,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
         }
         if (
           operation === "updateReview" &&
+          !fieldAgentProvided("githubReviewBody") &&
           (!node.data.githubReviewBody || node.data.githubReviewBody.trim() === "")
         ) {
           errors.push({
@@ -2252,6 +2275,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
             node.data.githubReviewEvent === "REQUEST_CHANGES" ||
             node.data.githubReviewEvent === "COMMENT"
           ) &&
+          !fieldAgentProvided("githubReviewBody") &&
           (!node.data.githubReviewBody || node.data.githubReviewBody.trim() === "")
         ) {
           errors.push({
@@ -2267,6 +2291,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
             operation === "upsertFile" ||
             operation === "deleteFile"
           ) &&
+          !fieldAgentProvided("githubFilePath") &&
           (!node.data.githubFilePath || node.data.githubFilePath.trim() === "")
         ) {
           errors.push({
@@ -2278,6 +2303,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
         }
         if (
           (operation === "upsertFile" || operation === "deleteFile") &&
+          !fieldAgentProvided("githubCommitMessage") &&
           (!node.data.githubCommitMessage || node.data.githubCommitMessage.trim() === "")
         ) {
           errors.push({
@@ -2289,6 +2315,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
         }
         if (
           (operation === "getRelease" || operation === "updateRelease" || operation === "deleteRelease") &&
+          !fieldAgentProvided("githubReleaseId") &&
           (!node.data.githubReleaseId || node.data.githubReleaseId.trim() === "")
         ) {
           errors.push({
@@ -2300,6 +2327,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
         }
         if (
           operation === "createRelease" &&
+          !fieldAgentProvided("githubTagName") &&
           (!node.data.githubTagName || node.data.githubTagName.trim() === "")
         ) {
           errors.push({
@@ -2318,6 +2346,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
             operation === "getWorkflowUsage"
             || operation === "dispatchWorkflowAndWait"
           ) &&
+          !fieldAgentProvided("githubWorkflowId") &&
           (!node.data.githubWorkflowId || node.data.githubWorkflowId.trim() === "")
         ) {
           errors.push({
@@ -2329,6 +2358,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
         }
         if (
           (operation === "dispatchWorkflow" || operation === "dispatchWorkflowAndWait") &&
+          !fieldAgentProvided("githubBranch") &&
           (!node.data.githubBranch || node.data.githubBranch.trim() === "")
         ) {
           errors.push({
