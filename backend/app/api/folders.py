@@ -66,9 +66,7 @@ def _write_folder_to_zip(
 def _accessible_workflow_filter(user_id: uuid.UUID):
     return or_(
         Workflow.owner_id == user_id,
-        Workflow.id.in_(
-            select(WorkflowShare.workflow_id).where(WorkflowShare.user_id == user_id)
-        ),
+        Workflow.id.in_(select(WorkflowShare.workflow_id).where(WorkflowShare.user_id == user_id)),
         Workflow.id.in_(
             select(WorkflowTeamShare.workflow_id).where(
                 WorkflowTeamShare.team_id.in_(
