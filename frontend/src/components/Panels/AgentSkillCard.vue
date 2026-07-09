@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import {
   ChevronDown,
   ChevronRight,
@@ -15,7 +15,13 @@ import Button from "@/components/ui/Button.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
 import Textarea from "@/components/ui/Textarea.vue";
-import type { AgentSkill, AgentSkillFile } from "@/types/workflow";
+import {
+  getSkillFileImageSrc,
+  getSkillFilesSortedForDisplay,
+  isImageSkillFile,
+  isTextSkillFile,
+} from "@/lib/skillFilePreview";
+import type { AgentSkill } from "@/types/workflow";
 
 interface Props {
   skill: AgentSkill;
@@ -25,7 +31,11 @@ interface Props {
   downloadLoading?: boolean;
 }
 
-defineProps<Props>();
+const props = defineProps<Props>();
+
+const sortedSkillFiles = computed(() =>
+  getSkillFilesSortedForDisplay(props.skill.files ?? []),
+);
 
 const emit = defineEmits<{
   (e: "toggle-expand"): void;
@@ -43,22 +53,6 @@ const emit = defineEmits<{
 
 const fileInputRef = ref<HTMLInputElement | null>(null);
 const isFileDragActive = ref(false);
-
-function isTextSkillFile(file: AgentSkillFile): boolean {
-  return !file.encoding || file.encoding === "text";
-}
-
-function isImageSkillFile(file: AgentSkillFile): boolean {
-  return file.encoding === "base64" && (file.mimeType?.startsWith("image/") ?? false);
-}
-
-function getSkillFilePreviewSrc(file: AgentSkillFile): string {
-  if (!isImageSkillFile(file) || !file.content) {
-    return "";
-  }
-  const mimeType = file.mimeType || "image/png";
-  return `data:${mimeType};base64,${file.content}`;
-}
 
 function openFilePicker(): void {
   fileInputRef.value?.click();
@@ -250,8 +244,8 @@ function handleFileDrop(event: DragEvent): void {
       >
         <Label class="text-xs">Files ({{ skill.files.length }})</Label>
         <div
-          v-for="(file, fileIndex) in skill.files"
-          :key="fileIndex"
+          v-for="{ file, originalIndex } in sortedSkillFiles"
+          :key="file.path"
           class="rounded border bg-muted/20 p-2 min-w-0"
         >
           <div class="flex justify-between items-center gap-2 mb-1 min-w-0">
@@ -263,7 +257,7 @@ function handleFileDrop(event: DragEvent): void {
               variant="ghost"
               size="sm"
               class="gap-1 shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-              @click="emit('remove-file', fileIndex)"
+              @click="emit('remove-file', originalIndex)"
             >
               <Trash2 class="w-3.5 h-3.5" />
               Remove
@@ -274,8 +268,8 @@ function handleFileDrop(event: DragEvent): void {
             class="space-y-2"
           >
             <img
-              v-if="getSkillFilePreviewSrc(file)"
-              :src="getSkillFilePreviewSrc(file)"
+              v-if="getSkillFileImageSrc(file)"
+              :src="getSkillFileImageSrc(file)"
               :alt="file.path"
               class="max-h-56 w-auto max-w-full rounded border bg-background object-contain"
             >
@@ -288,7 +282,7 @@ function handleFileDrop(event: DragEvent): void {
             :model-value="file.content"
             :rows="4"
             class="font-mono text-xs"
-            @update:model-value="emit('update:file-content', fileIndex, $event)"
+            @update:model-value="emit('update:file-content', originalIndex, $event)"
           />
           <p
             v-else
