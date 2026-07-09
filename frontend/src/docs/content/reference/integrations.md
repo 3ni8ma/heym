@@ -14,6 +14,7 @@ Some integration nodes do **not** require credentials. [WebSocket Trigger](../no
 | **OpenAI Codex** | [Codex](../nodes/codex-node.md) | `access_token` |
 | **Google** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | `api_key` |
 | **GitHub** | [GitHub](../nodes/github-node.md), [Codex](../nodes/codex-node.md), [Agent](../nodes/agent-node.md), [HTTP](../nodes/http-node.md) | `api_key`, optional `base_url` |
+| **Jira** | [Jira node](../nodes/jira-node.md) | `email`, `api_token`, `base_url`, `deployment`, optional `api_version` |
 | **Linear** | [Linear node](../nodes/linear-node.md) | `api_key`, or `client_id` + `client_secret` OAuth2 |
 | **Sentry** | [Sentry node](../nodes/sentry-node.md) | `api_token`, optional `base_url` |
 | **Custom** | [LLM](../nodes/llm-node.md), [Agent](../nodes/agent-node.md) | `api_key`, `base_url` |
@@ -149,6 +150,54 @@ OAuth tokens (`access_token`, `refresh_token`, `token_expiry`) are stored and re
 ### Used By
 
 - [Linear node](../nodes/linear-node.md)
+
+---
+
+## Jira
+
+The Jira credential stores Jira Basic auth credentials, Jira site base URL, deployment mode, and optional REST API version for the [Jira node](../nodes/jira-node.md). Use `cloud` for Jira Cloud or `data_center` for Jira Data Center / Server.
+
+### Setup
+
+**Jira Cloud**
+
+1. In Atlassian account settings, create an API token.
+2. In Heym Dashboard → **Credentials** → **New** → type **Jira**.
+3. Enter the Atlassian email, API token, and Jira site URL such as `https://your-domain.atlassian.net`.
+4. Use **Test Connection** to verify the credential.
+
+**Jira Data Center / Server**
+
+1. Select **Jira Data Center / Server** as the deployment.
+2. Enter the Jira username and password used for Basic auth.
+3. Enter the Jira site URL, for example `https://jira.example.com`.
+4. Use **Test Connection** to verify the credential.
+
+### Fields
+
+| Field | Description |
+| --- | --- |
+| `email` | Jira Cloud Atlassian account email, or Jira Data Center / Server username |
+| `api_token` | Jira Cloud Atlassian API token, or Jira Data Center / Server password for Basic auth |
+| `base_url` | Jira site base URL |
+| `deployment` | `cloud` for Jira Cloud or `data_center` for Jira Data Center / Server |
+| `api_version` | REST API version; defaults to `3` for Jira Cloud. Data Center / Server uses v2 |
+
+### Notes
+
+- The Jira node sends issue descriptions and comments as Atlassian Document Format text
+  documents for Jira Cloud REST API v3. Data Center / Server credentials send plain text.
+- Data Center / Server currently supports username/password Basic auth only. Personal access
+  tokens and Bearer auth are not supported yet.
+- Attachment upload accepts base64 or data URL content and is subject to the platform file size limit (default 99 MB). Attachment download can return base64 content when enabled.
+- User creation, deletion, and issue notification require the authenticated Jira account to have the relevant Jira site or organization permissions.
+- Use List Projects, Search Issues, and List Transitions to discover project keys, issue keys, and transition IDs.
+- For custom endpoints not covered by the Jira node, use the [HTTP node](../nodes/http-node.md) with Jira Basic Auth (`email:api_token` for Cloud or `username:password` for Data Center / Server) in the cURL command, or a Header credential with the matching `Authorization: Basic <base64(user:secret)>` value.
+
+See also:
+
+- [Jira node](../nodes/jira-node.md)
+- [Credentials](./credentials.md)
 
 ---
 

@@ -696,7 +696,7 @@ The response includes `$llmNodeLabel.image` (base64 data URL) which can be used 
 }
 ```
 
-### 4. agent (AI Agent with Tool Calling)
+### 5. agent (AI Agent with Tool Calling)
 - **Purpose**: LLM with optional user-defined Python tools and/or MCP (Model Context Protocol) connections. The LLM can call tools to perform computations, then use results in its response.
 - **Inputs**: 1 | **Outputs**: 1
 - **Data fields**:
@@ -1012,14 +1012,14 @@ Guardrails block unsafe user messages **before** the LLM or Agent runs. When a v
 }
 ```
 
-### 5. condition (If/Else Branch)
+### 6. condition (If/Else Branch)
 - **Purpose**: Branch workflow based on condition
 - **Inputs**: 1 | **Outputs**: 2 (true path: output-0, false path: output-1)
 - **Data fields**:
   - `label`: Node identifier
   - `condition`: JavaScript-like expression (e.g., `$previousNodeLabel.text.length > 0`)
 
-### 6. switch (Multi-way Branch)
+### 7. switch (Multi-way Branch)
 - **Purpose**: Route to different paths based on value matching
 - **Inputs**: 1 | **Outputs**: N+1 (N cases + default)
 - **Data fields**:
@@ -1027,7 +1027,7 @@ Guardrails block unsafe user messages **before** the LLM or Agent runs. When a v
   - `expression`: Value to evaluate (e.g., `$previousNodeLabel.category`)
   - `cases`: Array of case values ["case1", "case2"]
 
-### 7. execute (Call Another Workflow)
+### 8. execute (Call Another Workflow)
 - **Purpose**: Call/execute another workflow (sub-workflow)
 - **Inputs**: 1 | **Outputs**: 1
 - **Data fields**:
@@ -1156,7 +1156,7 @@ Do NOT use downstream nodes that depend on `$notifyWorkflow.outputs` when `execu
 - Each mapping's `value` should be an expression like `$nodeName.field`
 - **When target workflow needs multiple inputs, add corresponding `inputFields` to your textInput node!**
 
-### 8. output (End Point with Optional Async Continuation)
+### 9. output (End Point with Optional Async Continuation)
 - **Purpose**: Final output of the workflow, returns response to caller
 - **Inputs**: 1 | **Outputs**: 1 (optional, for async post-processing)
 - **Data fields**:
@@ -1207,14 +1207,14 @@ Do NOT use downstream nodes that depend on `$notifyWorkflow.outputs` when `execu
 - If multiple terminal nodes produce outputs (e.g. `output` + `jsonOutputMapper`, or two mappers), the runtime uses the normal per-label map — **unwrapping applies only when the sole terminal is one `jsonOutputMapper`**.
 - Same loop restriction as `output`: **never** place `jsonOutputMapper` inside a loop iteration branch (only after `done`).
 
-### 9. wait (Delay)
+### 10. wait (Delay)
 - **Purpose**: Pause execution for specified time
 - **Inputs**: 1 | **Outputs**: 1
 - **Data fields**:
   - `label`: Node identifier
   - `duration`: Milliseconds to wait (e.g., 1000 for 1 second)
 
-### 10. http (HTTP Request) - CAN BE A STARTING POINT!
+### 11. http (HTTP Request) - CAN BE A STARTING POINT!
 - **Purpose**: Make HTTP requests using cURL syntax
 - **Inputs**: 0 or 1 | **Outputs**: 1
 - **⚠️ STARTING POINT**: HTTP nodes can START a workflow without any preceding node! Perfect for fetching static URLs without user input.
@@ -1246,7 +1246,7 @@ The http node ALWAYS returns a structured response object:
 - `$httpNodeLabel.body.fieldName` - Access parsed JSON fields from body
 - `$httpNodeLabel.headers` - Response headers object
 
-### 11. merge (Combine Inputs) - USE ONLY WHEN EXPLICITLY REQUESTED!
+### 12. merge (Combine Inputs) - USE ONLY WHEN EXPLICITLY REQUESTED!
 - **Purpose**: Wait for multiple parallel branches and combine their outputs
 - **Inputs**: N (configurable) | **Outputs**: 1
 - **Data fields**:
@@ -1258,7 +1258,7 @@ The http node ALWAYS returns a structured response object:
 - DO NOT use merge for simple parallel workflows that end with separate outputs
 - If user wants parallel operations with separate results, use separate output nodes instead
 
-### 12. set (Data Transformation) ⭐ USE THIS FOR TRANSFORMATIONS!
+### 13. set (Data Transformation) ⭐ USE THIS FOR TRANSFORMATIONS!
 - **Purpose**: Transform input data - uppercase, lowercase, substring, concatenation, random numbers, etc.
 - **Inputs**: 1 | **Outputs**: 1
 - **Data fields**:
@@ -1285,14 +1285,14 @@ The http node ALWAYS returns a structured response object:
 3. Functions return their native type - randomInt returns a number, no conversion needed
 4. For modulo/math on set node output: `$generateRandom.randomNumber % 2 == 0` (use the key name, e.g., "randomNumber")
 
-### 13. sticky (Note)
+### 14. sticky (Note)
 - **Purpose**: Add documentation notes to canvas (not executed)
 - **Inputs**: 0 | **Outputs**: 0
 - **Data fields**:
   - `label`: Node identifier
   - `note`: Markdown text content
 
-### 14. errorHandler (Global Error Catcher) - ONLY ADD WHEN EXPLICITLY REQUESTED!
+### 15. errorHandler (Global Error Catcher) - ONLY ADD WHEN EXPLICITLY REQUESTED!
 - **Purpose**: Catches errors from ANY node in the workflow. If present on canvas, executes when any node fails.
 - **Inputs**: 0 (triggered automatically on error) | **Outputs**: 1
 - **Data fields**:
@@ -1401,7 +1401,7 @@ Notes:
 }
 ```
 
-### 15. slack (Send Slack Message)
+### 16. slack (Send Slack Message)
 - **Purpose**: Send a message to Slack channel via webhook
 - **Inputs**: 1 | **Outputs**: 1
 - **Data fields**:
@@ -1452,7 +1452,7 @@ Notes:
 }
 ```
 
-### 16. sendEmail (Send Email via SMTP)
+### 17. sendEmail (Send Email via SMTP)
 - **Purpose**: Send an email using SMTP credentials
 - **Inputs**: 1 | **Outputs**: 1
 - **Data fields**:
@@ -1513,7 +1513,7 @@ Notes:
 }
 ```
 
-### 17. variable (Set Variable)
+### 18. variable (Set Variable)
 - **Purpose**: Set or update a variable that can be accessed from ANY node via `$vars.variableName` (workflow-local) or `$global.variableName` (persistent, user-scoped)
 - **Inputs**: 1 | **Outputs**: 1
 - **Data fields**:
@@ -1646,7 +1646,7 @@ list item stays `item`:
 2. **Inside loop body**: Use another `variable` node with `.add()` to append items
 3. **After loop (done branch)**: Access collected items via `$vars.variableName`
 
-### 18. loop (Iterate Over Array)
+### 19. loop (Iterate Over Array)
 - **Purpose**: Iterate over an array of items, executing downstream nodes for each item
 - **Inputs**: 2 handles
   - Default input (receives initial array data)
@@ -1743,7 +1743,7 @@ The last node in the iteration body MUST connect BACK to the loop node's `loop` 
    - The workflow validator will REJECT any workflow with output nodes in loop branches
    - Use `set` or `variable` nodes for ALL intermediate processing inside loops
 
-### 19. disableNode (Disable Another Node)
+### 20. disableNode (Disable Another Node)
 - **Purpose**: Disable another node in the workflow permanently. When executed, sets the target node's `active` to `false` and updates the workflow in the database.
 - **Inputs**: 1 | **Outputs**: 1
 - **Data fields**:
@@ -1788,7 +1788,7 @@ The last node in the iteration body MUST connect BACK to the loop node's `loop` 
 5. If false: output says still waiting
 6. After disable runs, the cron node's `active` becomes `false` and it won't trigger anymore
 
-### 20. redis (Redis Operations)
+### 21. redis (Redis Operations)
 - **Purpose**: Perform Redis operations (set, get, check key existence, delete)
 - **Inputs**: 1 | **Outputs**: 1
 - **Data fields**:
@@ -1886,7 +1886,7 @@ The last node in the iteration body MUST connect BACK to the loop node's `loop` 
 - `$redisNodeLabel.key` - The key that was operated on
 - `$redisNodeLabel.ttl` - TTL value (for set operation with TTL)
 
-### 21. rag (Vector Store / RAG Operations)
+### 22. rag (Vector Store / RAG Operations)
 - **Purpose**: Insert documents into or search documents from a vector store (Qdrant or Postgres/pgvector) for RAG (Retrieval Augmented Generation)
 - **Inputs**: 1 | **Outputs**: 1
 - **Data fields**:
@@ -1990,7 +1990,7 @@ The last node in the iteration body MUST connect BACK to the loop node's `loop` 
 }
 ```
 
-### 22. grist (Grist Spreadsheet Operations)
+### 23. grist (Grist Spreadsheet Operations)
 - **Purpose**: Read, write, and manage data in Grist spreadsheets (open-source spreadsheet platform)
 - **Inputs**: 1 | **Outputs**: 1
 - **Data fields**:
@@ -2173,7 +2173,7 @@ When creating or updating records in Grist, you MUST use **column IDs** (interna
 - `$gristNodeLabel.tables` - Array of tables (for listTables)
 - `$gristNodeLabel.columns` - Array of columns with id and label (use listColumns to discover column IDs)
 
-### 23. googleSheets (Google Sheets Operations)
+### 24. googleSheets (Google Sheets Operations)
 - **Purpose**: Read, write, append, clear, and inspect Google Sheets spreadsheets via OAuth2
 - **Inputs**: 1 | **Outputs**: 1
 - **Data fields**:
@@ -2305,7 +2305,7 @@ Each row object includes **`rowIndex`**: the 1-based sheet row number (useful fo
 - `$sheetInfo.title` — Spreadsheet title
 - `$sheetInfo.sheets` — Array of {sheetId, title} objects
 
-### 24. bigquery (Google BigQuery Operations)
+### 25. bigquery (Google BigQuery Operations)
 - **Purpose**: Run SQL queries against Google BigQuery data warehouses and stream-insert rows into tables via OAuth2
 - **Inputs**: 1 | **Outputs**: 1
 - **Credential required**: `bigquery` credential type (OAuth2 — client_id + client_secret, then Connect via browser popup)
@@ -2597,7 +2597,7 @@ accepts at most two nested levels of block children per request.
 - `$queryTasks.count` — result count
 - `$createTask.success` — boolean success indicator
 
-### 25. dataTable (DataTable Operations)
+### 26. dataTable (DataTable Operations)
 - **Purpose**: Read, write, and manage data in Heym DataTables (first-party structured storage)
 - **Inputs**: 1 | **Outputs**: 1
 - **No credential required** — DataTable operates on internal Heym database
@@ -2690,7 +2690,7 @@ accepts at most two nested levels of block children per request.
 - `$nodeLabel.found` - Boolean (for getById)
 - `$nodeLabel.operation` - Operation name (e.g. "count"; "insert"/"update" for upsert)
 
-### 24. throwError (Stop Workflow with Error)
+### 27. throwError (Stop Workflow with Error)
 - **Purpose**: Immediately stop workflow execution and return an error response with a custom HTTP status code
 - **Inputs**: 1 | **Outputs**: 0 (workflow stops here)
 - **Data fields**:
@@ -2765,7 +2765,7 @@ accepts at most two nested levels of block children per request.
 }
 ```
 
-### 25. rabbitmq (RabbitMQ Message Queue)
+### 28. rabbitmq (RabbitMQ Message Queue)
 - **Purpose**: Send or receive messages from RabbitMQ queues and exchanges
 - **Inputs**: 1 | **Outputs**: 1
 - **Data fields**:
@@ -2878,7 +2878,7 @@ accepts at most two nested levels of block children per request.
 }
 ```
 
-### 26. crawler (Web Scraping with FlareSolverr)
+### 29. crawler (Web Scraping with FlareSolverr)
 - **Purpose**: Scrape web pages using FlareSolverr with optional HTML extraction via CSS selectors
 - **Inputs**: 1 | **Outputs**: 1
 - **Data fields**:
@@ -3018,7 +3018,7 @@ $crawler.extracted.items.map("concat('item.category', '/', 'item.slug', '.html')
 ```
 This returns: `["news/my-article.html", "blog/another-post.html", ...]`
 
-### 27. consoleLog (Backend Console Log)
+### 30. consoleLog (Backend Console Log)
 - **Purpose**: Writes a value to the backend (server) console for debugging. Logs do NOT appear in the browser.
 - **⛔ WHEN TO CREATE**: Add this node **ONLY** when the user explicitly requests backend/console logging. If this intent is NOT present, do **NOT** create any consoleLog node.
 - **Inputs**: 1 | **Outputs**: 1
@@ -3031,7 +3031,7 @@ This returns: `["news/my-article.html", "blog/another-post.html", ...]`
 { "type": "consoleLog", "data": { "label": "debugStep", "logMessage": "$userInput.body.text" } }
 ```
 
-### 28. playwright (Browser Automation)
+### 31. playwright (Browser Automation)
 - **Purpose**: Execute browser automation steps (navigate, click, type, fill, etc.) using Playwright. Steps are defined in the node and executed in order at runtime. Supports optional auth bootstrap from cookies/storageState plus fallback login steps.
 - **Inputs**: 1 | **Outputs**: 1
 - **Data fields**:
@@ -3146,7 +3146,7 @@ This returns: `["news/my-article.html", "blog/another-post.html", ...]`
 **Note**: Add steps in the Properties Panel. Steps are executed in order at runtime. Execution requires at least one step in `playwrightSteps`.
 If `playwrightAuthEnabled` is true, the first item in `playwrightSteps` must be `navigate`, auth bootstrap works only with step-based execution, and `playwrightAuthFallbackSteps` should leave the browser on the authenticated page expected by the remaining main steps.
 
-### 29. drive (Drive File Management)
+### 32. drive (Drive File Management)
 - **Purpose**: List and manage files generated by skills — retrieve metadata, delete, password-protect, set expiry (TTL), limit downloads, or share/unshare with teams
 - **Inputs**: 1 | **Outputs**: 1
 - **No credential required** — operates on files owned by the workflow owner
@@ -3334,7 +3334,7 @@ Access the converted file downstream: `$convertDoc.id`, `$convertDoc.download_ur
 - `$agentLabel._generated_files[0].mime_type` - MIME type
 - `$agentLabel._generated_files[0].size_bytes` - File size in bytes
 
-### 30. mcpCall (Direct MCP Tool Call)
+### 33. mcpCall (Direct MCP Tool Call)
 - **Purpose**: Call a specific MCP tool directly without an LLM deciding which tool to use
 - **Inputs**: 1 | **Outputs**: 1
 - **WHEN TO USE**: When you know exactly which MCP tool to call. Deterministic — no LLM loop.
@@ -3368,7 +3368,7 @@ Access the converted file downstream: `$convertDoc.id`, `$convertDoc.download_ur
 **Downstream access:**
 - `$searchCall.result` → tool result (object or string)
 
-### 31. chartOutput (Dashboard Widget Chart) - TERMINAL NODE FOR DASHBOARD WIDGETS
+### 34. chartOutput (Dashboard Widget Chart) - TERMINAL NODE FOR DASHBOARD WIDGETS
 - **Purpose**: Terminal node that turns upstream rows into a chart for a dashboard widget.
 - **Inputs**: 1 | **Outputs**: 0 (it is the LAST node in a dashboard-widget workflow)
 - **WHEN TO USE**: Only in dashboard-widget workflows. The node before it must produce an array of
@@ -3836,7 +3836,7 @@ For boolean values, use them directly without `== true`:
 **If a function is NOT in the documentation above, it DOES NOT EXIST!**
 Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `len()`, `abs()`, `min()`, `max()`, `round()`, `sum()`, `sorted()`, `randomInt()`, `range()`, `array()`, `notNull()`, `upper()`, `lower()`, `strip()`, `capitalize()`, `title()`, `split()`, `join()`, `replace()`, `regexReplace()`, `hash()`, and the documented string/array/object methods.
 
-### 32. s3 (Amazon S3 Operations)
+### 35. s3 (Amazon S3 Operations)
 - **Type**: `s3`
 - **Purpose**: Manage buckets and folders; list, upload, download, copy, and delete objects in Amazon S3
 - **Inputs**: 1 | **Outputs**: 1
@@ -3931,7 +3931,7 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
 }
 ```
 
-### 33. linear (Linear Workspace and Issue Operations)
+### 36. linear (Linear Workspace and Issue Operations)
 - **Type**: `linear`
 - **Inputs**: 1, **Outputs**: 1
 - **Credential required**: `linear` credential type containing a Linear personal API key or
@@ -3990,7 +3990,7 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
 }
 ```
 
-### 34. sentry (Sentry REST Operations)
+### 37. sentry (Sentry REST Operations)
 - **Type**: `sentry`
 - **Purpose**: Manage Sentry organizations, projects, teams, issues, events, and releases
 - **Inputs**: 1 | **Outputs**: 1
@@ -4037,7 +4037,97 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
 }
 ```
 
-### 35. github (GitHub REST Operations)
+### 38. jira (Jira REST Operations)
+- **Type**: `jira`
+- **Purpose**: Manage Jira projects, issues, comments, attachments, users, notifications, and workflow transitions
+- **Inputs**: 1 | **Outputs**: 1
+- **Required setup**: `credentialId` must point to an owned Jira credential with email,
+  API token, Jira base URL, and deployment mode (`cloud` or `data_center`)
+- **Operations**:
+  - `getMyself`: authenticated Jira user
+  - `listProjects`: projects visible to the user
+  - `searchIssues`: search issues with `jiraJql`; Cloud uses `/search/jql` and
+    `jiraNextPageToken`, Data Center uses `/search` and `jiraStartAt`; defaults to
+    `updated >= -30d ORDER BY updated DESC`; optional `jiraFields` (defaults to
+    `key`, `summary`, `status`, `assignee`, `issuetype`)
+  - `getIssue`: fetch by key or ID such as `ENG-123`
+  - `createIssue`: requires `jiraProjectKey` and `jiraSummary`; optional `jiraIssueType`,
+    `jiraIssueTypeId`, `jiraDescription`, `jiraAssigneeAccountId` (Cloud accountId or
+    Data Center username), and `jiraLabels`
+  - `updateIssue`: requires `jiraIssueKey` and at least one changed field
+  - `deleteIssue`: requires `jiraIssueKey`
+  - `getIssueChangelog`: changelog entries for `jiraIssueKey`
+  - `notifyIssue`: requires `jiraIssueKey`, `jiraNotifySubject`, and `jiraNotifyTextBody`
+  - `listComments`: comments for `jiraIssueKey`
+  - `createComment`: requires `jiraIssueKey` and `jiraCommentBody`
+  - `getComment`: requires `jiraIssueKey` and `jiraCommentId`
+  - `updateComment`: requires `jiraIssueKey`, `jiraCommentId`, and `jiraCommentBody`
+  - `deleteComment`: requires `jiraIssueKey` and `jiraCommentId`
+  - `listTransitions`: available transitions for `jiraIssueKey`
+  - `transitionIssue`: requires `jiraIssueKey` and `jiraTransitionId`
+  - `addAttachment`: requires `jiraIssueKey`, `jiraAttachmentFilename`, and `jiraAttachmentBase64`
+  - `getAttachment`: requires `jiraAttachmentId`; optional `jiraIncludeBinary`
+  - `listAttachments`: requires `jiraIssueKey`; optional `jiraIncludeBinary`
+  - `deleteAttachment`: requires `jiraAttachmentId`
+  - `getUser`: requires `jiraAccountId` (Cloud accountId or Data Center username)
+  - `createUser`: requires `jiraUserEmail`; optional `jiraUsername`, `jiraUserDisplayName`,
+    and `jiraUserProducts` (admin permissions; username applies to Data Center, products
+    apply to Jira Cloud)
+  - `deleteUser`: requires `jiraAccountId` (Cloud accountId or Data Center username; admin permissions)
+- **Fields**: `jiraOperation`, `jiraProjectKey`, `jiraIssueKey`, `jiraIssueType`,
+  `jiraIssueTypeId`, `jiraSummary`, `jiraDescription`, `jiraJql`, `jiraFields`,
+  `jiraAssigneeAccountId`, `jiraLabels`, `jiraCommentBody`, `jiraCommentId`,
+  `jiraTransitionId`, `jiraNotifySubject`, `jiraAttachmentId`, `jiraAttachmentFilename`,
+  `jiraAttachmentBase64`, `jiraAttachmentMimeType`,
+  `jiraNotifyTextBody`, `jiraNotifyHtmlBody`, `jiraNotifyTo`, `jiraAccountId`,
+  `jiraUsername`, `jiraUserEmail`, `jiraUserDisplayName`, `jiraUserProducts`,
+  `jiraLimit` (1-100), `jiraStartAt`, `jiraNextPageToken`
+- Text fields support expressions. `jiraIncludeBinary` is a static boolean toggle and can be
+  marked as agent-provided when the Jira node is attached to an Agent tool handle.
+  `jiraLabels`, `jiraUserProducts`, and `jiraFields` may be a
+  JSON array of strings or comma-separated text. `jiraNotifyTo` must be a JSON object and
+  defaults to `{"assignee":true}` when omitted. `searchIssues` pagination uses
+  `pagination.nextPageToken` on Cloud and `pagination.startAt` on Data Center.
+- Jira REST API v3 sends issue descriptions and comments as Atlassian Document Format (ADF);
+  Data Center REST API v2 sends plain text. `getIssueChangelog` uses
+  `/issue/{key}/changelog` on Cloud and expanded issue changelog data on Data Center.
+- List outputs contain `{success, operation, count, projects|issues|comments|changelog|attachments, pagination}`.
+  `searchIssues` uses cursor pagination (`pagination.nextPageToken`) on Cloud and offset
+  pagination (`pagination.startAt`) on Data Center. Other paginated lists use `startAt`.
+  `listAttachments` pagination is client-side after fetching all issue attachments.
+- Issue outputs contain `{success, operation, issue, key}`.
+- Comment get/create/update outputs `{success, operation, comment}`; comment delete outputs
+  `{success, operation, deleted}`.
+- `listTransitions` outputs `{success, operation, transitions, count}` without pagination.
+  `transitionIssue` outputs `{success, operation, transition, issue, key}`.
+- Attachment add outputs `{success, operation, attachments, count}`. List attachments also
+  includes `pagination`. Attachment get outputs `{success, operation, attachment}` and includes
+  `attachment.content_base64` when `jiraIncludeBinary` is true. Attachment delete outputs
+  `{success, operation, deleted}`.
+- User get/create outputs `{success, operation, user}`; delete outputs `{success, operation, deleted}`.
+- Notify outputs `{success, operation, notified}`.
+- Set update fields to `null` to clear description or assignee.
+
+**Example — create a Jira issue:**
+```json
+{
+  "id": "jira-1",
+  "type": "jira",
+  "position": {"x": 500, "y": 100},
+  "data": {
+    "label": "createJiraIssue",
+    "credentialId": "YOUR_CREDENTIAL_ID",
+    "jiraOperation": "createIssue",
+    "jiraProjectKey": "ENG",
+    "jiraIssueType": "Task",
+    "jiraSummary": "$input.title",
+    "jiraDescription": "$input.description",
+    "jiraLabels": "[\"automation\"]"
+  }
+}
+```
+
+### 39. github (GitHub REST Operations)
 - **Type**: `github`
 - **Purpose**: Manage repositories, users, issues, pull requests, reviews, releases, Actions
   workflows, traffic insights, and repository files
@@ -4110,7 +4200,7 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
 }
 ```
 
-### 36. codex (OpenAI Codex Coding Agent)
+### 40. codex (OpenAI Codex Coding Agent)
 - **Type**: `codex`
 - **Purpose**: Run a coding task against a Git repository using the Codex CLI inside Heym's
   isolated runner. This node is access-token-only; do not use OpenAI API keys.
@@ -4337,7 +4427,7 @@ Always include:
 21. **MULTIPLE INPUT FIELDS** - textInput nodes support multiple input fields via `inputFields` array. Define fields like `[{"key": "text"}, {"key": "base64"}]`. Access via `$nodeLabel.body.fieldKey`. Input values are sent in the `body` object.
 22. **⚠️ NO UNNECESSARY textInput!** - NEVER add textInput unless user explicitly needs to provide input data. For static URLs, scheduled tasks, or fixed operations, START DIRECTLY with http, cron, or other nodes. textInput is ONLY for workflows that receive dynamic data from users/API callers.
 23. **⚠️ PRESERVE CREDENTIALS & MODEL** - When modifying an existing workflow, ALWAYS preserve existing `credentialId` and `model` values in nodes. NEVER replace, remove, or change credential IDs or model names unless the user explicitly asks to use a different credential or model. If a node already has a `credentialId` or `model`, keep them exactly as is.
-23a. **⚠️ CREDENTIALS & INTEGRATIONS - OWNED ONLY (NO SHARED)** - For **every** node field that references a credential or secret (`credentialId`, `githubCredentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Playwright `aiStep` credential, etc.), use ONLY credentials **owned** by the workflow owner. **NEVER** put shared credentials (shared with you by another user or via team share) in generated JSON—the UI labels these as shared; they must not appear in AI output. Use placeholders such as `YOUR_CREDENTIAL_ID`, `codex-credential-uuid`, `github-credential-uuid`, `slack-credential-uuid`, `telegram-credential-uuid`, or `imap-credential-uuid` and let the user pick an owned credential in the editor. Applies to: `llm`, `agent`, `codex`, `slack`, `telegram`, `slackTrigger`, `telegramTrigger`, `imapTrigger`, `sendEmail`, `redis`, `grist`, `github`, `linear`, `googleSheets`, `bigquery`, `supabase`, `notion`, `rabbitmq`, `crawler`, `playwright` (including `aiStep`), and any other integration that stores a credential id. When modifying an existing workflow (rule 23), still preserve existing ids if they are already non-shared; when **adding** new nodes, never insert shared credential UUIDs.
+23a. **⚠️ CREDENTIALS & INTEGRATIONS - OWNED ONLY (NO SHARED)** - For **every** node field that references a credential or secret (`credentialId`, `githubCredentialId`, `fallbackCredentialId`, `guardrailCredentialId`, Playwright `aiStep` credential, etc.), use ONLY credentials **owned** by the workflow owner. **NEVER** put shared credentials (shared with you by another user or via team share) in generated JSON—the UI labels these as shared; they must not appear in AI output. Use placeholders such as `YOUR_CREDENTIAL_ID`, `codex-credential-uuid`, `github-credential-uuid`, `jira-credential-uuid`, `slack-credential-uuid`, `telegram-credential-uuid`, or `imap-credential-uuid` and let the user pick an owned credential in the editor. Applies to: `llm`, `agent`, `codex`, `slack`, `telegram`, `slackTrigger`, `telegramTrigger`, `imapTrigger`, `sendEmail`, `redis`, `grist`, `github`, `jira`, `linear`, `googleSheets`, `bigquery`, `supabase`, `notion`, `rabbitmq`, `crawler`, `playwright` (including `aiStep`), and any other integration that stores a credential id. When modifying an existing workflow (rule 23), still preserve existing ids if they are already non-shared; when **adding** new nodes, never insert shared credential UUIDs.
 24. **EXECUTE NODE OUTPUT** - Execute node returns `{status, outputs, workflow_id, execution_time_ms}`. Access the called workflow's result via `$executeNodeLabel.outputs.output.result`. The `outputs.output` object contains the result from the executed workflow's output node.
 25. **EXECUTE NODE MULTIPLE INPUTS** - When calling a workflow that expects multiple input fields: (1) Add matching `inputFields` to your textInput node to collect all required data, (2) Use `executeInputMappings` array to map each field. Example: If target needs `text` and `imageUrl`, your textInput should have `inputFields: [{"key": "prompt"}, {"key": "image"}]`, then execute node uses `"executeInputMappings": [{"key": "text", "value": "$userInput.body.prompt"}, {"key": "imageUrl", "value": "$userInput.body.image"}]`
 26. **REQUEST BODY, HEADERS & QUERY** - When workflow is executed via API, textInput nodes receive `body`, `headers` and `query` objects. Access via `$textInputLabel.body.fieldName`, `$textInputLabel.headers.headerName` and `$textInputLabel.query.paramName`. Useful for accessing raw request data, authentication, and dynamic behavior.

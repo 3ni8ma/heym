@@ -48,6 +48,32 @@ const codexSigningIn = ref(false);
 const codexSignInError = ref("");
 const codexSignedInAccount = ref("");
 const baseUrl = ref("");
+const jiraEmail = ref("");
+const jiraDeployment = ref<"cloud" | "data_center">("cloud");
+const jiraApiVersion = ref("3");
+const jiraTesting = ref(false);
+const jiraTestSuccess = ref<boolean | null>(null);
+const jiraTestMessage = ref("");
+const jiraUserLabel = computed((): string =>
+  jiraDeployment.value === "data_center" ? "Jira Username" : "Jira Email",
+);
+const jiraUserPlaceholder = computed((): string =>
+  jiraDeployment.value === "data_center" ? "jira-user" : "you@example.com",
+);
+const jiraSecretLabel = computed((): string =>
+  jiraDeployment.value === "data_center" ? "Password" : "API Token",
+);
+const jiraSecretPlaceholder = computed((): string => {
+  if (isEditing.value) {
+    return "••••••• (re-enter to update)";
+  }
+  return jiraDeployment.value === "data_center" ? "Jira password" : "Atlassian API token";
+});
+const jiraAuthHelpText = computed((): string =>
+  jiraDeployment.value === "data_center"
+    ? "Data Center / Server currently supports Basic auth with username and password. Personal access tokens and Bearer auth are not supported yet."
+    : "Jira Cloud uses an Atlassian account email and API token.",
+);
 const bearerToken = ref("");
 const headerKey = ref("");
 const headerValue = ref("");
@@ -188,6 +214,7 @@ const typeOptions = [
   { value: "codex", label: CREDENTIAL_TYPE_LABELS.codex },
   { value: "google", label: CREDENTIAL_TYPE_LABELS.google },
   { value: "github", label: CREDENTIAL_TYPE_LABELS.github },
+  { value: "jira", label: CREDENTIAL_TYPE_LABELS.jira },
   { value: "linear", label: CREDENTIAL_TYPE_LABELS.linear },
   { value: "elevenlabs", label: CREDENTIAL_TYPE_LABELS.elevenlabs },
   { value: "custom", label: CREDENTIAL_TYPE_LABELS.custom },
@@ -236,7 +263,23 @@ watch(
             : "chatgpt";
         codexSignedInAccount.value =
           props.credential.public_fields?.account_id || "";
-        baseUrl.value = "";
+        baseUrl.value =
+          props.credential.type === "jira"
+            ? props.credential.public_fields?.base_url ?? ""
+            : "";
+        jiraEmail.value =
+          props.credential.type === "jira"
+            ? props.credential.public_fields?.email ?? ""
+            : "";
+        jiraDeployment.value =
+          props.credential.type === "jira" &&
+          props.credential.public_fields?.deployment === "data_center"
+            ? "data_center"
+            : "cloud";
+        jiraApiVersion.value =
+          props.credential.type === "jira"
+            ? props.credential.public_fields?.api_version ?? "3"
+            : "3";
         bearerToken.value = "";
         headerKey.value = props.credential.header_key || "";
         headerValue.value = "";
@@ -344,6 +387,9 @@ watch(
         resetCodexOAuthState();
         codexSignedInAccount.value = "";
         baseUrl.value = "";
+        jiraEmail.value = "";
+        jiraDeployment.value = "cloud";
+        jiraApiVersion.value = "3";
         bearerToken.value = "";
         headerKey.value = "";
         headerValue.value = "";
@@ -425,6 +471,9 @@ watch(
       linearTesting.value = false;
       linearTestSuccess.value = null;
       linearTestMessage.value = "";
+      jiraTesting.value = false;
+      jiraTestSuccess.value = null;
+      jiraTestMessage.value = "";
       notionTesting.value = false;
       notionTestSuccess.value = null;
       notionTestMessage.value = "";
@@ -460,6 +509,11 @@ const isValid = computed(() => {
     type.value === "elevenlabs"
   ) {
     return !!apiKey.value.trim() || isEditing.value;
+  } else if (type.value === "jira") {
+    if (isEditing.value) {
+      return !!jiraEmail.value.trim() && !!baseUrl.value.trim();
+    }
+    return !!jiraEmail.value.trim() && !!apiKey.value.trim() && !!baseUrl.value.trim();
   } else if (type.value === "codex") {
     if (codexAuthMode.value === "chatgpt") {
       return !!codexOAuthConfig.value || isEditing.value;
@@ -592,6 +646,16 @@ const canTestLinearConnection = computed((): boolean => {
   return isEditing.value && !!props.credential?.id;
 });
 
+const canTestJiraConnection = computed((): boolean => {
+  if (type.value !== "jira") {
+    return false;
+  }
+  if (jiraEmail.value.trim() && baseUrl.value.trim() && apiKey.value.trim()) {
+    return true;
+  }
+  return isEditing.value && !!props.credential?.id && !!jiraEmail.value.trim() && !!baseUrl.value.trim();
+});
+
 function resetCodexOAuthState(): void {
   codexOAuthConfig.value = null;
   codexOAuthState.value = "";
@@ -656,6 +720,18 @@ function buildConfig(): CredentialConfig {
       api_key: apiKey.value,
       ...(trimmedBaseUrl ? { base_url: trimmedBaseUrl } : {}),
     };
+  } else if (type.value === "jira") {
+    const config: Record<string, string> = {
+      email: jiraEmail.value.trim(),
+      api_token: apiKey.value.trim(),
+      base_url: baseUrl.value.trim(),
+      deployment: jiraDeployment.value,
+    };
+    const apiVersion = jiraDeployment.value === "data_center" ? "2" : jiraApiVersion.value.trim();
+    if (apiVersion) {
+      config.api_version = apiVersion;
+    }
+    return config;
   } else if (type.value === "sentry") {
     const trimmedBaseUrl = baseUrl.value.trim();
     return {
@@ -1018,6 +1094,47 @@ async function testLinearConnection(): Promise<void> {
     error.value = message;
   } finally {
     linearTesting.value = false;
+  }
+}
+
+async function testJiraConnection(): Promise<void> {
+  if (!canTestJiraConnection.value) {
+    error.value =
+      jiraDeployment.value === "data_center"
+        ? "Enter Jira username, password, and base URL to test the connection."
+        : "Enter Jira email, API token, and base URL to test the connection.";
+    return;
+  }
+
+  jiraTesting.value = true;
+  jiraTestSuccess.value = null;
+  jiraTestMessage.value = "";
+  error.value = "";
+
+  try {
+    const result = await credentialsApi.testConnection({
+      type: "jira",
+      config: {
+        email: jiraEmail.value.trim(),
+        api_token: apiKey.value.trim(),
+        base_url: baseUrl.value.trim(),
+        deployment: jiraDeployment.value,
+        api_version: jiraDeployment.value === "data_center" ? "2" : jiraApiVersion.value.trim(),
+      },
+      credential_id: isEditing.value ? props.credential?.id : undefined,
+    });
+    jiraTestSuccess.value = result.success;
+    jiraTestMessage.value = result.message;
+    if (!result.success) {
+      error.value = result.message;
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Connection test failed";
+    jiraTestSuccess.value = false;
+    jiraTestMessage.value = message;
+    error.value = message;
+  } finally {
+    jiraTesting.value = false;
   }
 }
 
@@ -1583,6 +1700,100 @@ async function handleSave(): Promise<void> {
           <p class="text-xs text-muted-foreground">
             Paste a ChatGPT/Codex access token. API keys are intentionally not accepted for this
             credential type.
+          </p>
+        </div>
+      </template>
+
+      <template v-if="type === 'jira'">
+        <div class="space-y-2">
+          <Label for="cred-jira-email">{{ jiraUserLabel }}</Label>
+          <Input
+            id="cred-jira-email"
+            v-model="jiraEmail"
+            :placeholder="jiraUserPlaceholder"
+            :disabled="saving"
+          />
+        </div>
+        <div class="space-y-2">
+          <Label for="cred-jira-api-token">{{ jiraSecretLabel }}</Label>
+          <div class="relative">
+            <Input
+              id="cred-jira-api-token"
+              v-model="apiKey"
+              :type="showApiKey ? 'text' : 'password'"
+              :placeholder="jiraSecretPlaceholder"
+              :disabled="saving"
+              class="pr-10"
+            />
+            <button
+              type="button"
+              class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              @click="showApiKey = !showApiKey"
+            >
+              <EyeOff
+                v-if="showApiKey"
+                class="w-4 h-4"
+              />
+              <Eye
+                v-else
+                class="w-4 h-4"
+              />
+            </button>
+          </div>
+        </div>
+        <div class="space-y-2">
+          <Label for="cred-jira-base-url">Jira Base URL</Label>
+          <Input
+            id="cred-jira-base-url"
+            v-model="baseUrl"
+            placeholder="https://your-domain.atlassian.net"
+            :disabled="saving"
+          />
+        </div>
+        <div class="space-y-2">
+          <Label for="cred-jira-deployment">Deployment</Label>
+          <Select
+            id="cred-jira-deployment"
+            v-model="jiraDeployment"
+            :options="[
+              { value: 'cloud', label: 'Jira Cloud' },
+              { value: 'data_center', label: 'Jira Data Center / Server' },
+            ]"
+            :disabled="saving"
+          />
+        </div>
+        <div class="space-y-2">
+          <Label for="cred-jira-api-version">REST API Version</Label>
+          <Input
+            id="cred-jira-api-version"
+            :model-value="jiraDeployment === 'data_center' ? '2' : jiraApiVersion"
+            placeholder="3"
+            :disabled="saving || jiraDeployment === 'data_center'"
+            @update:model-value="jiraApiVersion = String($event)"
+          />
+          <p class="text-xs text-muted-foreground">
+            {{ jiraAuthHelpText }} Use the Jira site URL, not a REST path. Jira Cloud defaults to
+            v3; Data Center and Server use REST API v2.
+          </p>
+        </div>
+        <div class="flex items-center gap-3">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            data-testid="jira-test-connection-button"
+            :loading="jiraTesting"
+            :disabled="saving || jiraTesting || !canTestJiraConnection"
+            @click="testJiraConnection"
+          >
+            Test Connection
+          </Button>
+          <p
+            v-if="jiraTestMessage"
+            class="text-xs"
+            :class="jiraTestSuccess ? 'text-emerald-600' : 'text-destructive'"
+          >
+            {{ jiraTestMessage }}
           </p>
         </div>
       </template>
