@@ -20,6 +20,7 @@ import {
   parseSkillAssetFile,
   parseSkillZip,
 } from "@/lib/skillZipParser";
+import { sortSkillFiles } from "@/lib/skillFilePreview";
 import { isRetryAttemptNodeResult } from "@/lib/executionLog";
 import { findEnclosingLoopIdForListSize, findNodeResultIndexForLoopIteration, mapNodeResultsToEnclosingLoopIterations, selectedLoopIterationIndexForNode } from "@/lib/loopNodeDisplay";
 import { getGitHubExpressionFields, type GitHubExpressionFieldKey } from "@/lib/githubExpressionFields";
@@ -7083,7 +7084,7 @@ export function usePropertiesPanelController() {
       filesByPath.set(file.path, file);
     });
 
-    const nextFiles = Array.from(filesByPath.values());
+    const nextFiles = sortSkillFiles(Array.from(filesByPath.values()));
     skills[skillIndex] = {
       ...skill,
       content: nextContent,
