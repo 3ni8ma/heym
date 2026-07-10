@@ -46,6 +46,7 @@ const shareFileId = ref("");
 const shareFilename = ref("");
 
 const showBulk = ref(false);
+const downloadingBulk = ref(false);
 const selectedIds = ref<Set<string>>(new Set());
 const lastSelectedIndex = ref<number | null>(null);
 
@@ -217,6 +218,28 @@ function downloadFile(file: GeneratedFile): void {
   window.open(url, "_blank", "noopener");
 }
 
+async function downloadSelected(): Promise<void> {
+  const ids = selectedFileIds.value;
+  if (ids.length === 0 || downloadingBulk.value) return;
+  downloadingBulk.value = true;
+  error.value = "";
+  try {
+    const blob = await filesApi.bulkDownload(ids);
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "heym-drive-files.zip";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  } catch {
+    error.value = "Failed to download selected files";
+  } finally {
+    downloadingBulk.value = false;
+  }
+}
+
 function mimeIcon(mime: string) {
   if (mime.startsWith("image/")) return Image;
   if (mime === "application/pdf") return FileText;
@@ -241,6 +264,22 @@ watch(page, () => {
 watch(pageSizeChoice, () => {
   if (page.value === 0) void loadFiles();
   else page.value = 0;
+});
+
+// A search only filters the rows currently loaded on the page, so as soon as the
+// user types we switch to "All" to search across every accessible file. The prior
+// page-size choice is restored when the search is cleared.
+const pageSizeBeforeSearch = ref<(typeof PAGE_SIZE_OPTIONS)[number] | null>(null);
+watch(searchQuery, (query, previous) => {
+  const hasQuery = query.trim().length > 0;
+  const hadQuery = previous.trim().length > 0;
+  if (hasQuery && !hadQuery && pageSizeChoice.value !== "All") {
+    pageSizeBeforeSearch.value = pageSizeChoice.value;
+    pageSizeChoice.value = "All";
+  } else if (!hasQuery && hadQuery && pageSizeBeforeSearch.value !== null) {
+    pageSizeChoice.value = pageSizeBeforeSearch.value;
+    pageSizeBeforeSearch.value = null;
+  }
 });
 
 onMounted(() => {
@@ -371,6 +410,15 @@ onBeforeUnmount(() => {
       class="flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-sm"
     >
       <span class="font-medium">{{ selectedIds.size }} selected</span>
+      <Button
+        size="sm"
+        :loading="downloadingBulk"
+        :disabled="downloadingBulk"
+        @click="downloadSelected"
+      >
+        <Download class="w-3.5 h-3.5 mr-1" />
+        Download ZIP
+      </Button>
       <Button
         size="sm"
         @click="showBulk = true"

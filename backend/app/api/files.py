@@ -1,10 +1,12 @@
 """API endpoints for generated file management and downloads."""
 
 import base64
+import io
 import uuid
+import zipfile
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +15,7 @@ from app.db.models import FileAccessToken, FileTeamShare, GeneratedFile, Team, T
 from app.db.session import get_db
 from app.models.schemas import (
     BulkCreateFileShareRequest,
+    BulkFileDownloadRequest,
     BulkFileOperationResponse,
     BulkFileTeamSharingRequest,
     CreateFileShareRequest,
@@ -425,6 +428,57 @@ async def bulk_create_share(
         succeeded.append(file_id)
     await db.commit()
     return BulkFileOperationResponse(succeeded=succeeded, failed=failed)
+
+
+def _unique_zip_name(name: str, used: set[str]) -> str:
+    """Return a filename that does not collide with names already in the archive."""
+    candidate = name or "file"
+    if candidate not in used:
+        used.add(candidate)
+        return candidate
+    stem, dot, ext = candidate.rpartition(".")
+    base = stem if dot else candidate
+    suffix = f".{ext}" if dot else ""
+    counter = 1
+    while True:
+        candidate = f"{base} ({counter}){suffix}"
+        if candidate not in used:
+            used.add(candidate)
+            return candidate
+        counter += 1
+
+
+@router.post("/download/bulk")
+async def bulk_download_files(
+    payload: BulkFileDownloadRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    """Bundle multiple accessible files into a single ZIP archive for download."""
+    buffer = io.BytesIO()
+    used_names: set[str] = set()
+    added = 0
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for file_id in payload.file_ids:
+            access = await _get_accessible_file(db, file_id, user)
+            if access is None:
+                continue
+            file_row = access[0]
+            disk_path = get_file_path(file_row)
+            if not disk_path.exists():
+                continue
+            archive.write(disk_path, arcname=_unique_zip_name(file_row.filename, used_names))
+            added += 1
+
+    if added == 0:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No files to download")
+
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="heym-drive-files.zip"'},
+    )
 
 
 @router.get("/{file_id}/share", response_model=list[FileAccessTokenResponse])
