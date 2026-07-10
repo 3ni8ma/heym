@@ -13,9 +13,42 @@ function sanitizeRouterBase(raw: unknown): string {
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
 }
 
+// Dashboard tabs are query-driven (`/?tab=<name>`). Expose friendly path aliases
+// (e.g. `/mcp`, `/drive`) that redirect to the matching dashboard tab so links and
+// manual URLs land on the right place.
+const DASHBOARD_TAB_PATHS = [
+  "schedules",
+  "credentials",
+  "globalvariables",
+  "vectorstores",
+  "mcp",
+  "traces",
+  "analytics",
+  "dashboard",
+  "templates",
+  "teams",
+  "logs",
+  "drive",
+  "datatable",
+] as const;
+
+const dashboardTabRoutes = DASHBOARD_TAB_PATHS.map((tab) => ({
+  path: `/${tab}`,
+  redirect: { path: "/", query: { tab } },
+}));
+
 const router = createRouter({
   history: createWebHistory(sanitizeRouterBase(import.meta.env.BASE_URL)),
   routes: [
+    {
+      path: "/workflows",
+      redirect: { path: "/" },
+    },
+    {
+      path: "/chat",
+      redirect: { name: "chats" },
+    },
+    ...dashboardTabRoutes,
     {
       path: "/login",
       name: "login",

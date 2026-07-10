@@ -2849,6 +2849,13 @@ export const filesApi = {
     });
     return response.data as Blob;
   },
+
+  bulkDelete: async (fileIds: string[]): Promise<BulkFileOperationResult> => {
+    const response = await api.post<BulkFileOperationResult>("/files/delete/bulk", {
+      file_ids: fileIds,
+    });
+    return response.data;
+  },
 };
 
 // ---------- Data Tables ----------

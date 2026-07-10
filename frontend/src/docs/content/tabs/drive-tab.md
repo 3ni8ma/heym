@@ -27,6 +27,7 @@ Files you own show a checkbox at the start of their row (files shared with you t
 - **Bulk actions** opens a single dialog to apply one setting to every selected file:
   - **Share all with my teams** / **Remove team sharing** in one click
   - **Create share link for each file** using the same password, expiry, and max-downloads settings
+- **Delete** removes every selected file and its share links after a confirmation
 - **Clear selection** deselects everything
 
 The dialog reports how many files it applied to (files you don't own are skipped). Use the rows-per-page selector's **All** option to load every file on one page and select across your whole Drive. Typing in the search box automatically switches the rows-per-page selector to **All** so the search covers every file, not just the current page; clearing the search restores your previous selection.
