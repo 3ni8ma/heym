@@ -2,13 +2,27 @@
 
 from __future__ import annotations
 
+import io
+import tempfile
 import unittest
 import uuid
+import zipfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.api.files import bulk_create_share, bulk_update_file_team_sharing
-from app.models.schemas import BulkCreateFileShareRequest, BulkFileTeamSharingRequest
+from fastapi import HTTPException
+
+from app.api.files import (
+    bulk_create_share,
+    bulk_download_files,
+    bulk_update_file_team_sharing,
+)
+from app.models.schemas import (
+    BulkCreateFileShareRequest,
+    BulkFileDownloadRequest,
+    BulkFileTeamSharingRequest,
+)
 
 
 def _db() -> AsyncMock:
@@ -151,6 +165,63 @@ class BulkCreateShareApiTests(unittest.IsolatedAsyncioTestCase):
         create_token.assert_awaited_once()
         self.assertEqual(create_token.await_args.kwargs["file_id"], owned)
         db.commit.assert_awaited_once()
+
+
+async def _collect_stream(response: object) -> bytes:
+    chunks: list[bytes] = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk if isinstance(chunk, bytes) else chunk.encode())
+    return b"".join(chunks)
+
+
+class BulkDownloadApiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_zips_accessible_files_and_dedupes_names(self) -> None:
+        owner = _user()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            paths: dict[uuid.UUID, Path] = {}
+            rows: dict[uuid.UUID, SimpleNamespace] = {}
+            # Two files share the same filename to exercise collision handling.
+            specs = [("report.csv", b"a,b\n1,2\n"), ("report.csv", b"x,y\n3,4\n")]
+            for i, (name, data) in enumerate(specs):
+                fid = uuid.uuid4()
+                disk = tmp_path / f"{i}.bin"
+                disk.write_bytes(data)
+                paths[fid] = disk
+                rows[fid] = SimpleNamespace(id=fid, filename=name)
+
+            async def _access(_db: object, file_id: uuid.UUID, _user: object) -> object:
+                row = rows.get(file_id)
+                return (row, False, None, None) if row else None
+
+            with (
+                patch("app.api.files._get_accessible_file", new=AsyncMock(side_effect=_access)),
+                patch("app.api.files.get_file_path", new=lambda row: paths[row.id]),
+            ):
+                response = await bulk_download_files(
+                    BulkFileDownloadRequest(file_ids=list(rows.keys())),
+                    user=owner,
+                    db=_db(),
+                )
+
+            self.assertEqual(response.media_type, "application/zip")
+            body = await _collect_stream(response)
+            with zipfile.ZipFile(io.BytesIO(body)) as archive:
+                names = archive.namelist()
+                self.assertEqual(len(names), 2)
+                self.assertIn("report.csv", names)
+                self.assertIn("report (1).csv", names)
+
+    async def test_raises_404_when_no_files_accessible(self) -> None:
+        owner = _user()
+        with patch("app.api.files._get_accessible_file", new=AsyncMock(return_value=None)):
+            with self.assertRaises(HTTPException) as ctx:
+                await bulk_download_files(
+                    BulkFileDownloadRequest(file_ids=[uuid.uuid4()]),
+                    user=owner,
+                    db=_db(),
+                )
+        self.assertEqual(ctx.exception.status_code, 404)
 
 
 if __name__ == "__main__":

@@ -2842,6 +2842,13 @@ export const filesApi = {
     });
     return response.data;
   },
+
+  bulkDownload: async (fileIds: string[]): Promise<Blob> => {
+    const response = await api.post("/files/download/bulk", { file_ids: fileIds }, {
+      responseType: "blob",
+    });
+    return response.data as Blob;
+  },
 };
 
 // ---------- Data Tables ----------

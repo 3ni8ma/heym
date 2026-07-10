@@ -7436,7 +7436,10 @@ export function usePropertiesPanelController() {
               ...skill,
               id: originalSkill.id,
               timeoutSeconds: skill.timeoutSeconds ?? originalSkill.timeoutSeconds ?? 30,
-              driveFilesEnabled: skill.driveFilesEnabled ?? originalSkill.driveFilesEnabled ?? false,
+              // Drive access is a node-side toggle that is never carried in a skill
+              // zip/md, so a finetune/replace must preserve the original value instead
+              // of letting the parser's hardcoded `false` overwrite it.
+              driveFilesEnabled: originalSkill.driveFilesEnabled ?? skill.driveFilesEnabled ?? false,
             }
           : skill,
       );
