@@ -1431,6 +1431,10 @@ class BulkFileDownloadRequest(BaseModel):
     file_ids: list[uuid.UUID] = Field(min_length=1)
 
 
+class BulkFileDeleteRequest(BaseModel):
+    file_ids: list[uuid.UUID] = Field(min_length=1)
+
+
 class FileListResponse(BaseModel):
     files: list[GeneratedFileResponse] = Field(default_factory=list)
     total: int = 0

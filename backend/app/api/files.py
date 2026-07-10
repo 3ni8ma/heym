@@ -15,6 +15,7 @@ from app.db.models import FileAccessToken, FileTeamShare, GeneratedFile, Team, T
 from app.db.session import get_db
 from app.models.schemas import (
     BulkCreateFileShareRequest,
+    BulkFileDeleteRequest,
     BulkFileDownloadRequest,
     BulkFileOperationResponse,
     BulkFileTeamSharingRequest,
@@ -297,6 +298,26 @@ async def delete_all_files_endpoint(
     for row in rows:
         await delete_file(db, row)
     await db.commit()
+
+
+@router.post("/delete/bulk", response_model=BulkFileOperationResponse)
+async def bulk_delete_files(
+    payload: BulkFileDeleteRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> BulkFileOperationResponse:
+    """Delete multiple owned files (and their share tokens) in one request."""
+    succeeded: list[uuid.UUID] = []
+    failed: list[uuid.UUID] = []
+    for file_id in payload.file_ids:
+        row = await _get_owned_file(db, file_id, user.id)
+        if not row:
+            failed.append(file_id)
+            continue
+        await delete_file(db, row)
+        succeeded.append(file_id)
+    await db.commit()
+    return BulkFileOperationResponse(succeeded=succeeded, failed=failed)
 
 
 @router.post("/upload", response_model=GeneratedFileResponse)

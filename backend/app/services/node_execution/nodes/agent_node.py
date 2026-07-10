@@ -7,6 +7,44 @@ from importlib import import_module
 from app.services.node_execution.base import NodeExecutionContext
 
 
+def _collect_generated_files_from_output(output: object) -> list[dict]:
+    """Aggregate skill-generated file links found anywhere in an agent result.
+
+    Skill tool results embed a ``_generated_files`` array under their tool call.
+    Surfacing the union at the top level lets the execution log render a download
+    button and lets expressions reference ``$agentLabel._generated_files`` even
+    when JSON output mode replaces the raw agent result.
+    """
+    collected: list[dict] = []
+    seen: set[str] = set()
+
+    def _walk(value: object, depth: int) -> None:
+        if depth > 6:
+            return
+        if isinstance(value, list):
+            for item in value:
+                _walk(item, depth + 1)
+            return
+        if not isinstance(value, dict):
+            return
+        files = value.get("_generated_files")
+        if isinstance(files, list):
+            for entry in files:
+                if not isinstance(entry, dict):
+                    continue
+                key = str(entry.get("download_url") or entry.get("id") or "")
+                if key and key in seen:
+                    continue
+                if key:
+                    seen.add(key)
+                collected.append(copy.deepcopy(entry))
+        for nested in value.values():
+            _walk(nested, depth + 1)
+
+    _walk(output, 0)
+    return collected
+
+
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the agent node."""
     _workflow_executor = import_module("app.services.workflow_executor")
@@ -39,6 +77,9 @@ def execute(ctx: NodeExecutionContext) -> object:
     output = self._execute_agent_node(
         node_id, inputs, node_data, guardrails_config=agent_guardrails_config
     )
+    generated_files = _collect_generated_files_from_output(output)
+    if generated_files:
+        output["_generated_files"] = generated_files
     trace_id = self._pop_internal_trace_id(output)
     pending_meta = output.pop("_hitl_pending", None)
     if agent_json_output_enabled and not output.get("error"):
@@ -59,6 +100,8 @@ def execute(ctx: NodeExecutionContext) -> object:
             output["fallbackUsed"] = agent_output["fallbackUsed"]
         if agent_output.get("model"):
             output["model"] = agent_output["model"]
+        if generated_files:
+            output["_generated_files"] = generated_files
         self._restore_internal_trace_id(output, trace_id)
     if output.get("error"):
         if trace_id:

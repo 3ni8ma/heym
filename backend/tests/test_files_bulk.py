@@ -15,11 +15,13 @@ from fastapi import HTTPException
 
 from app.api.files import (
     bulk_create_share,
+    bulk_delete_files,
     bulk_download_files,
     bulk_update_file_team_sharing,
 )
 from app.models.schemas import (
     BulkCreateFileShareRequest,
+    BulkFileDeleteRequest,
     BulkFileDownloadRequest,
     BulkFileTeamSharingRequest,
 )
@@ -164,6 +166,50 @@ class BulkCreateShareApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.failed, [not_owned])
         create_token.assert_awaited_once()
         self.assertEqual(create_token.await_args.kwargs["file_id"], owned)
+        db.commit.assert_awaited_once()
+
+
+class BulkDeleteApiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_deletes_all_owned_files(self) -> None:
+        owner = _user()
+        ids = [uuid.uuid4() for _ in range(3)]
+        db = _db()
+
+        with (
+            patch("app.api.files._get_owned_file", new=_owned_lookup(owner, set(ids))),
+            patch("app.api.files.delete_file", new=AsyncMock()) as delete,
+        ):
+            response = await bulk_delete_files(
+                BulkFileDeleteRequest(file_ids=ids),
+                user=owner,
+                db=db,
+            )
+
+        self.assertEqual(set(response.succeeded), set(ids))
+        self.assertEqual(response.failed, [])
+        self.assertEqual(delete.await_count, 3)
+        db.commit.assert_awaited_once()
+
+    async def test_non_owned_ids_land_in_failed_and_are_not_deleted(self) -> None:
+        owner = _user()
+        owned = uuid.uuid4()
+        not_owned = uuid.uuid4()
+        db = _db()
+
+        with (
+            patch("app.api.files._get_owned_file", new=_owned_lookup(owner, {owned})),
+            patch("app.api.files.delete_file", new=AsyncMock()) as delete,
+        ):
+            response = await bulk_delete_files(
+                BulkFileDeleteRequest(file_ids=[owned, not_owned]),
+                user=owner,
+                db=db,
+            )
+
+        self.assertEqual(response.succeeded, [owned])
+        self.assertEqual(response.failed, [not_owned])
+        delete.assert_awaited_once()
+        self.assertEqual(delete.await_args.args[1].id, owned)
         db.commit.assert_awaited_once()
 
 

@@ -47,6 +47,7 @@ const shareFilename = ref("");
 
 const showBulk = ref(false);
 const downloadingBulk = ref(false);
+const deletingBulk = ref(false);
 const selectedIds = ref<Set<string>>(new Set());
 const lastSelectedIndex = ref<number | null>(null);
 
@@ -240,6 +241,28 @@ async function downloadSelected(): Promise<void> {
   }
 }
 
+async function deleteSelected(): Promise<void> {
+  const ids = selectedFileIds.value;
+  if (ids.length === 0 || deletingBulk.value) return;
+  if (
+    !window.confirm(
+      `Delete ${ids.length} selected file${ids.length === 1 ? "" : "s"}? This cannot be undone.`,
+    )
+  ) {
+    return;
+  }
+  deletingBulk.value = true;
+  error.value = "";
+  try {
+    await filesApi.bulkDelete(ids);
+    await loadFiles();
+  } catch {
+    error.value = "Failed to delete selected files";
+  } finally {
+    deletingBulk.value = false;
+  }
+}
+
 function mimeIcon(mime: string) {
   if (mime.startsWith("image/")) return Image;
   if (mime === "application/pdf") return FileText;
@@ -425,6 +448,16 @@ onBeforeUnmount(() => {
       >
         <Settings class="w-3.5 h-3.5 mr-1" />
         Actions
+      </Button>
+      <Button
+        size="sm"
+        variant="destructive"
+        :loading="deletingBulk"
+        :disabled="deletingBulk"
+        @click="deleteSelected"
+      >
+        <Trash2 class="w-3.5 h-3.5 mr-1" />
+        Delete
       </Button>
       <Button
         size="sm"
