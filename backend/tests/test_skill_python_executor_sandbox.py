@@ -165,10 +165,13 @@ class SkillDockerCommandTest(unittest.TestCase):
                     "main.py",
                 )
 
-    def test_entrypoint_runs_skill_not_uvicorn(self) -> None:
+    def test_entrypoint_runs_skill_with_backend_interpreter(self) -> None:
         cmd = self._build()
-        self.assertEqual(cmd[cmd.index("--entrypoint") + 1], "uv")
-        self.assertEqual(cmd[-4:], ["heym-backend", "run", "python", "main.py"])
+        # The skill runs with the backend's own venv interpreter (so backend
+        # packages like python-docx are available), not uvicorn and not uv.
+        self.assertEqual(cmd[cmd.index("--entrypoint") + 1], executor._skill_interpreter())
+        self.assertNotIn("uv", cmd)
+        self.assertEqual(cmd[-2:], ["heym-backend", "main.py"])
 
     def test_backend_secrets_not_forwarded_as_env(self) -> None:
         with mock.patch.dict(
@@ -389,6 +392,35 @@ class SkillDockerFailClosedTest(unittest.TestCase):
                     _skill("print('{}')"), {}, 30.0, None, "main.py", "img"
                 )
         self.assertEqual(result.output, {"partial": True})
+
+
+class SkillImageResolutionTest(unittest.TestCase):
+    """The sandbox image must resolve without relying on `docker inspect`."""
+
+    def test_resolves_from_codex_docker_image_when_no_dedicated_image(self) -> None:
+        # The single-container release image and Compose set HEYM_CODEX_DOCKER_IMAGE
+        # to the backend image; skills reuse it so resolution never depends on the
+        # (unreliable) container self-inspection.
+        with mock.patch.dict(
+            os.environ,
+            {
+                "HEYM_SKILL_IMAGE": "",
+                "HEYM_PYTHON_TOOL_IMAGE": "",
+                "HEYM_CODEX_DOCKER_IMAGE": "ghcr.io/heymrun/heym:1.2.3",
+            },
+        ):
+            self.assertEqual(executor._resolve_image(), "ghcr.io/heymrun/heym:1.2.3")
+
+    def test_dedicated_skill_image_takes_precedence(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "HEYM_SKILL_IMAGE": "explicit:image",
+                "HEYM_PYTHON_TOOL_IMAGE": "",
+                "HEYM_CODEX_DOCKER_IMAGE": "codex:image",
+            },
+        ):
+            self.assertEqual(executor._resolve_image(), "explicit:image")
 
 
 if __name__ == "__main__":

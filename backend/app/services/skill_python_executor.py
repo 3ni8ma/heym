@@ -1,5 +1,5 @@
 """
-Execute skill Python scripts with uv, preserving directory structure.
+Execute skill Python scripts with the backend interpreter, preserving directory structure.
 
 Skill Python code is **untrusted** (it can arrive verbatim inside a shared
 workflow / ``everyone``-visibility template), so it is treated exactly like the
@@ -34,6 +34,7 @@ import mimetypes
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import uuid
 from dataclasses import dataclass, field
@@ -299,12 +300,21 @@ def _docker_available() -> bool:
 
 
 def _resolve_image() -> str | None:
-    """Resolve the image to run skills in: explicit override, else this container's image."""
+    """Resolve the image to run skills in.
+
+    Prefers an explicit override, then the Codex runner image (both the single
+    container release image and Docker Compose already set
+    ``HEYM_CODEX_DOCKER_IMAGE`` to the backend image, and it always carries uv),
+    and finally falls back to inspecting this container's own image. The env
+    fallbacks matter because ``docker inspect <hostname>`` is not reliable in
+    every deployment (e.g. a custom hostname, or an image referenced by digest).
+    """
     import socket  # noqa: PLC0415 (only needed for the Docker sandbox path)
 
     override = (
         os.environ.get("HEYM_SKILL_IMAGE", "").strip()
         or os.environ.get("HEYM_PYTHON_TOOL_IMAGE", "").strip()
+        or os.environ.get("HEYM_CODEX_DOCKER_IMAGE", "").strip()
     )
     if override:
         return override
@@ -321,6 +331,18 @@ def _resolve_image() -> str | None:
     except (FileNotFoundError, subprocess.SubprocessError, OSError):
         pass
     return None
+
+
+def _skill_interpreter() -> str:
+    """Python interpreter used to run skills.
+
+    Skills rely on the backend's installed packages (python-docx, pypdf, etc.),
+    so they run with the backend's own venv interpreter rather than an isolated
+    uv environment. In the Docker sandbox the sibling uses the backend image, so
+    ``sys.executable`` (e.g. ``/app/backend/.venv/bin/python``) is a valid path
+    there too. Override with ``HEYM_SKILL_PYTHON`` for a custom skill image.
+    """
+    return os.environ.get("HEYM_SKILL_PYTHON", "").strip() or sys.executable
 
 
 def _skill_volume_mount_point() -> Path:
@@ -434,7 +456,6 @@ def _build_skill_docker_command(
     """
     memory = os.environ.get("HEYM_SKILL_MEMORY", "512m")
     home_dir = run_dir / ".home"
-    cache_dir = home_dir / ".uv-cache"
     cmd = [
         "docker",
         "run",
@@ -442,7 +463,7 @@ def _build_skill_docker_command(
         "-i",
         "--name",
         name,
-        # Egress preserved: skills call APIs / install their own deps via uv.
+        # Egress preserved: skills call external APIs.
         "--network",
         os.environ.get("HEYM_SKILL_NETWORK", "bridge"),
         *_resolve_workspace_mount(mount_point, run_dir),
@@ -468,18 +489,19 @@ def _build_skill_docker_command(
         "--env",
         f"HOME={home_dir}",
         "--env",
-        f"UV_CACHE_DIR={cache_dir}",
-        "--env",
         f"_OUTPUT_DIR={run_dir / _OUTPUT_FILES_DIR}",
     ]
     for key, value in _docker_forward_env().items():
-        # HOME / UV_CACHE_DIR are set explicitly above to point inside the
-        # writable workspace; never let the backend's values override them.
-        if key in {"HOME", "UV_CACHE_DIR"}:
+        # HOME is set explicitly above to point inside the writable workspace;
+        # never let the backend's value (a read-only path) override it.
+        if key == "HOME":
             continue
         cmd.extend(["--env", f"{key}={value}"])
-    # The backend image ENTRYPOINT starts uvicorn; override it to run the skill.
-    cmd.extend(["--entrypoint", "uv", image, "run", "python", entry_point])
+    # Override the backend image ENTRYPOINT (uvicorn) and run the skill directly
+    # with the backend's own venv interpreter so backend packages (python-docx,
+    # pypdf, ...) are available. Running the interpreter directly also avoids uv
+    # discovering / repairing the backend project on the read-only filesystem.
+    cmd.extend(["--entrypoint", _skill_interpreter(), image, entry_point])
     return cmd
 
 
@@ -744,7 +766,9 @@ def _execute_skill_subprocess(
 
         try:
             result = subprocess.run(
-                ["uv", "run", "python", entry_point],
+                # Run with the backend's own interpreter so backend packages
+                # (python-docx, pypdf, ...) are available to the skill.
+                [_skill_interpreter(), entry_point],
                 cwd=str(root),
                 input=args_json,
                 capture_output=True,
