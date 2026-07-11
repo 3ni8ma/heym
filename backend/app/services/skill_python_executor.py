@@ -1,5 +1,30 @@
 """
 Execute skill Python scripts with uv, preserving directory structure.
+
+Skill Python code is **untrusted** (it can arrive verbatim inside a shared
+workflow / ``everyone``-visibility template), so it is treated exactly like the
+user-defined Python *tool* path: a sandbox backend is selected by the shared
+``HEYM_PYTHON_TOOL_SANDBOX`` environment variable.
+
+* ``docker`` / ``auto`` (default) - run the skill inside a throwaway, hardened
+  **sibling** container: non-root, all Linux capabilities dropped,
+  ``no-new-privileges``, read-only root filesystem, strict CPU / memory / PID
+  limits, and crucially **no** Docker socket -- so skill code can never reach
+  the host Docker daemon or the backend's secrets. Unlike the tool sandbox,
+  skills keep network egress and a writable workspace (skills legitimately
+  generate output files and read Heym Drive files). ``auto`` fails **closed**
+  (raises) when Docker is unavailable instead of silently running untrusted
+  code in the backend process.
+* ``subprocess`` - run the skill in a local subprocess with an allowlisted
+  environment and an RLIMIT memory cap. This is **NOT a security boundary**
+  (the skill runs in the backend execution context); it exists only for
+  trusted single-user / local development and must be selected explicitly.
+  ``run.sh`` sets it for native dev.
+
+The workspace is shared with the sibling container through the same named
+Docker volume the Codex runner uses (``HEYM_CODEX_DOCKER_WORKSPACE_VOLUME`` /
+the mount at ``HEYM_SKILL_WORKSPACE_DIR``), so no extra deployment wiring is
+required for the Docker Compose or single-container image setups.
 """
 
 import base64
@@ -10,6 +35,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,18 +43,44 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Environment variables that must NOT be inherited by skill subprocesses.
-# These contain application secrets that user-supplied skills must never see.
-_SECRET_ENV_KEYS: frozenset[str] = frozenset(  # pragma: allowlist secret
+# Environment allowlist: only these operational (non-secret) variables are
+# exposed to untrusted skill code. Everything else -- database URLs, the app
+# SECRET_KEY / ENCRYPTION_KEY, provider API keys, OAuth client secrets, etc. --
+# is dropped. An allowlist (vs. the previous 7-key denylist) fails safe: a new
+# secret added to the backend environment is withheld by default rather than
+# leaked until someone remembers to extend a denylist.
+_ENV_ALLOWLIST_EXACT: frozenset[str] = frozenset(
     {
-        "DATABASE_URL",
-        "SECRET_KEY",
-        "ENCRYPTION_KEY",
-        "POSTGRES_PASSWORD",  # pragma: allowlist secret
-        "POSTGRES_USER",  # pragma: allowlist secret
-        "RABBITMQ_URL",
-        "QDRANT_API_KEY",
+        "PATH",
+        "HOME",
+        "LANG",
+        "LANGUAGE",
+        "TZ",
+        "TERM",
+        "TMPDIR",
+        "PWD",
     }
+)
+# Whole prefixes that are safe to pass through: the Python/uv toolchain needs
+# these, and the proxy / CA-bundle families must survive so skill network
+# egress keeps working behind a corporate proxy.
+_ENV_ALLOWLIST_PREFIXES: tuple[str, ...] = (
+    "PYTHON",
+    "UV_",
+    "XDG_",
+    "LC_",
+    "SSL_",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+    "all_proxy",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
 )
 
 _MEMORY_LIMIT_BYTES = 512 * 1024 * 1024  # 512 MB virtual memory cap
@@ -37,6 +89,21 @@ _HITL_SENTINEL = "_hitl_request.json"
 _DRIVE_FILES_DIR = "_drive_files"
 _DRIVE_MANIFEST = "_drive_files_manifest.json"
 _DRIVE_HELPER = "heym_drive.py"
+
+# Mount point (inside the backend container) of the shared volume that skill
+# workspaces live on. Every Docker deployment (compose + single-image) already
+# mounts the Codex workspace volume here, so skills ride it with no extra wiring.
+_DEFAULT_SKILL_VOLUME_MOUNT = "/app/data/codex-workspaces"
+# Per-run skill workspaces are created under this subdirectory of the mount so
+# they never collide with Codex's own run directories.
+_SKILL_WORKSPACE_SUBDIR = "_skill-workspaces"
+
+# Docker exit codes that mean the *container never started* (as opposed to the
+# skill process itself exiting non-zero). These must fail closed so a sandbox
+# that cannot launch is never mistaken for a completed skill run.
+_DOCKER_START_FAILURE_CODES: frozenset[int] = frozenset({125, 126, 127})
+
+_docker_available_cache: bool | None = None
 
 
 _DRIVE_HELPER_SOURCE = r'''"""Read Heym Drive files exposed to this skill run."""
@@ -159,9 +226,261 @@ class SkillExecutionResult:
     hitl_request: dict[str, Any] | None = None
 
 
+def _env_is_allowed(key: str) -> bool:
+    """True when an environment variable is safe to expose to untrusted skills."""
+    if key in _ENV_ALLOWLIST_EXACT:
+        return True
+    return any(key.startswith(prefix) for prefix in _ENV_ALLOWLIST_PREFIXES)
+
+
 def _safe_env() -> dict[str, str]:
-    """Return the current environment with all secret keys removed."""
-    return {k: v for k, v in os.environ.items() if k not in _SECRET_ENV_KEYS}
+    """Return only the allowlisted (non-secret) subset of the environment."""
+    return {k: v for k, v in os.environ.items() if _env_is_allowed(k)}
+
+
+# Variables forwarded into the sibling container. Deliberately narrower than the
+# subprocess allowlist: host-specific values (PATH, HOME, PWD, TMPDIR, UV_*) must
+# NOT override the container's own correct values, but proxy / CA / locale
+# settings must survive so skill network egress keeps working.
+_DOCKER_ENV_FORWARD_PREFIXES: tuple[str, ...] = (
+    "LANG",
+    "LANGUAGE",
+    "TZ",
+    "LC_",
+    "SSL_",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "NO_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "no_proxy",
+    "all_proxy",
+    "REQUESTS_CA_BUNDLE",
+    "CURL_CA_BUNDLE",
+    "NODE_EXTRA_CA_CERTS",
+)
+
+
+def _docker_forward_env() -> dict[str, str]:
+    """Environment to forward as ``--env`` into the sibling container (non-secret, portable)."""
+    return {
+        k: v
+        for k, v in os.environ.items()
+        if any(k.startswith(prefix) for prefix in _DOCKER_ENV_FORWARD_PREFIXES)
+    }
+
+
+def _sandbox_mode() -> str:
+    """Select the skill sandbox backend, sharing the Python-tool sandbox switch."""
+    raw = os.environ.get("HEYM_PYTHON_TOOL_SANDBOX", "auto").strip().lower()
+    if raw not in ("auto", "docker", "subprocess"):
+        logger.warning("Unknown HEYM_PYTHON_TOOL_SANDBOX=%r; defaulting to 'auto'", raw)
+        return "auto"
+    return raw
+
+
+def _docker_available() -> bool:
+    """Return True when a working Docker daemon is reachable (cached)."""
+    global _docker_available_cache
+    if _docker_available_cache is not None:
+        return _docker_available_cache
+    try:
+        result = subprocess.run(
+            ["docker", "version", "--format", "{{.Server.Version}}"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        _docker_available_cache = result.returncode == 0 and bool(result.stdout.strip())
+    except (FileNotFoundError, subprocess.SubprocessError, OSError):
+        _docker_available_cache = False
+    return _docker_available_cache
+
+
+def _resolve_image() -> str | None:
+    """Resolve the image to run skills in: explicit override, else this container's image."""
+    import socket  # noqa: PLC0415 (only needed for the Docker sandbox path)
+
+    override = (
+        os.environ.get("HEYM_SKILL_IMAGE", "").strip()
+        or os.environ.get("HEYM_PYTHON_TOOL_IMAGE", "").strip()
+    )
+    if override:
+        return override
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", "--format", "{{.Config.Image}}", socket.gethostname()],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        image = result.stdout.strip()
+        if result.returncode == 0 and image:
+            return image
+    except (FileNotFoundError, subprocess.SubprocessError, OSError):
+        pass
+    return None
+
+
+def _skill_volume_mount_point() -> Path:
+    """Absolute path where the shared workspace volume is mounted in the backend."""
+    return Path(
+        os.environ.get("HEYM_SKILL_WORKSPACE_MOUNT", "").strip()
+        or os.environ.get("HEYM_CODEX_WORKSPACE_DIR", "").strip()
+        or _DEFAULT_SKILL_VOLUME_MOUNT
+    )
+
+
+def _skill_workspace_root() -> Path:
+    """Directory (inside the shared volume) that holds per-run skill workspaces."""
+    override = os.environ.get("HEYM_SKILL_WORKSPACE_DIR", "").strip()
+    if override:
+        return Path(override)
+    return _skill_volume_mount_point() / _SKILL_WORKSPACE_SUBDIR
+
+
+def _resolve_workspace_mount(mount_point: Path, run_dir: Path) -> list[str]:
+    """Return the ``docker run`` mount args that expose only ``run_dir`` to the sibling.
+
+    A Docker named-volume mount places the volume **root** at the destination, so
+    the backend and sibling must agree on where that root lives. We mount just
+    this run's subtree at ``run_dir`` (``volume-subpath`` for a named volume, the
+    resolved host path for a bind), which both fixes that path alignment and
+    isolates each run: a skill never sees other runs' or Codex's workspace data.
+    """
+    try:
+        rel = run_dir.relative_to(mount_point)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"Skill run dir {run_dir} is not under the workspace volume mount {mount_point}"
+        ) from exc
+    rel_str = rel.as_posix()
+
+    volume = (
+        os.environ.get("HEYM_SKILL_DOCKER_WORKSPACE_VOLUME", "").strip()
+        or os.environ.get("HEYM_CODEX_DOCKER_WORKSPACE_VOLUME", "").strip()
+    )
+    if volume:
+        return ["--mount", f"type=volume,src={volume},dst={run_dir},volume-subpath={rel_str}"]
+
+    host_root = os.environ.get("HEYM_SKILL_HOST_WORKSPACE_DIR", "").strip()
+    if not host_root:
+        for mount in _current_container_mounts():
+            if str(mount.get("Destination") or "") != str(mount_point):
+                continue
+            if mount.get("Type") == "volume" and mount.get("Name"):
+                return [
+                    "--mount",
+                    f"type=volume,src={mount['Name']},dst={run_dir},volume-subpath={rel_str}",
+                ]
+            if mount.get("Type") == "bind" and mount.get("Source"):
+                host_root = str(mount["Source"])
+                break
+    if not host_root:
+        raise RuntimeError(
+            "Skill Docker sandbox needs a shared workspace: set "
+            "HEYM_SKILL_DOCKER_WORKSPACE_VOLUME (or HEYM_CODEX_DOCKER_WORKSPACE_VOLUME) to the "
+            "named volume mounted at the workspace volume mount point, or run with "
+            "HEYM_PYTHON_TOOL_SANDBOX=subprocess for trusted/dev use only."
+        )
+    host_run_dir = Path(host_root) / rel
+    return ["--mount", f"type=bind,src={host_run_dir},dst={run_dir}"]
+
+
+def _current_container_mounts() -> list[dict[str, Any]]:
+    """Best-effort inspection of the backend container's own Docker mounts."""
+    try:
+        hostname = Path("/etc/hostname").read_text(encoding="utf-8").strip()
+    except OSError:
+        return []
+    if not hostname:
+        return []
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", hostname],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError, OSError):
+        return []
+    if result.returncode != 0:
+        return []
+    try:
+        parsed = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return []
+    if isinstance(parsed, list) and parsed and isinstance(parsed[0], dict):
+        mounts = parsed[0].get("Mounts")
+        if isinstance(mounts, list):
+            return [m for m in mounts if isinstance(m, dict)]
+    return []
+
+
+def _build_skill_docker_command(
+    image: str,
+    name: str,
+    mount_point: Path,
+    run_dir: Path,
+    entry_point: str,
+) -> list[str]:
+    """Build a hardened, throwaway ``docker run`` invocation for a skill.
+
+    Hardened like the Python-tool sandbox (non-root, cap-drop ALL,
+    no-new-privileges, read-only root fs, resource limits, **no Docker
+    socket**) but keeps a per-run writable workspace mount and network egress,
+    which skills legitimately use.
+    """
+    memory = os.environ.get("HEYM_SKILL_MEMORY", "512m")
+    home_dir = run_dir / ".home"
+    cache_dir = home_dir / ".uv-cache"
+    cmd = [
+        "docker",
+        "run",
+        "--rm",
+        "-i",
+        "--name",
+        name,
+        # Egress preserved: skills call APIs / install their own deps via uv.
+        "--network",
+        os.environ.get("HEYM_SKILL_NETWORK", "bridge"),
+        *_resolve_workspace_mount(mount_point, run_dir),
+        "--workdir",
+        str(run_dir),
+        "--read-only",
+        "--tmpfs",
+        "/tmp:rw,nosuid,size=64m",
+        "--user",
+        os.environ.get("HEYM_SKILL_USER", "65534:65534"),
+        "--cap-drop",
+        "ALL",
+        "--security-opt",
+        "no-new-privileges",
+        "--pids-limit",
+        os.environ.get("HEYM_SKILL_PIDS", "256"),
+        "--memory",
+        memory,
+        "--memory-swap",
+        memory,
+        "--cpus",
+        os.environ.get("HEYM_SKILL_CPUS", "1"),
+        "--env",
+        f"HOME={home_dir}",
+        "--env",
+        f"UV_CACHE_DIR={cache_dir}",
+        "--env",
+        f"_OUTPUT_DIR={run_dir / _OUTPUT_FILES_DIR}",
+    ]
+    for key, value in _docker_forward_env().items():
+        # HOME / UV_CACHE_DIR are set explicitly above to point inside the
+        # writable workspace; never let the backend's values override them.
+        if key in {"HOME", "UV_CACHE_DIR"}:
+            continue
+        cmd.extend(["--env", f"{key}={value}"])
+    # The backend image ENTRYPOINT starts uvicorn; override it to run the skill.
+    cmd.extend(["--entrypoint", "uv", image, "run", "python", entry_point])
+    return cmd
 
 
 ENTRY_POINT_PRIORITY = ("main.py", "run.py")
@@ -187,13 +506,24 @@ def _collect_output_files(output_dir: Path) -> tuple[list[dict[str, Any]], dict[
     if not output_dir.exists():
         return [], None
 
+    output_dir_resolved = output_dir.resolve()
+
     hitl_request: dict[str, Any] | None = None
     sentinel_path = output_dir / _HITL_SENTINEL
-    if sentinel_path.exists():
+    # The sentinel is read by the backend (outside the sandbox), so apply the
+    # same symlink hardening as generated files: a skill must not be able to
+    # point _hitl_request.json at a host file and have the backend read it.
+    if (
+        sentinel_path.exists()
+        and not sentinel_path.is_symlink()
+        and sentinel_path.resolve().parent == output_dir_resolved
+    ):
         try:
             hitl_request = json.loads(sentinel_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
             logger.warning("Failed to parse HITL sentinel file")
+    elif sentinel_path.is_symlink():
+        logger.warning("Skipping symlinked HITL sentinel in skill output")
 
     if hitl_request is not None:
         return [], hitl_request
@@ -201,6 +531,17 @@ def _collect_output_files(output_dir: Path) -> tuple[list[dict[str, Any]], dict[
     generated_files: list[dict[str, Any]] = []
     for file_path in output_dir.iterdir():
         if file_path.name.startswith("_") or file_path.is_dir():
+            continue
+        # A skill can drop a symlink in _output_files pointing at an arbitrary
+        # host file (e.g. /etc/passwd or the backend's .env). The backend, not
+        # the sandbox, collects these files, so following the link would
+        # exfiltrate host data as a "generated file". Skip symlinks and anything
+        # that resolves outside the output directory.
+        if file_path.is_symlink():
+            logger.warning("Skipping symlink in skill output: %s", file_path.name)
+            continue
+        if file_path.resolve().parent != output_dir_resolved:
+            logger.warning("Skipping skill output file outside output dir: %s", file_path.name)
             continue
         mime_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
         generated_files.append(
@@ -214,9 +555,31 @@ def _collect_output_files(output_dir: Path) -> tuple[list[dict[str, Any]], dict[
     return generated_files, None
 
 
+def _safe_skill_path(root: Path, rel_path: object) -> Path:
+    """Resolve a skill-declared relative path, rejecting escapes outside ``root``.
+
+    Skill files come verbatim from workflow / template node data, so an absolute
+    path, a ``..`` segment, or a NUL byte must never be allowed to write outside
+    the throwaway workspace (the ``.py``/``.md`` allowlist only constrains the
+    LLM skill-builder assistant, not execution).
+    """
+    if not isinstance(rel_path, str) or not rel_path.strip():
+        raise ValueError("Skill file path must be a non-empty string")
+    if "\x00" in rel_path:
+        raise ValueError("Skill file path must not contain NUL bytes")
+    candidate = Path(rel_path)
+    if candidate.is_absolute() or candidate.drive or candidate.anchor:
+        raise ValueError(f"Skill file path must be relative: {rel_path!r}")
+    root_resolved = root.resolve()
+    resolved = (root_resolved / candidate).resolve()
+    if resolved != root_resolved and root_resolved not in resolved.parents:
+        raise ValueError(f"Skill file path escapes the workspace: {rel_path!r}")
+    return resolved
+
+
 def _write_skill_file(root: Path, file_data: dict[str, Any]) -> None:
     """Write a skill file to disk, decoding base64 payloads for binary assets."""
-    path = root / file_data["path"]
+    path = _safe_skill_path(root, file_data.get("path"))
     path.parent.mkdir(parents=True, exist_ok=True)
 
     encoding = str(file_data.get("encoding") or "text")
@@ -314,38 +677,57 @@ def _serialize_skill_stdin(arguments: dict[str, Any]) -> str:
     return json.dumps(arguments, default=str)
 
 
-def execute_skill_python(
+def _populate_workspace(
+    root: Path,
+    skill_files: list[dict[str, Any]],
+    drive_files: list[dict[str, Any]] | None,
+) -> Path:
+    """Write skill files + Drive files into ``root`` and return the output directory."""
+    for f in skill_files:
+        _write_skill_file(root, f)
+    if drive_files is not None:
+        _prepare_drive_files(root, drive_files)
+    output_dir = root / _OUTPUT_FILES_DIR
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
+
+
+def _build_result(stdout: str, stderr: str, output_dir: Path) -> SkillExecutionResult:
+    """Parse a skill's stdout/stderr and collect any generated files."""
+    stdout = (stdout or "").strip()
+    if not stdout:
+        output: object = {"output": "", "stderr": stderr or ""}
+    else:
+        try:
+            output = json.loads(stdout)
+        except json.JSONDecodeError:
+            output = {"output": stdout, "stderr": stderr or ""}
+    generated_files, hitl_request = _collect_output_files(output_dir)
+    return SkillExecutionResult(
+        output=output,
+        generated_files=generated_files,
+        hitl_request=hitl_request,
+    )
+
+
+def _force_remove_container(name: str) -> None:
+    try:
+        subprocess.run(["docker", "rm", "-f", name], capture_output=True, text=True, timeout=10)
+    except (FileNotFoundError, subprocess.SubprocessError, OSError):
+        pass
+
+
+def _execute_skill_subprocess(
     skill_files: list[dict[str, Any]],
     arguments: dict[str, Any],
-    timeout_seconds: float = 30.0,
-    drive_files: list[dict[str, Any]] | None = None,
+    timeout_seconds: float,
+    drive_files: list[dict[str, Any]] | None,
+    entry_point: str,
 ) -> SkillExecutionResult:
-    """
-    Execute a skill's Python script using uv.
-
-    Args:
-        skill_files: List of {"path": str, "content": str}
-        arguments: Dict of arguments to pass to the script (as JSON on stdin)
-        timeout_seconds: Max execution time
-        drive_files: Optional accessible Drive file metadata with source_path values
-
-    Returns:
-        SkillExecutionResult with output, any generated files, and optional HITL request.
-    """
-    entry_point = _find_entry_point(skill_files)
-    if not entry_point:
-        raise ValueError("No Python file found in skill")
-
+    """Run the skill in a local subprocess (NOT a security boundary; trusted/dev only)."""
     with tempfile.TemporaryDirectory() as tmpdir:
         root = Path(tmpdir)
-        for f in skill_files:
-            _write_skill_file(root, f)
-        if drive_files is not None:
-            _prepare_drive_files(root, drive_files)
-
-        output_dir = root / _OUTPUT_FILES_DIR
-        output_dir.mkdir(exist_ok=True)
-
+        output_dir = _populate_workspace(root, skill_files, drive_files)
         args_json = _serialize_skill_stdin(arguments)
 
         env = _safe_env()
@@ -378,20 +760,132 @@ def execute_skill_python(
 
         if result.stderr:
             logger.warning("Skill stderr: %s", result.stderr)
+        return _build_result(result.stdout, result.stderr, output_dir)
 
-        stdout = result.stdout.strip()
-        if not stdout:
-            output: object = {"output": "", "stderr": result.stderr or ""}
-        else:
-            try:
-                output = json.loads(stdout)
-            except json.JSONDecodeError:
-                output = {"output": stdout, "stderr": result.stderr or ""}
 
-        generated_files, hitl_request = _collect_output_files(output_dir)
+def _execute_skill_docker(
+    skill_files: list[dict[str, Any]],
+    arguments: dict[str, Any],
+    timeout_seconds: float,
+    drive_files: list[dict[str, Any]] | None,
+    entry_point: str,
+    image: str,
+) -> SkillExecutionResult:
+    """Run the skill inside a hardened, throwaway sibling container (no Docker socket)."""
+    mount_point = _skill_volume_mount_point()
+    run_dir = _skill_workspace_root() / "_skills" / uuid.uuid4().hex
+    run_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        # The sandbox runs non-root against a root-owned volume, so the throwaway
+        # run dir (and the dirs the sandbox user must write) are made writable.
+        _chmod_best_effort(run_dir, 0o777)
+        (run_dir / ".home").mkdir(parents=True, exist_ok=True)
+        _chmod_best_effort(run_dir / ".home", 0o777)
 
-        return SkillExecutionResult(
-            output=output,
-            generated_files=generated_files,
-            hitl_request=hitl_request,
+        output_dir = _populate_workspace(run_dir, skill_files, drive_files)
+        _chmod_best_effort(output_dir, 0o777)
+
+        args_json = _serialize_skill_stdin(arguments)
+        name = f"heym-skill-{uuid.uuid4().hex}"
+        cmd = _build_skill_docker_command(image, name, mount_point, run_dir, entry_point)
+
+        proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
         )
+        try:
+            stdout, stderr = proc.communicate(input=args_json, timeout=timeout_seconds)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            _force_remove_container(name)
+            raise TimeoutError(
+                f"Skill execution timed out after {timeout_seconds} seconds"
+            ) from None
+
+        if stderr:
+            logger.warning("Skill docker stderr: %s", stderr)
+        # Fail closed when the sandbox itself could not start. Docker uses 125
+        # (daemon/`docker run` error, e.g. a missing workspace volume), 126
+        # (entrypoint not executable), and 127 (entrypoint not found) for
+        # container-start failures; any other exit code is the skill's own
+        # process exiting, which stays a soft result like the subprocess path.
+        if proc.returncode in _DOCKER_START_FAILURE_CODES:
+            raise RuntimeError(
+                "Skill Docker sandbox failed to start "
+                f"(docker exit {proc.returncode}): {(stderr or '').strip()[:500]}"
+            )
+        return _build_result(stdout, stderr, output_dir)
+    finally:
+        shutil.rmtree(run_dir, ignore_errors=True)
+
+
+def _chmod_best_effort(path: Path, mode: int) -> None:
+    try:
+        os.chmod(path, mode)
+    except OSError:
+        pass
+
+
+def execute_skill_python(
+    skill_files: list[dict[str, Any]],
+    arguments: dict[str, Any],
+    timeout_seconds: float = 30.0,
+    drive_files: list[dict[str, Any]] | None = None,
+) -> SkillExecutionResult:
+    """
+    Execute a skill's Python script in the configured sandbox.
+
+    Skill code is untrusted, so a sandbox backend is selected by
+    ``HEYM_PYTHON_TOOL_SANDBOX`` (see the module docstring): ``auto``/``docker``
+    run it inside a hardened throwaway sibling container with no Docker socket,
+    ``subprocess`` runs it locally (trusted/dev only). ``auto`` fails closed when
+    Docker is unavailable rather than running untrusted code in the backend.
+
+    Args:
+        skill_files: List of {"path": str, "content": str}
+        arguments: Dict of arguments to pass to the script (as JSON on stdin)
+        timeout_seconds: Max execution time
+        drive_files: Optional accessible Drive file metadata with source_path values
+
+    Returns:
+        SkillExecutionResult with output, any generated files, and optional HITL request.
+
+    Raises:
+        RuntimeError: If the configured Docker sandbox backend is unavailable.
+    """
+    entry_point = _find_entry_point(skill_files)
+    if not entry_point:
+        raise ValueError("No Python file found in skill")
+
+    mode = _sandbox_mode()
+    if mode == "subprocess":
+        logger.warning(
+            "HEYM_PYTHON_TOOL_SANDBOX=subprocess: executing the skill in a local subprocess. "
+            "This is NOT a security boundary and must only be used for trusted code or local "
+            "development."
+        )
+        return _execute_skill_subprocess(
+            skill_files, arguments, timeout_seconds, drive_files, entry_point
+        )
+
+    # mode == "auto" or "docker": require a real Docker sandbox and fail closed
+    # rather than silently running untrusted skill code in the backend context.
+    if not _docker_available():
+        raise RuntimeError(
+            "Skill execution requires a Docker sandbox but no working Docker daemon is reachable. "
+            "Run with Docker available, or set HEYM_PYTHON_TOOL_SANDBOX=subprocess to explicitly "
+            "allow the insecure local fallback (trusted/dev use only)."
+        )
+    image = _resolve_image()
+    if image is None:
+        raise RuntimeError(
+            "Skill Docker sandbox is enabled but the runner image could not be resolved. "
+            "Set HEYM_SKILL_IMAGE (or HEYM_PYTHON_TOOL_IMAGE) to the backend image."
+        )
+    return _execute_skill_docker(
+        skill_files, arguments, timeout_seconds, drive_files, entry_point, image
+    )

@@ -1,5 +1,6 @@
 """Unit tests for optional Drive file access in Python skills."""
 
+import os
 import tempfile
 import unittest
 import uuid
@@ -17,6 +18,18 @@ def _skill_file(source: str) -> list[dict[str, str]]:
 
 class SkillPythonExecutorDriveTests(unittest.TestCase):
     """Verify the generated heym_drive helper for enabled skills."""
+
+    def setUp(self) -> None:
+        # These tests exercise real local execution + the Drive helper, not the
+        # sandbox selection, so pin the insecure-but-local subprocess backend.
+        self._prev_sandbox = os.environ.get("HEYM_PYTHON_TOOL_SANDBOX")
+        os.environ["HEYM_PYTHON_TOOL_SANDBOX"] = "subprocess"
+
+    def tearDown(self) -> None:
+        if self._prev_sandbox is None:
+            os.environ.pop("HEYM_PYTHON_TOOL_SANDBOX", None)
+        else:
+            os.environ["HEYM_PYTHON_TOOL_SANDBOX"] = self._prev_sandbox
 
     def test_drive_helper_reads_accessible_files_by_id_and_filename(self) -> None:
         new_file_id = str(uuid.uuid4())

@@ -79,7 +79,9 @@ vulnerabilities in Heym:
   condition evaluator, Slack/Telegram webhooks, OAuth redirect_uri validation,
   and token-at-rest storage (GHSA-pm6h-x3h5-j38h).
 - [@sajdakabir](https://github.com/sajdakabir) for reporting a server-side
-  request forgery (SSRF) in the MCP HTTP/SSE tool transports, and for reporting a horizontal IDOR
+  request forgery (SSRF) in the MCP HTTP/SSE tool transports, for reporting a horizontal IDOR
   in template get-by-id (GHSA-5748-x76g-v68m) and a missing creator gate in team
   member management that let any member alter the roster and reach team-shared
-  credentials (GHSA-vxpw-x7j7-8723).
+  credentials (GHSA-vxpw-x7j7-8723), and for reporting unsandboxed skill code
+  execution where Agent Python skills ran outside the Docker isolation mandated
+  for Python tools (GHSA-hcv7-mg77-pg73).
