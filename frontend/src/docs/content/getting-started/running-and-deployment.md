@@ -201,6 +201,8 @@ docker run --rm \
 
 > **Codex runner.** The Codex node uses the same `ghcr.io/heymrun/heym` image as a sibling runner container (`--entrypoint codex`) so Codex's Linux sandbox can create namespaces. Keep the `heym-codex-workspaces` volume mount if you want Codex workflows in the direct image setup; the runner does not receive the Docker socket or backend secrets.
 
+> **Skill sandbox.** Python skills on the Agent node run in a hardened sibling container that shares the `heym-codex-workspaces` volume, so keep that volume mount for skills too — not just Codex. Each run gets an isolated per-run subpath, and the sibling receives neither the Docker socket nor backend secrets. This needs **Docker Engine 25.0+**; on older engines, or without the volume, `HEYM_PYTHON_TOOL_SANDBOX=auto` fails closed — set `HEYM_PYTHON_TOOL_SANDBOX=subprocess` only for trusted single-user setups. See [Security](../reference/security.md#skill-sandbox).
+
 **Minimum environment variables for direct image runs:**
 
 | Variable | Required | Purpose |

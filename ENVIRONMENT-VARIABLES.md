@@ -84,8 +84,25 @@ lifetimes) that override these code defaults when you copy it.
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `HEYM_PYTHON_TOOL_SANDBOX` | How user-defined Agent Python tools run: `auto` (Docker sandbox, fail-closed), `docker` (never falls back), or `subprocess` (no security boundary; trusted/local only). | `auto` |
-| `HEYM_PYTHON_TOOL_IMAGE` | Image used for the Docker sandbox. Empty auto-detects the running backend image. | — |
+| `HEYM_PYTHON_TOOL_SANDBOX` | How user-defined Agent Python **tools** and **skills** run: `auto` (Docker sandbox, fail-closed), `docker` (never falls back), or `subprocess` (no security boundary; trusted/local only). Governs both paths. | `auto` |
+| `HEYM_PYTHON_TOOL_IMAGE` | Image used for the Python tool Docker sandbox (also the skill sandbox fallback when `HEYM_SKILL_IMAGE` is empty). Empty auto-detects the running backend image. | — |
+
+## Agent skill sandbox
+
+Untrusted Agent Python **skills** run in a hardened, throwaway sibling container (non-root, `cap-drop ALL`, `no-new-privileges`, read-only root fs, resource limits, **no Docker socket**) selected by `HEYM_PYTHON_TOOL_SANDBOX` above. Unlike Python tools, skills keep network egress and a per-run writable workspace, shared with the sibling through the same volume the Codex runner uses. Requires Docker Engine 25.0+ (per-run `volume-subpath` mounts); otherwise `auto` fails closed.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HEYM_SKILL_IMAGE` | Image used for the skill Docker sandbox. Empty falls back to `HEYM_PYTHON_TOOL_IMAGE`, then auto-detects the running backend image. | — |
+| `HEYM_SKILL_NETWORK` | Docker network mode for skill containers. Egress is intentionally allowed (skills call APIs / install deps via `uv`). | `bridge` |
+| `HEYM_SKILL_MEMORY` | Memory limit (and swap cap) for skill containers. | `512m` |
+| `HEYM_SKILL_CPUS` | CPU limit for skill containers. | `1` |
+| `HEYM_SKILL_PIDS` | PID limit for skill containers. | `256` |
+| `HEYM_SKILL_USER` | Non-root `uid:gid` the skill runs as inside the container. | `65534:65534` |
+| `HEYM_SKILL_WORKSPACE_MOUNT` | Mount point of the shared workspace volume inside the backend. Falls back to `HEYM_CODEX_WORKSPACE_DIR`. | `/app/data/codex-workspaces` |
+| `HEYM_SKILL_WORKSPACE_DIR` | Directory (under the mount) where per-run skill workspaces are created. | `<mount>/_skill-workspaces` |
+| `HEYM_SKILL_DOCKER_WORKSPACE_VOLUME` | Docker volume shared with each skill runner. Falls back to `HEYM_CODEX_DOCKER_WORKSPACE_VOLUME` (`heym-codex-workspaces` in Compose), else the backend's own mount is inspected. | — |
+| `HEYM_SKILL_HOST_WORKSPACE_DIR` | Absolute host path for the workspace mount when using a bind mount instead of a Docker volume. | — |
 
 ## Docker log access
 

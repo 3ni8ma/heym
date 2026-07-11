@@ -82,6 +82,19 @@ The execution backend is controlled by the `HEYM_PYTHON_TOOL_SANDBOX` environmen
 
 Set `HEYM_PYTHON_TOOL_IMAGE` to pin the sandbox image; when empty, Heym auto-detects the running backend image. The in-process restrictions (an import allowlist plus attribute and introspection filtering) are applied as defense in depth, but the container is the real isolation boundary — keep the default `auto` (or `docker`) mode for multi-user and production deployments.
 
+## Skill Sandbox
+
+Python skills attached to an [Agent node](../nodes/agent-node.md) also execute untrusted code — a skill can arrive verbatim inside a shared workflow or an `everyone`-visibility template — so skills run through the **same** `HEYM_PYTHON_TOOL_SANDBOX` switch as Python tools and fail closed the same way. The skill container is hardened identically (non-root, all capabilities dropped, `no-new-privileges`, read-only root filesystem, CPU/memory/PID limits, and **no Docker socket**), with two deliberate differences because skills legitimately need them:
+
+- **Network egress is allowed** (skills call APIs and install their own dependencies via `uv`), and
+- **a writable workspace is mounted** so skills can generate output files and read Heym Drive files.
+
+The workspace is shared with the throwaway sibling container through the same named Docker volume the Codex runner uses (`heym-codex-workspaces`, mounted at `/app/data/codex-workspaces`). Only this run's own subdirectory is mounted into the sibling — via a per-run `volume-subpath` — so one skill never sees another run's or Codex's workspace data. The Docker Compose stack always mounts this volume; the single-container `docker run` must include `-v heym-codex-workspaces:/app/data/codex-workspaces` for Python skills as well as Codex. If the volume is missing in `auto`/`docker` mode, skill execution **fails closed** rather than running in the backend. Because per-run subpath mounts require **Docker Engine 25.0 or newer**, older engines should either upgrade or run trusted skills with `HEYM_PYTHON_TOOL_SANDBOX=subprocess`.
+
+Only non-secret, portable environment variables (proxy and CA-bundle settings, locale) are forwarded into the container; database URLs, `SECRET_KEY`/`ENCRYPTION_KEY`, provider API keys, and OAuth secrets are withheld by an allowlist. Skill file paths are validated to stay inside the workspace, and symlinks planted in the output directory (including the `_hitl_request.json` sentinel) are never followed. Override the defaults with `HEYM_SKILL_IMAGE`, `HEYM_SKILL_NETWORK`, `HEYM_SKILL_MEMORY`, `HEYM_SKILL_CPUS`, `HEYM_SKILL_PIDS`, and `HEYM_SKILL_USER` if needed.
+
+As with tools, `subprocess` mode runs the skill in the backend process and is **not a security boundary** — use it only for trusted single-user or local development (`run.sh` selects it for native dev).
+
 ## Related
 
 - [Running & Deployment](../getting-started/running-and-deployment.md) – Configure `SECRET_KEY`, `ENCRYPTION_KEY`, `ALLOW_REGISTER`, and `HEYM_PYTHON_TOOL_SANDBOX` at startup
