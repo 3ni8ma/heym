@@ -110,11 +110,31 @@ test("brings a past execution onto the canvas via /workflows/:id/:executionId", 
     await page.getByRole("button", { name: "History", exact: true }).click();
     await expect(page.getByRole("heading", { name: "All Execution History" })).toBeVisible();
     await page.keyboard.press("s");
-    await page
-      .getByPlaceholder("Search by workflow name, trigger, status...")
-      .fill(workflow.name);
-    await expect(page.locator("button").filter({ hasText: workflow.name }).first()).toBeVisible();
-    await page.getByRole("button", { name: "Bring to Canvas" }).click();
+    const allHistorySearch = page.getByPlaceholder(
+      "Search by workflow name, trigger, status...",
+    );
+    const filteredHistoryResponse = page.waitForResponse(
+      (candidate) => {
+        const url = new URL(candidate.url());
+        return (
+          candidate.request().method() === "GET" &&
+          url.pathname === "/api/workflows/history/all" &&
+          url.searchParams.get("search") === workflow.name
+        );
+      },
+      { timeout: 10_000 },
+    );
+    await allHistorySearch.fill(workflow.name);
+    await filteredHistoryResponse;
+    const matchingHistoryEntry = page.locator("button").filter({ hasText: workflow.name }).first();
+    await expect(matchingHistoryEntry).toBeVisible();
+    await matchingHistoryEntry.click();
+    const bringToCanvasFromAllHistory = page
+      .locator("div.space-y-3")
+      .filter({ hasText: workflow.name })
+      .getByRole("button", { name: "Bring to Canvas" });
+    await expect(bringToCanvasFromAllHistory).toBeVisible();
+    await bringToCanvasFromAllHistory.click();
     await expectExecutionPath(page, workflow.id, entryId);
     await expect(page.getByPlaceholder("Enter text...")).toHaveValue("deeplink payload");
 

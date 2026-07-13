@@ -8,8 +8,9 @@ Create Date: 2026-07-12
 from typing import Union
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects.postgresql import UUID
+
+from alembic import op
 
 revision: str = "098_add_board_mapper"
 down_revision: Union[str, None] = "097_add_boards"
