@@ -13,6 +13,7 @@ import {
   LayoutTemplate,
   MessageCircle,
   Server,
+  SquareKanban,
   Table2,
   Terminal,
   Users,
@@ -27,6 +28,7 @@ const route = useRoute();
 
 const tabs = [
   { id: "workflows", label: "Workflows", icon: Workflow },
+  { id: "board", label: "Board", icon: SquareKanban },
   { id: "schedules", label: "Scheduled", icon: CalendarClock },
   { id: "templates", label: "Templates", icon: LayoutTemplate },
   { id: "globalvariables", label: "Variables", icon: Variable },
@@ -49,6 +51,7 @@ const activeTab = computed(() => {
   if (route.path.startsWith("/chats")) return "chat";
   const tabParam = route.query.tab as string;
   if (
+    tabParam === "board" ||
     tabParam === "schedules" ||
     tabParam === "credentials" ||
     tabParam === "globalvariables" ||
@@ -302,6 +305,7 @@ watch(activeTab, () => {
 
 /* --- per-tab hover animations --- */
 .tab-item[data-tab-id="workflows"]:hover       .tab-icon { animation: icon-spin   0.45s ease-out; }
+.tab-item[data-tab-id="board"]:hover           .tab-icon { animation: icon-pop    0.35s ease-out; }
 .tab-item[data-tab-id="schedules"]:hover       .tab-icon { animation: icon-tick   0.40s ease-out; }
 .tab-item[data-tab-id="templates"]:hover       .tab-icon { animation: icon-pop    0.35s ease-out; }
 .tab-item[data-tab-id="dashboard"]:hover       .tab-icon { animation: icon-pop    0.35s ease-out; }

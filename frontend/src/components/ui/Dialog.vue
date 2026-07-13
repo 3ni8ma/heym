@@ -123,12 +123,23 @@ function toggleFullscreen(): void {
         >
           <div class="dialog-header flex items-center justify-between pb-4 mb-5 shrink-0 gap-2">
             <div class="flex items-center gap-2 md:gap-4 min-w-0 flex-1 overflow-hidden">
-              <h2
-                v-if="title"
-                class="text-base md:text-lg font-semibold tracking-tight truncate flex-shrink-0"
+              <div
+                v-if="title || $slots.subtitle"
+                class="min-w-0 flex-shrink-0"
               >
-                {{ title }}
-              </h2>
+                <h2
+                  v-if="title"
+                  class="text-base md:text-lg font-semibold tracking-tight truncate"
+                >
+                  {{ title }}
+                </h2>
+                <div
+                  v-if="$slots.subtitle"
+                  class="truncate leading-none"
+                >
+                  <slot name="subtitle" />
+                </div>
+              </div>
               <template v-if="$slots['header-actions']">
                 <div class="h-5 w-px bg-border/60 shrink-0 hidden sm:block" />
                 <div class="min-w-0 flex-1 overflow-hidden">
@@ -165,7 +176,7 @@ function toggleFullscreen(): void {
               </button>
             </div>
           </div>
-          <div class="dialog-body overflow-y-auto overflow-x-hidden flex-1 min-h-0 -mx-1 px-1">
+          <div class="dialog-body overflow-y-auto overflow-x-hidden flex-1 min-h-0 -ml-1 pl-1 -mr-4 pr-4 md:-mr-5 md:pr-5">
             <slot />
           </div>
         </div>
