@@ -136,6 +136,7 @@ async function deleteCard(cardId: string): Promise<void> {
         {{ column.workflows.length }}
       </span>
       <button
+        v-if="boardStore.canWrite"
         class="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
         :class="column.workflows.length ? '' : 'ml-auto'"
         :aria-label="`Configure ${column.name}`"
