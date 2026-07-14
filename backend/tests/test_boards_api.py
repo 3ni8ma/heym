@@ -135,7 +135,7 @@ class TestColumnEndpoints(unittest.IsolatedAsyncioTestCase):
         board.owner_id = user.id
         return board
 
-    async def test_set_chain_rejects_unowned_workflows(self):
+    async def test_set_chain_rejects_inaccessible_workflows(self):
         user = _User()
         board = self._board(user)
         column = MagicMock()
@@ -147,24 +147,74 @@ class TestColumnEndpoints(unittest.IsolatedAsyncioTestCase):
 
         db = AsyncMock()
         db.add = MagicMock()
-        # 1: board lookup, 2: column lookup, 3: owned workflows lookup (only one found)
         db.execute = AsyncMock(
             side_effect=[
                 _result_with(scalar=board),
                 _result_with(scalar=column),
-                _result_with(scalars_list=[owned_workflow]),
+                _result_with(scalars_list=[]),
             ]
         )
 
-        with self.assertRaises(HTTPException) as ctx:
-            await boards_api.update_column(
+        async def _accessible_workflow(_db, workflow_id, _user_id):
+            if workflow_id == wanted[0]:
+                return owned_workflow
+            return None
+
+        with patch(
+            "app.api.boards.get_accessible_workflow",
+            AsyncMock(side_effect=_accessible_workflow),
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                await boards_api.update_column(
+                    board_id=board.id,
+                    column_id=column.id,
+                    request=ColumnUpdateRequest(workflow_ids=wanted),
+                    db=db,
+                    current_user=user,
+                )
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertEqual(ctx.exception.detail, "One or more workflows were not found")
+
+    async def test_set_chain_accepts_shared_workflows(self):
+        user = _User()
+        board = self._board(user)
+        column = MagicMock()
+        column.id = uuid.uuid4()
+        column.board_id = board.id
+        column.name = "Dev"
+        column.color = "#fff"
+        column.position = 0
+        column.ai_instructions = None
+        wanted = [uuid.uuid4()]
+        shared_workflow = MagicMock()
+        shared_workflow.id = wanted[0]
+
+        db = AsyncMock()
+        db.add = MagicMock()
+        _wire_db_inserts(db)
+        db.execute = AsyncMock(
+            side_effect=[
+                _result_with(scalar=board),
+                _result_with(scalar=column),
+                _result_with(scalars_list=[]),
+                _result_with(scalars_list=[]),
+            ]
+        )
+
+        with patch(
+            "app.api.boards.get_accessible_workflow",
+            AsyncMock(return_value=shared_workflow),
+        ):
+            response = await boards_api.update_column(
                 board_id=board.id,
                 column_id=column.id,
                 request=ColumnUpdateRequest(workflow_ids=wanted),
                 db=db,
                 current_user=user,
             )
-        self.assertEqual(ctx.exception.status_code, 400)
+
+        self.assertEqual(response.id, column.id)
+        db.commit.assert_awaited()
 
     async def test_delete_column_with_cards_conflicts(self):
         user = _User()

@@ -65,9 +65,9 @@ from app.services.file_storage import (
 )
 from app.services.hitl_service import build_public_base_url
 from app.services.upload_limits import read_upload_file_limited
+from app.services.workflow_access import get_accessible_workflow
 
 router = APIRouter()
-
 DEFAULT_COLUMNS = ["Backlog", "Planning", "Development", "Done"]
 ACTIVE_RUN_STATUSES = ("running", "pending")
 MAX_BOARD_CARDS = 500
@@ -476,23 +476,14 @@ async def update_column(
     if "ai_instructions" in fields_set:
         column.ai_instructions = request.ai_instructions
     if request.workflow_ids is not None:
-        owned = (
-            (
-                await db.execute(
-                    select(Workflow).where(
-                        Workflow.id.in_(request.workflow_ids),
-                        Workflow.owner_id == current_user.id,
-                    )
+        # Check that all workflows are accessible to the user (owned or shared)
+        for workflow_id in set(request.workflow_ids):
+            workflow = await get_accessible_workflow(db, workflow_id, current_user.id)
+            if workflow is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="One or more workflows were not found",
                 )
-            )
-            .scalars()
-            .all()
-        )
-        if len(owned) != len(set(request.workflow_ids)):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="One or more workflows were not found",
-            )
         existing = (
             (
                 await db.execute(
@@ -854,7 +845,7 @@ async def run_card_chain(
     return _card_response(card)
 
 
-# ── Card attachments ─────────────────────────────────────────────────────────
+# ─── Card attachments ────────────────────────────────────────────────────────────────
 
 
 def _card_attachments(card: BoardCard) -> list[dict]:
@@ -942,7 +933,7 @@ async def delete_card_attachment(
     await db.commit()
 
 
-# ── Sharing ──────────────────────────────────────────────────────────────────
+# ─── Sharing ────────────────────────────────────────────────────────────────────────
 
 
 def _validate_permission(permission: str) -> str:
