@@ -142,7 +142,7 @@ async function emptyColumn(): Promise<void> {
         {{ column.workflows.length }}
       </span>
       <button
-        v-if="boardStore.canWrite"
+        v-if="boardStore.canWrite && cards.length > 0"
         class="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
         :class="column.workflows.length ? '' : 'ml-auto'"
         :aria-label="`Empty ${column.name}`"
