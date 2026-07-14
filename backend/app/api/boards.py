@@ -223,7 +223,7 @@ def _card_response(card: BoardCard) -> BoardCardResponse:
     )
 
 
-async def _validate_owned_credential(
+async def _validate_accessible_credential(
     db: AsyncSession, credential_id: uuid.UUID, user: User
 ) -> None:
     credential = await get_accessible_credential(db, credential_id, user.id)
@@ -323,7 +323,7 @@ async def create_board(
     current_user: User = Depends(get_current_user),
 ) -> BoardSummaryResponse:
     if request.mapper_credential_id is not None:
-        await _validate_owned_credential(db, request.mapper_credential_id, current_user)
+        await _validate_accessible_credential(db, request.mapper_credential_id, current_user)
     board = Board(
         owner_id=current_user.id,
         name=request.name,
@@ -405,7 +405,7 @@ async def update_board(
         board.mapper_model = request.mapper_model
     if "mapper_credential_id" in fields_set:
         if request.mapper_credential_id is not None:
-            await _validate_owned_credential(db, request.mapper_credential_id, current_user)
+            await _validate_accessible_credential(db, request.mapper_credential_id, current_user)
         board.mapper_credential_id = request.mapper_credential_id
     await db.commit()
     await db.refresh(board)

@@ -90,7 +90,7 @@ class TestCreateBoard(unittest.IsolatedAsyncioTestCase):
 
 
 class TestBoardCredentialValidation(unittest.IsolatedAsyncioTestCase):
-    async def test_accepts_accessible_shared_credential(self):
+    async def test_accepts_accessible_credential(self):
         db = AsyncMock()
         user = _User()
         credential_id = uuid.uuid4()
@@ -99,7 +99,7 @@ class TestBoardCredentialValidation(unittest.IsolatedAsyncioTestCase):
             "app.api.boards.get_accessible_credential",
             AsyncMock(return_value=MagicMock()),
         ) as get_credential:
-            await boards_api._validate_owned_credential(db, credential_id, user)
+            await boards_api._validate_accessible_credential(db, credential_id, user)
 
         get_credential.assert_awaited_once_with(db, credential_id, user.id)
 
@@ -113,7 +113,7 @@ class TestBoardCredentialValidation(unittest.IsolatedAsyncioTestCase):
             AsyncMock(return_value=None),
         ):
             with self.assertRaises(HTTPException) as ctx:
-                await boards_api._validate_owned_credential(db, credential_id, user)
+                await boards_api._validate_accessible_credential(db, credential_id, user)
 
         self.assertEqual(ctx.exception.status_code, 400)
         self.assertEqual(ctx.exception.detail, "Credential not found")
