@@ -56,6 +56,7 @@ from app.models.board_schemas import (
     CommentCreateRequest,
 )
 from app.services import board_run_service
+from app.services.credential_access import get_accessible_credential
 from app.services.file_storage import (
     build_download_url,
     create_access_token,
@@ -225,10 +226,8 @@ def _card_response(card: BoardCard) -> BoardCardResponse:
 async def _validate_owned_credential(
     db: AsyncSession, credential_id: uuid.UUID, user: User
 ) -> None:
-    result = await db.execute(
-        select(Credential.id).where(Credential.id == credential_id, Credential.owner_id == user.id)
-    )
-    if result.scalar_one_or_none() is None:
+    credential = await get_accessible_credential(db, credential_id, user.id)
+    if credential is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Credential not found")
 
 
