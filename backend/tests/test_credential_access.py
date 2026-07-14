@@ -13,6 +13,23 @@ def make_result(value: object) -> Mock:
 
 
 class CredentialAccessTests(unittest.IsolatedAsyncioTestCase):
+    async def test_returns_owned_credential(self) -> None:
+        user_id = uuid.uuid4()
+        credential = Credential(
+            id=uuid.uuid4(),
+            owner_id=user_id,
+            name="Owned OpenAI",
+            type=CredentialType.openai,
+            encrypted_config="encrypted",
+        )
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=make_result(credential))
+
+        result = await get_accessible_credential(db, credential.id, user_id)
+
+        self.assertIs(result, credential)
+        db.execute.assert_awaited_once()
+
     async def test_returns_directly_shared_credential(self) -> None:
         user_id = uuid.uuid4()
         credential = Credential(
@@ -56,4 +73,13 @@ class CredentialAccessTests(unittest.IsolatedAsyncioTestCase):
         result = await get_accessible_credential(db, credential.id, user_id)
 
         self.assertIs(result, credential)
+        self.assertEqual(db.execute.await_count, 3)
+
+    async def test_returns_none_for_inaccessible_credential(self) -> None:
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=make_result(None))
+
+        result = await get_accessible_credential(db, uuid.uuid4(), uuid.uuid4())
+
+        self.assertIsNone(result)
         self.assertEqual(db.execute.await_count, 3)
