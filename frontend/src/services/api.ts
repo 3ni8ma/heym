@@ -1513,6 +1513,9 @@ export const boardApi = {
   deleteColumn: async (boardId: string, columnId: string): Promise<void> => {
     await api.delete(`/boards/${boardId}/columns/${columnId}`);
   },
+  emptyColumn: async (boardId: string, columnId: string): Promise<void> => {
+    await api.delete(`/boards/${boardId}/columns/${columnId}/cards`);
+  },
   createCard: async (boardId: string, payload: CardCreatePayload): Promise<BoardCard> => {
     const response = await api.post<BoardCard>(`/boards/${boardId}/cards`, payload);
     return response.data;

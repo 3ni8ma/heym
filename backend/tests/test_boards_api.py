@@ -189,6 +189,31 @@ class TestColumnEndpoints(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(ctx.exception.status_code, 409)
 
+    async def test_empty_column_deletes_all_cards_and_commits(self):
+        user = _User()
+        board = self._board(user)
+        column = MagicMock()
+        column.id = uuid.uuid4()
+        column.board_id = board.id
+
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _result_with(scalar=board),
+                _result_with(scalar=column),
+                _result_with(),
+            ]
+        )
+
+        await boards_api.empty_column(
+            board_id=board.id, column_id=column.id, db=db, current_user=user
+        )
+
+        delete_statement = db.execute.await_args_list[2].args[0]
+        self.assertEqual(delete_statement.table.name, "board_cards")
+        self.assertIn("board_cards.column_id", str(delete_statement.whereclause))
+        db.commit.assert_awaited_once()
+
 
 class TestCardEndpoints(unittest.IsolatedAsyncioTestCase):
     async def test_create_card_defaults_to_first_column_bottom(self):

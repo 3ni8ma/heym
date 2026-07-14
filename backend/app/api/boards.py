@@ -11,7 +11,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -541,6 +541,20 @@ async def delete_column(
             detail="Move or delete the cards in this column first",
         )
     await db.delete(column)
+    await db.commit()
+
+
+@router.delete("/{board_id}/columns/{column_id}/cards", status_code=status.HTTP_204_NO_CONTENT)
+async def empty_column(
+    board_id: uuid.UUID,
+    column_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    """Delete every card in a board column."""
+    board, _ = await _get_board_for_user(db, board_id, current_user, write=True)
+    column = await _get_board_column(db, board, column_id)
+    await db.execute(delete(BoardCard).where(BoardCard.column_id == column.id))
     await db.commit()
 
 

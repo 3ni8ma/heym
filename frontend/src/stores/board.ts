@@ -173,6 +173,12 @@ export const useBoardStore = defineStore("board", () => {
     await refreshActiveBoard();
   }
 
+  async function emptyColumn(columnId: string): Promise<void> {
+    if (!activeBoard.value) return;
+    await boardApi.emptyColumn(activeBoard.value.id, columnId);
+    await refreshActiveBoard();
+  }
+
   async function cloneCard(cardId: string): Promise<void> {
     const board = activeBoard.value;
     if (!board) return;
@@ -207,6 +213,7 @@ export const useBoardStore = defineStore("board", () => {
     moveCard,
     runFollowUp,
     deleteCard,
+    emptyColumn,
     cloneCard,
     stopPolling,
   };
