@@ -567,9 +567,19 @@ async function copyRun(run: CardRun): Promise<void> {
 </template>
 
 <style scoped>
+.board-activity-md {
+  max-width: 100%;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
+}
+
 .board-activity-md :deep(p) {
   margin: 0 0 0.4rem;
   white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
 }
 
 .board-activity-md :deep(p:last-child) {
@@ -582,6 +592,9 @@ async function copyRun(run: CardRun): Promise<void> {
   margin: 0.4rem 0 0.25rem;
   font-size: 0.875rem;
   font-weight: 600;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
 }
 
 .board-activity-md :deep(ul),
@@ -600,6 +613,9 @@ async function copyRun(run: CardRun): Promise<void> {
 
 .board-activity-md :deep(li) {
   margin: 0.1rem 0;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
 }
 
 .board-activity-md :deep(li::marker) {
@@ -614,6 +630,10 @@ async function copyRun(run: CardRun): Promise<void> {
 .board-activity-md :deep(a) {
   color: hsl(var(--primary));
   text-decoration: underline;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
+  max-width: 100%;
 }
 
 .board-activity-md :deep(code) {
@@ -621,6 +641,9 @@ async function copyRun(run: CardRun): Promise<void> {
   background: hsl(var(--muted));
   padding: 0.05rem 0.25rem;
   font-size: 0.78rem;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
 }
 
 .board-activity-md :deep(pre) {
@@ -628,10 +651,15 @@ async function copyRun(run: CardRun): Promise<void> {
   border-radius: 0.375rem;
   background: hsl(var(--muted));
   padding: 0.5rem;
+  max-width: 100%;
 }
 
 .board-activity-md :deep(pre code) {
   background: transparent;
   padding: 0;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-wrap: break-word;
+  word-break: break-word;
 }
 </style>
