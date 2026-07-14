@@ -845,7 +845,8 @@ async def run_card_chain(
     return _card_response(card)
 
 
-# ── Card attachments ───────────────────────────────────────────────────────────────
+# ─── Card attachments ────────────────────────────────────────────────────────────────
+
 
 def _card_attachments(card: BoardCard) -> list[dict]:
     metadata = card.card_metadata or {}
@@ -932,7 +933,8 @@ async def delete_card_attachment(
     await db.commit()
 
 
-# ── Sharing ───────────────────────────────────────────────────────────────────────
+# ─── Sharing ────────────────────────────────────────────────────────────────────────
+
 
 def _validate_permission(permission: str) -> str:
     if permission not in ("read", "write"):
