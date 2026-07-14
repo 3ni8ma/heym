@@ -12,6 +12,7 @@ const props = defineProps<{ column: BoardColumn; index: number }>();
 const emit = defineEmits<{
   (e: "openCard", cardId: string): void;
   (e: "openSettings", columnId: string): void;
+  (e: "openErrorHistory", cardId: string): void;
 }>();
 
 const boardStore = useBoardStore();
@@ -161,6 +162,7 @@ async function deleteCard(cardId: string): Promise<void> {
           @open="emit('openCard', $event)"
           @clone="boardStore.cloneCard"
           @delete="deleteCard"
+          @open-error-history="emit('openErrorHistory', $event)"
         />
       </div>
     </div>
