@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, nextTick, ref, watch } from "vue";
 import {
   Loader2,
   CheckCircle2,
@@ -11,9 +11,11 @@ import {
 } from "lucide-vue-next";
 
 import type { BoardCard } from "@/types/board";
+import { useToast } from "@/composables/useToast";
 import { useBoardStore } from "@/stores/board";
 
 const boardStore = useBoardStore();
+const { showToast } = useToast();
 // No board actions until the Agentic Kanban Model is selected.
 const canAct = computed<boolean>(() => boardStore.mapperConfigured && boardStore.canWrite);
 
@@ -23,6 +25,78 @@ const emit = defineEmits<{
   (e: "clone", cardId: string): void;
   (e: "delete", cardId: string): void;
 }>();
+const editingTitle = ref(false);
+const editedTitle = ref(props.card.title);
+const titleInput = ref<HTMLTextAreaElement | null>(null);
+const savingTitle = ref(false);
+let titleClickTimer: ReturnType<typeof setTimeout> | null = null;
+
+watch(
+  () => props.card.title,
+  (title) => {
+    if (!editingTitle.value) editedTitle.value = title;
+  },
+);
+
+async function startTitleEdit(): Promise<void> {
+  if (!canAct.value || savingTitle.value) return;
+  editedTitle.value = props.card.title;
+  editingTitle.value = true;
+  await nextTick();
+  const input = titleInput.value;
+  if (!input) return;
+  input.focus();
+  input.setSelectionRange(0, input.value.length);
+}
+
+function onTitleClick(): void {
+  if (titleClickTimer) clearTimeout(titleClickTimer);
+  titleClickTimer = setTimeout(() => {
+    titleClickTimer = null;
+    emit("open", props.card.id);
+  }, 250);
+}
+
+function onTitleDblClick(): void {
+  if (titleClickTimer) {
+    clearTimeout(titleClickTimer);
+    titleClickTimer = null;
+  }
+  void startTitleEdit();
+}
+
+async function saveTitle(): Promise<void> {
+  if (!editingTitle.value || savingTitle.value) return;
+
+  const title = editedTitle.value.trim();
+  if (!title) {
+    editedTitle.value = props.card.title;
+    showToast("Card title cannot be empty", "error");
+    await nextTick();
+    titleInput.value?.focus();
+    return;
+  }
+  if (title === props.card.title) {
+    editingTitle.value = false;
+    return;
+  }
+
+  savingTitle.value = true;
+  try {
+    await boardStore.updateCard(props.card.id, { title });
+    editedTitle.value = title;
+    editingTitle.value = false;
+  } catch {
+    editedTitle.value = props.card.title;
+    showToast("Failed to update card title", "error");
+    savingTitle.value = false;
+    await nextTick();
+    titleInput.value?.focus();
+    titleInput.value?.setSelectionRange(0, titleInput.value.value.length);
+  } finally {
+    savingTitle.value = false;
+  }
+}
 
 const statusClasses = computed<string>(() => {
   switch (props.card.run_status) {
@@ -54,13 +128,44 @@ function onDragStart(event: DragEvent): void {
   <div
     class="group cursor-pointer rounded-lg border p-3 text-sm shadow-sm transition-colors hover:border-primary/60"
     :class="statusClasses"
-    :draggable="canAct"
+    :draggable="canAct && !editingTitle"
     :data-testid="`board-card-${card.id}`"
     @dragstart="onDragStart"
     @click="emit('open', card.id)"
   >
     <div class="flex items-start justify-between gap-2">
-      <span class="line-clamp-2 font-medium">{{ card.title }}</span>
+      <div class="min-w-0 flex-1">
+        <div
+          v-if="editingTitle"
+          class="relative"
+          @click.stop
+          @dblclick.stop
+        >
+          <textarea
+            ref="titleInput"
+            v-model="editedTitle"
+            rows="3"
+            class="w-full resize-none rounded border border-primary/60 bg-background px-1 py-0.5 font-medium leading-5 text-foreground outline-none ring-1 ring-primary/30 disabled:pr-6"
+            :disabled="savingTitle"
+            :data-testid="`board-card-title-input-${card.id}`"
+            :aria-label="`Edit title for ${card.title}`"
+            @blur="saveTitle"
+            @click.stop
+          />
+          <Loader2
+            v-if="savingTitle"
+            class="absolute right-1 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin text-muted-foreground"
+            :data-testid="`board-card-title-saving-${card.id}`"
+          />
+        </div>
+        <span
+          v-else
+          class="line-clamp-3 whitespace-pre-line font-medium"
+          :data-testid="`board-card-title-${card.id}`"
+          @click.stop="onTitleClick"
+          @dblclick.stop="onTitleDblClick"
+        >{{ card.title }}</span>
+      </div>
       <span
         v-if="attachmentCount"
         class="mt-0.5 inline-flex shrink-0 items-center gap-0.5 text-xs text-muted-foreground"
