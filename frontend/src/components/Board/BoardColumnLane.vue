@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
-import { GripVertical, Plus, Settings2, Workflow } from "lucide-vue-next";
+import { GripVertical, Plus, Settings2, Trash2, Workflow } from "lucide-vue-next";
 
 import type { BoardCard, BoardColumn } from "@/types/board";
 import { useBoardStore } from "@/stores/board";
@@ -97,6 +97,11 @@ async function deleteCard(cardId: string): Promise<void> {
   if (!window.confirm(`Delete card "${card?.title ?? ""}"?`)) return;
   await boardStore.deleteCard(cardId);
 }
+
+async function emptyColumn(): Promise<void> {
+  if (!window.confirm(`Delete all cards in "${props.column.name}" column?`)) return;
+  await boardStore.emptyColumn(props.column.id);
+}
 </script>
 
 <template>
@@ -140,6 +145,14 @@ async function deleteCard(cardId: string): Promise<void> {
         v-if="boardStore.canWrite"
         class="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
         :class="column.workflows.length ? '' : 'ml-auto'"
+        :aria-label="`Empty ${column.name}`"
+        @click="emptyColumn"
+      >
+        <Trash2 class="h-4 w-4" />
+      </button>
+      <button
+        v-if="boardStore.canWrite"
+        class="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
         :aria-label="`Configure ${column.name}`"
         @click="emit('openSettings', column.id)"
       >
