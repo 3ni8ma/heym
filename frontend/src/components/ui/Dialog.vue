@@ -125,10 +125,11 @@ function toggleFullscreen(): void {
             <div class="flex items-center gap-2 md:gap-4 min-w-0 flex-1 overflow-hidden">
               <div
                 v-if="title || $slots.subtitle"
-                class="min-w-0 flex-shrink-0"
+                class="min-w-0"
               >
                 <h2
                   v-if="title"
+                  :title="title"
                   class="text-base md:text-lg font-semibold tracking-tight truncate"
                 >
                   {{ title }}
