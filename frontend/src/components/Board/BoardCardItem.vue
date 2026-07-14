@@ -6,6 +6,7 @@ import {
   Copy,
   Paperclip,
   XCircle,
+  ExternalLink,
   PauseCircle,
   Trash2,
 } from "lucide-vue-next";
@@ -24,6 +25,7 @@ const emit = defineEmits<{
   (e: "open", cardId: string): void;
   (e: "clone", cardId: string): void;
   (e: "delete", cardId: string): void;
+  (e: "openErrorHistory", cardId: string): void;
 }>();
 const editingTitle = ref(false);
 const editedTitle = ref(props.card.title);
@@ -199,6 +201,17 @@ function onDragStart(event: DragEvent): void {
           />
         </div>
         <div class="hidden items-center gap-0.5 group-hover:flex">
+          <button
+            v-if="card.run_status === 'failed'"
+            class="flex items-center justify-center gap-0.5 rounded p-0.5 text-red-500 underline decoration-dotted transition-colors hover:bg-red-500/10 hover:text-red-400"
+            aria-label="View error history"
+            title="View error history"
+            :data-testid="`board-card-error-history-${card.id}`"
+            @click.stop="emit('openErrorHistory', card.id)"
+          >
+            <XCircle class="h-3.5 w-3.5" />
+            <ExternalLink class="h-3 w-3" />
+          </button>
           <button
             class="flex items-center justify-center rounded p-0.5 text-muted-foreground hover:text-primary"
             aria-label="Clone card"

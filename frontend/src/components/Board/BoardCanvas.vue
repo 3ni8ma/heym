@@ -9,6 +9,7 @@ import BoardColumnLane from "./BoardColumnLane.vue";
 const emit = defineEmits<{
   (e: "openCard", cardId: string): void;
   (e: "openSettings", columnId: string): void;
+  (e: "openErrorHistory", cardId: string): void;
 }>();
 
 const boardStore = useBoardStore();
@@ -37,6 +38,7 @@ async function addColumn(): Promise<void> {
       :index="index"
       @open-card="emit('openCard', $event)"
       @open-settings="emit('openSettings', $event)"
+      @open-error-history="emit('openErrorHistory', $event)"
     />
     <div class="flex w-64 shrink-0 flex-col">
       <button

@@ -3,10 +3,13 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Plus, Settings, SquareKanban, Trash2 } from "lucide-vue-next";
 
+import ExecutionHistoryAllDialog from "@/components/Panels/ExecutionHistoryAllDialog.vue";
 import Button from "@/components/ui/Button.vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
-import { useBoardStore } from "@/stores/board";
 import { onDismissOverlays } from "@/composables/useOverlayBackHandler";
+import { useToast } from "@/composables/useToast";
+import { boardApi } from "@/services/api";
+import { useBoardStore } from "@/stores/board";
 import BoardCanvas from "./BoardCanvas.vue";
 import BoardCardDetailDialog from "./BoardCardDetailDialog.vue";
 import BoardColumnSettingsDialog from "./BoardColumnSettingsDialog.vue";
@@ -16,10 +19,13 @@ import BoardEditDialog from "./BoardEditDialog.vue";
 const boardStore = useBoardStore();
 const route = useRoute();
 const router = useRouter();
+const { showToast } = useToast();
 const createOpen = ref(false);
 const editOpen = ref(false);
 const openCardId = ref<string | null>(null);
 const settingsColumnId = ref<string | null>(null);
+const historyOpen = ref(false);
+const historyWorkflowId = ref<string | undefined>(undefined);
 
 async function openBoardWithUrl(boardId: string): Promise<void> {
   await boardStore.openBoard(boardId);
@@ -39,6 +45,8 @@ onMounted(async () => {
     editOpen.value = false;
     openCardId.value = null;
     settingsColumnId.value = null;
+    historyOpen.value = false;
+    historyWorkflowId.value = undefined;
   });
   await boardStore.fetchBoards();
   const urlBoardId = typeof route.query.board === "string" ? route.query.board : null;
@@ -78,6 +86,34 @@ async function removeActiveBoard(): Promise<void> {
 
 async function onBoardCreated(boardId: string): Promise<void> {
   await openBoardWithUrl(boardId);
+}
+
+async function openErrorHistory(cardId: string): Promise<void> {
+  const boardId = boardStore.activeBoard?.id;
+  if (!boardId) return;
+
+  try {
+    const detail = await boardApi.getCard(boardId, cardId);
+    const failedRun = [...detail.runs].reverse().find(
+      (run) => run.status === "failed" && run.workflow_id !== null,
+    );
+    if (!failedRun?.workflow_id) {
+      showToast("No workflow error history is available for this card", "error");
+      return;
+    }
+
+    openCardId.value = null;
+    historyOpen.value = false;
+    historyWorkflowId.value = failedRun.workflow_id;
+    historyOpen.value = true;
+  } catch {
+    showToast("Failed to load card error history", "error");
+  }
+}
+
+function closeErrorHistory(): void {
+  historyOpen.value = false;
+  historyWorkflowId.value = undefined;
 }
 </script>
 
@@ -173,6 +209,7 @@ async function onBoardCreated(boardId: string): Promise<void> {
       v-else-if="boardStore.activeBoard"
       @open-card="openCardId = $event"
       @open-settings="settingsColumnId = $event"
+      @open-error-history="openErrorHistory"
     />
 
     <BoardCreateDialog
@@ -193,6 +230,12 @@ async function onBoardCreated(boardId: string): Promise<void> {
       :open="settingsColumnId !== null"
       :column-id="settingsColumnId"
       @close="settingsColumnId = null"
+    />
+    <ExecutionHistoryAllDialog
+      :open="historyOpen"
+      :workflow-id="historyWorkflowId"
+      initial-status="error"
+      @close="closeErrorHistory"
     />
   </div>
 </template>
