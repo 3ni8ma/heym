@@ -29,6 +29,7 @@ const DASHBOARD_TAB_PATHS = [
   "teams",
   "logs",
   "drive",
+  "board",
   "datatable",
 ] as const;
 
