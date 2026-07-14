@@ -650,11 +650,32 @@ class CodexRunnerService:
 
     def _push_branch(self, workspace: Path, request: CodexRunRequest, branch: str) -> None:
         remote_url = self._clone_url_with_token(request.repository_url, request.github_config)
+        sensitive_values = [request.github_config.get("api_key", "")]
         self._run_command(["git", "remote", "set-url", "origin", remote_url], cwd=workspace)
+        remote_branch = self._git_output(
+            ["git", "ls-remote", "--heads", "origin", f"refs/heads/{branch}"], workspace
+        )
+        if remote_branch.strip():
+            try:
+                self._run_command(
+                    ["git", "pull", "--rebase", "origin", branch],
+                    cwd=workspace,
+                    sensitive_values=sensitive_values,
+                )
+            except ValueError as exc:
+                # A failed rebase leaves the workspace in an unusable state. Restore the local
+                # commit while surfacing an actionable conflict error instead of attempting push.
+                try:
+                    self._run_command(["git", "rebase", "--abort"], cwd=workspace)
+                except ValueError:
+                    pass
+                raise ValueError(
+                    f"Could not synchronize branch '{branch}' with origin before push: {exc}"
+                ) from exc
         self._run_command(
             ["git", "push", "-u", "origin", branch],
             cwd=workspace,
-            sensitive_values=[request.github_config.get("api_key", "")],
+            sensitive_values=sensitive_values,
         )
 
     def _current_branch(self, workspace: Path) -> str:
