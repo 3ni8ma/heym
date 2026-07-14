@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useRouter } from "vue-router";
+import axios from "axios";
 import { ArrowDown, ArrowUp, ExternalLink, Trash2, X } from "lucide-vue-next";
 
 import Dialog from "@/components/ui/Dialog.vue";
@@ -30,6 +31,7 @@ const aiInstructions = ref("");
 const chain = ref<{ id: string; name: string }[]>([]);
 const available = ref<{ id: string; name: string }[]>([]);
 const saving = ref(false);
+const error = ref<string | null>(null);
 
 const column = computed(() =>
   boardStore.activeBoard?.columns.find((c) => c.id === props.columnId),
@@ -39,6 +41,7 @@ watch(
   () => [props.open, props.columnId] as const,
   async ([open]) => {
     if (!open || !column.value) return;
+    error.value = null;
     name.value = column.value.name;
     color.value = column.value.color;
     aiInstructions.value = column.value.ai_instructions ?? "";
@@ -50,6 +53,14 @@ watch(
     available.value = workflows.map((w) => ({ id: w.id, name: w.name }));
   },
   { immediate: true },
+);
+
+watch(
+  [name, color, aiInstructions, chain],
+  () => {
+    error.value = null;
+  },
+  { deep: true },
 );
 
 const availableOptions = computed(() =>
@@ -76,6 +87,7 @@ function moveLink(index: number, delta: number): void {
 async function save(): Promise<void> {
   const board = boardStore.activeBoard;
   if (!board || !props.columnId || saving.value) return;
+  error.value = null;
   saving.value = true;
   try {
     await boardApi.updateColumn(board.id, props.columnId, {
@@ -86,6 +98,32 @@ async function save(): Promise<void> {
     });
     await boardStore.refreshActiveBoard();
     emit("close");
+  } catch (saveError: unknown) {
+    if (axios.isAxiosError(saveError)) {
+      const status = saveError.response?.status;
+      const detail = saveError.response?.data?.detail;
+      if (!saveError.response) {
+        error.value = "Unable to reach the server. Check your connection and try again.";
+      } else if (status === 401 || status === 403) {
+        error.value =
+          "You do not have permission to update this column. Ask the board owner for write access.";
+      } else if (status === 400 || status === 422) {
+        error.value =
+          typeof detail === "string"
+            ? `The column could not be saved: ${detail}`
+            : "Some column settings are invalid. Review them and try again.";
+      } else {
+        error.value =
+          typeof detail === "string"
+            ? `Unable to save the column: ${detail}`
+            : "Unable to save the column right now. Please try again.";
+      }
+    } else {
+      error.value =
+        saveError instanceof Error && saveError.message
+          ? `Unable to save the column: ${saveError.message}`
+          : "Unable to save the column right now. Please try again.";
+    }
   } finally {
     saving.value = false;
   }
@@ -112,6 +150,14 @@ async function removeColumn(): Promise<void> {
     @close="emit('close')"
   >
     <div class="flex flex-col gap-4 p-1 text-sm">
+      <div
+        v-if="error"
+        class="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400"
+        role="alert"
+        data-testid="column-settings-error"
+      >
+        {{ error }}
+      </div>
       <div>
         <label class="mb-1 block text-xs font-semibold uppercase text-muted-foreground">
           Name
