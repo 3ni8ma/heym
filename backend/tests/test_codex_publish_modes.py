@@ -104,6 +104,58 @@ class TestCommitMessage(unittest.TestCase):
         self.assertIn("ran docker compose config", body)
 
 
+class TestPushBranch(unittest.TestCase):
+    def setUp(self) -> None:
+        self.runner = CodexRunnerService()
+        self.runner._run_command = MagicMock()  # type: ignore[method-assign]
+        self.workspace = Path("/tmp/ws")
+        self.request = _request("commit_push")
+
+    def test_existing_remote_branch_is_rebased_before_push(self) -> None:
+        self.runner._git_output = MagicMock(  # type: ignore[method-assign]
+            return_value="abc123\trefs/heads/codex/run\n"
+        )
+
+        self.runner._push_branch(self.workspace, self.request, "codex/run")
+
+        commands = [call.args[0] for call in self.runner._run_command.call_args_list]
+        self.assertEqual(commands[1], ["git", "pull", "--rebase", "origin", "codex/run"])
+        self.assertEqual(commands[2], ["git", "push", "-u", "origin", "codex/run"])
+
+    def test_new_remote_branch_skips_pull(self) -> None:
+        self.runner._git_output = MagicMock(return_value="")  # type: ignore[method-assign]
+
+        self.runner._push_branch(self.workspace, self.request, "codex/run")
+
+        commands = [call.args[0] for call in self.runner._run_command.call_args_list]
+        self.assertEqual(
+            commands,
+            [
+                [
+                    "git",
+                    "remote",
+                    "set-url",
+                    "origin",
+                    "https://x-access-token:ghp@github.com/acme/app",
+                ],
+                ["git", "push", "-u", "origin", "codex/run"],
+            ],
+        )
+
+    def test_pull_conflict_aborts_rebase_and_does_not_push(self) -> None:
+        self.runner._git_output = MagicMock(  # type: ignore[method-assign]
+            return_value="abc123\trefs/heads/codex/run\n"
+        )
+        self.runner._run_command.side_effect = [None, ValueError("CONFLICT in app.py"), None]
+
+        with self.assertRaisesRegex(ValueError, "Could not synchronize branch"):
+            self.runner._push_branch(self.workspace, self.request, "codex/run")
+
+        commands = [call.args[0] for call in self.runner._run_command.call_args_list]
+        self.assertEqual(commands[-1], ["git", "rebase", "--abort"])
+        self.assertNotIn(["git", "push", "-u", "origin", "codex/run"], commands)
+
+
 class TestPublishDispatch(unittest.TestCase):
     def setUp(self) -> None:
         self.runner = CodexRunnerService()
