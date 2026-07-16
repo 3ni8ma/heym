@@ -119,7 +119,17 @@ class TestPushBranch(unittest.TestCase):
         self.runner._push_branch(self.workspace, self.request, "codex/run")
 
         commands = [call.args[0] for call in self.runner._run_command.call_args_list]
-        self.assertEqual(commands[1], ["git", "pull", "--rebase", "origin", "codex/run"])
+        self.assertEqual(
+            commands[1],
+            [
+                "git",
+                "pull",
+                "--rebase",
+                "--strategy-option=theirs",
+                "origin",
+                "codex/run",
+            ],
+        )
         self.assertEqual(commands[2], ["git", "push", "-u", "origin", "codex/run"])
 
     def test_new_remote_branch_skips_pull(self) -> None:

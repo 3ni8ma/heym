@@ -667,8 +667,18 @@ class CodexRunnerService:
         )
         if remote_branch.strip():
             try:
+                # During a rebase Git names the fetched branch "ours" and the commit being
+                # replayed "theirs". Prefer the just-completed Codex change for overlapping
+                # hunks while still retaining every non-conflicting remote update.
                 self._run_command(
-                    ["git", "pull", "--rebase", "origin", branch],
+                    [
+                        "git",
+                        "pull",
+                        "--rebase",
+                        "--strategy-option=theirs",
+                        "origin",
+                        branch,
+                    ],
                     cwd=workspace,
                     sensitive_values=sensitive_values,
                 )
