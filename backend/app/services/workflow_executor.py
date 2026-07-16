@@ -66,6 +66,8 @@ _DOTDICT_BUILTIN_METHOD_NAMES: frozenset[str] = frozenset(
 )
 _ITEM_DOT_PATH_RE = re.compile(r"^item(?:\.[a-zA-Z_][a-zA-Z0-9_]*)+$")
 _ITEM_REF_IN_TEMPLATE_RE = re.compile(r"item\.[a-zA-Z_][a-zA-Z0-9_]*\b(?!\()")
+_DOLLAR_NAME_RE = re.compile(r"\$([a-zA-Z_][a-zA-Z0-9_]*)")
+_ITEM_EXPRESSION_STRING_START_RE = re.compile(r"\.(?:distinctBy|distinct_by|filter|map|sort)\(\s*$")
 
 _SLUG_RE = re.compile(r"[^a-zA-Z0-9]+")
 _EXECUTION_CONTEXT_INPUT_KEY = "__heym_execution_context"
@@ -406,6 +408,65 @@ def _normalize_js_logical_ops_for_eval(processed: str) -> str:
 _SHARED_EXECUTOR = ThreadPoolExecutor(max_workers=8)
 
 _HTTP_CLIENT_LOCK = Lock()
+_EXPRESSION_EVAL_CONTEXT_LOCAL = local()
+
+
+@dataclass(frozen=True)
+class _ExpressionEvalContext:
+    names: dict[str, Any]
+    functions: dict[str, Any]
+    item_scope_depth: int
+
+
+def _get_expression_eval_context_stack() -> list[_ExpressionEvalContext]:
+    stack = getattr(_EXPRESSION_EVAL_CONTEXT_LOCAL, "stack", None)
+    if stack is None:
+        stack = []
+        _EXPRESSION_EVAL_CONTEXT_LOCAL.stack = stack
+    return stack
+
+
+def _current_expression_eval_context() -> _ExpressionEvalContext | None:
+    stack = getattr(_EXPRESSION_EVAL_CONTEXT_LOCAL, "stack", None)
+    if not stack:
+        return None
+    return stack[-1]
+
+
+def _is_inside_item_expression_string(text: str, index: int) -> bool:
+    """Return whether ``index`` is inside a quoted map/filter-style expression argument."""
+    quote: str | None = None
+    quote_start = -1
+    cursor = 0
+    while cursor < index:
+        char = text[cursor]
+        if quote is not None:
+            if char == "\\" and cursor + 1 < index:
+                cursor += 2
+                continue
+            if char == quote:
+                quote = None
+                quote_start = -1
+            cursor += 1
+            continue
+        if char in ('"', "'"):
+            quote = char
+            quote_start = cursor
+        cursor += 1
+
+    if quote is None or quote_start < 0:
+        return False
+    return bool(_ITEM_EXPRESSION_STRING_START_RE.search(text[:quote_start]))
+
+
+def _rewrite_item_expression_dollar_refs(expr: str, item_scope_name: str) -> str:
+    """Make DSL ``$`` references valid names inside a local item expression."""
+
+    def replace(match: re.Match[str]) -> str:
+        name = match.group(1)
+        return item_scope_name if name == "item" else name
+
+    return _DOLLAR_NAME_RE.sub(replace, expr)
 
 
 def _build_playwright_script(
@@ -796,6 +857,14 @@ class DotList(list):
 
         try:
             wrapped_item = _wrap_value(item)
+            inherited_context = _current_expression_eval_context()
+            inherited_names = dict(inherited_context.names) if inherited_context else {}
+            inherited_functions = (
+                dict(inherited_context.functions) if inherited_context else dict(DEFAULT_FUNCTIONS)
+            )
+            item_scope_depth = inherited_context.item_scope_depth if inherited_context else 0
+            item_scope_name = f"heymItemScope{item_scope_depth}"
+            expr = _rewrite_item_expression_dollar_refs(expr, item_scope_name)
 
             def resolve_item_ref(arg):
                 if not isinstance(arg, str):
@@ -832,15 +901,17 @@ class DotList(list):
                     return obj.get(key, default)
                 return getattr(obj, key, default) if hasattr(obj, key) else default
 
-            evaluator = HeymExpressionEval(
-                names={
+            inherited_names.update(
+                {
+                    item_scope_name: wrapped_item,
                     "item": wrapped_item,
                     "true": True,
                     "false": False,
                     "null": None,
-                },
-                functions={
-                    **DEFAULT_FUNCTIONS,
+                }
+            )
+            inherited_functions.update(
+                {
                     "len": len,
                     "str": str,
                     "int": int,
@@ -852,8 +923,13 @@ class DotList(list):
                     "round": round,
                     "concat": concat_func,
                     "get": get_func,
-                },
+                }
             )
+            evaluator = HeymExpressionEval(
+                names=inherited_names,
+                functions=inherited_functions,
+            )
+            evaluator.item_scope_depth = item_scope_depth + 1
             return evaluator.eval(expr)
         except Exception:
             return None
@@ -871,7 +947,9 @@ class DotList(list):
             isinstance(expr, str)
             and "item." in expr
             and not expr.strip().startswith("concat(")
-            and not _is_valid_expression_syntax(expr)
+            and not _is_valid_expression_syntax(
+                _rewrite_item_expression_dollar_refs(expr, "heymItemScope")
+            )
         ):
             # Keep supporting template-like strings such as
             # "- item.source (Page: item.page): item.snippet".
@@ -1322,6 +1400,22 @@ class DotDateTime:
 
 class HeymExpressionEval(EvalWithCompoundTypes):
     """simpleeval blocks ``.format`` on all objects; allow it only for ``DotDateTime``."""
+
+    item_scope_depth = 0
+
+    def eval(self, expr: str, previously_parsed: ast.AST | None = None) -> object:
+        """Evaluate while exposing names to nested ``map``/``filter`` item expressions."""
+        context = _ExpressionEvalContext(
+            names=dict(self.names) if isinstance(self.names, dict) else {},
+            functions=dict(self.functions),
+            item_scope_depth=self.item_scope_depth,
+        )
+        stack = _get_expression_eval_context_stack()
+        stack.append(context)
+        try:
+            return super().eval(expr, previously_parsed=previously_parsed)
+        finally:
+            stack.pop()
 
     def _eval_attribute(self, node: ast.Attribute):
         if node.attr == "orEmpty":
@@ -5777,7 +5871,10 @@ class WorkflowExecutor:
             spans = self._find_expressions(expr)
             if not spans:
                 break
+            replaced = False
             for start, end, dollar_expr in sorted(spans, key=lambda t: t[0], reverse=True):
+                if _is_inside_item_expression_string(expr, start):
+                    continue
                 resolved = self.resolve_expression(
                     dollar_expr, inputs, current_node_id, preserve_type=True
                 )
@@ -5792,6 +5889,9 @@ class WorkflowExecutor:
                 else:
                     replacement = str(resolved)
                 expr = expr[:start] + replacement + expr[end:]
+                replaced = True
+            if not replaced:
+                break
         return expr
 
     def resolve_expression(

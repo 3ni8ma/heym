@@ -822,6 +822,40 @@ class TestExpressionEvaluatorServiceEvaluate(unittest.TestCase):
         self.assertTrue(response.preserved_type)
         self.assertIsNone(response.error)
 
+    def test_nested_map_filter_resolves_outer_item_in_executor_and_preview(self) -> None:
+        expr = (
+            '$distinctTypes.types.map("dict(issue_type=item, '
+            "count=$dataTable.rows.filter('item.data.issue_type == $item').length)\")"
+        )
+        context = {
+            "distinctTypes": {"types": ["Quality Issue", "Sizing Issue", "Product Confusion"]},
+            "dataTable": {
+                "rows": [
+                    {"data": {"issue_type": "Quality Issue"}},
+                    {"data": {"issue_type": "Quality Issue"}},
+                    {"data": {"issue_type": "Sizing Issue"}},
+                ]
+            },
+        }
+        expected = [
+            {"issue_type": "Quality Issue", "count": 2},
+            {"issue_type": "Sizing Issue", "count": 1},
+            {"issue_type": "Product Confusion", "count": 0},
+        ]
+
+        executor_result = WorkflowExecutor(nodes=[], edges=[]).resolve_expression(
+            expr,
+            context,
+            preserve_type=True,
+        )
+        self.assertEqual(executor_result, expected)
+
+        response = self._service().evaluate(expr, context)
+        self.assertEqual(response.result, expected)
+        self.assertEqual(response.result_type, "array")
+        self.assertTrue(response.preserved_type)
+        self.assertIsNone(response.error)
+
     def test_array_map_string_method_call_matches_executor(self) -> None:
         expr = '$set.dates.map("item.substring(0, 5)")'
         ctx = {"set": {"dates": ["2026-06-13 00:20:33.463147+00:00"]}}

@@ -16,6 +16,7 @@ from app.db.models import CredentialType
 from app.http_identity import HEYM_USER_AGENT
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
+from app.services.openai_client import create_openai_client
 
 logger = logging.getLogger(__name__)
 
@@ -489,11 +490,10 @@ class LLMService:
     def _get_client(self) -> tuple[OpenAI, str]:
         """Get OpenAI client configured for the credential type."""
         if self.credential_type == CredentialType.google:
-            return OpenAI(
+            return create_openai_client(
                 api_key=self.api_key,
                 base_url=GOOGLE_OPENAI_BASE_URL,
                 timeout=self.request_timeout,
-                default_headers={"User-Agent": HEYM_USER_AGENT},
             ), "Google"
 
         if self.credential_type == CredentialType.custom:
@@ -502,22 +502,20 @@ class LLMService:
             base = self.base_url.rstrip("/")
             if not base.endswith("/v1"):
                 base = base + "/v1"
-            return OpenAI(
+            return create_openai_client(
                 api_key=self.api_key,
                 base_url=base,
                 timeout=self.request_timeout,
-                default_headers={"User-Agent": HEYM_USER_AGENT},
             ), "Custom"
 
         # OpenAI (default)
         client_kwargs: dict[str, Any] = {
             "api_key": self.api_key,
             "timeout": self.request_timeout,
-            "default_headers": {"User-Agent": HEYM_USER_AGENT},
         }
         if self.base_url:
             client_kwargs["base_url"] = self.base_url
-        return OpenAI(**client_kwargs), "OpenAI"
+        return create_openai_client(**client_kwargs), "OpenAI"
 
     def _record_trace(
         self,

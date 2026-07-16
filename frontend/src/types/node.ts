@@ -188,6 +188,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       timeoutSeconds: 3600,
       setupCommand: "",
       codexModel: "",
+      codexReasoningEffort: "medium",
     },
   },
   condition: {

@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import quote, urlparse, urlunparse
 
 from app.config import settings
+from app.services.codex_catalog import CODEX_REASONING_EFFORTS
 from app.services.github_service import GitHubService
 
 # OpenAI strict structured output requires every property to appear in `required` when
@@ -81,6 +82,7 @@ class CodexRunRequest:
     github_config: dict
     codex_auth: dict = field(default_factory=dict)
     model: str = ""
+    reasoning_effort: str = ""
 
 
 @dataclass(frozen=True)
@@ -99,6 +101,7 @@ class CodexResumeRequest:
     timeout_seconds: float
     codex_auth: dict = field(default_factory=dict)
     model: str = ""
+    reasoning_effort: str = ""
 
 
 @dataclass
@@ -300,6 +303,7 @@ class CodexRunnerService:
             resume_thread_id=None,
             codex_access_token=self._exec_token(request.codex_auth, request.codex_access_token),
             model=request.model,
+            reasoning_effort=request.reasoning_effort,
         )
         return self._finalize_result(result, workspace, request)
 
@@ -321,6 +325,7 @@ class CodexRunnerService:
             resume_thread_id=request.thread_id,
             codex_access_token=self._exec_token(request.codex_auth, request.codex_access_token),
             model=request.model,
+            reasoning_effort=request.reasoning_effort,
         )
         run_request = CodexRunRequest(
             repository_url=request.repository_url,
@@ -334,6 +339,7 @@ class CodexRunnerService:
             github_config=request.github_config,
             codex_auth=request.codex_auth,
             model=request.model,
+            reasoning_effort=request.reasoning_effort,
         )
         return self._finalize_result(result, workspace, run_request)
 
@@ -479,6 +485,7 @@ class CodexRunnerService:
         resume_thread_id: str | None,
         codex_access_token: str,
         model: str = "",
+        reasoning_effort: str = "",
     ) -> CodexRunResult:
         # Write the schema outside the repo (in CODEX_HOME) so it is never a git candidate.
         codex_home = self._codex_home_dir(workspace)
@@ -490,6 +497,9 @@ class CodexRunnerService:
             cmd.append("resume")
         if model.strip():
             cmd.extend(["--model", model.strip()])
+        effort = reasoning_effort.strip().lower()
+        if effort in CODEX_REASONING_EFFORTS:
+            cmd.extend(["-c", f'model_reasoning_effort="{effort}"'])
         cmd.extend(["--json", "--output-schema", str(schema_path)])
         # `codex exec` has no --ask-for-approval flag; set the policy via config override so it
         # runs autonomously without prompting.
