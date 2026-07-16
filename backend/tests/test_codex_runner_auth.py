@@ -144,7 +144,9 @@ class TestCodexRunnerAuth(unittest.TestCase):
         self.assertNotIn("model_reasoning_effort", self._run_exec_with(""))
 
     def test_reasoning_effort_rejects_invalid_values(self) -> None:
-        self.assertNotIn("model_reasoning_effort", self._run_exec_with("", reasoning_effort="bogus"))
+        self.assertNotIn(
+            "model_reasoning_effort", self._run_exec_with("", reasoning_effort="bogus")
+        )
 
     def test_exec_uses_valid_flags(self) -> None:
         # codex exec has no --ask-for-approval flag; approval is set via config override.
