@@ -1106,6 +1106,62 @@ class TestExpressionEvaluatorServiceEvaluate(unittest.TestCase):
         response = self._service().evaluate("$data.text.upper()", {"data": {"text": "hello"}})
         self.assertEqual(response.result, "HELLO")
 
+    def test_base64_functions_encode_and_decode_ascii(self) -> None:
+        encoded = self._service().evaluate('$base64Encode("hello")', {})
+        decoded = self._service().evaluate('$base64Decode("aGVsbG8=")', {})
+
+        self.assertEqual(encoded.result, "aGVsbG8=")
+        self.assertEqual(decoded.result, "hello")
+        self.assertIsNone(encoded.error)
+        self.assertIsNone(decoded.error)
+
+    def test_base64_functions_support_utf8(self) -> None:
+        context = {
+            "data": {
+                "text": "Héym 🌍",
+                "encoded": "SMOpeW0g8J+MjQ==",
+            }
+        }
+
+        encoded = self._service().evaluate("$base64Encode($data.text)", context)
+        decoded = self._service().evaluate("$base64Decode($data.encoded)", context)
+
+        self.assertEqual(encoded.result, "SMOpeW0g8J+MjQ==")
+        self.assertEqual(decoded.result, "Héym 🌍")
+        self.assertIsNone(encoded.error)
+        self.assertIsNone(decoded.error)
+
+    def test_base64_functions_handle_empty_strings(self) -> None:
+        encoded = self._service().evaluate('$base64Encode("")', {})
+        decoded = self._service().evaluate('$base64Decode("")', {})
+
+        self.assertEqual(encoded.result, "")
+        self.assertEqual(decoded.result, "")
+        self.assertIsNone(encoded.error)
+        self.assertIsNone(decoded.error)
+
+    def test_base64_string_methods_round_trip_embedded_null(self) -> None:
+        response = self._service().evaluate(
+            "$data.text.base64Encode().base64Decode()",
+            {"data": {"text": "\x00binaryÿ"}},
+        )
+
+        self.assertEqual(response.result, "\x00binaryÿ")
+        self.assertIsNone(response.error)
+
+    def test_base64_decode_rejects_invalid_input(self) -> None:
+        response = self._service().evaluate('$base64Decode("not-base64!")', {})
+
+        self.assertIsNone(response.result)
+        self.assertIn("valid Base64-encoded UTF-8 text", response.error or "")
+
+    def test_base64_functions_require_string_input(self) -> None:
+        encoded = self._service().evaluate("$base64Encode(123)", {})
+        decoded = self._service().evaluate("$base64Decode(123)", {})
+
+        self.assertIn("requires a string", encoded.error or "")
+        self.assertIn("requires a string", decoded.error or "")
+
     def test_string_method_or_empty_preserves_string(self) -> None:
         response = self._service().evaluate("$data.text.orEmpty()", {"data": {"text": "hello"}})
         self.assertEqual(response.result, "hello")

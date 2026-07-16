@@ -122,7 +122,7 @@ A workflow consists of nodes (operations) and edges (connections between nodes).
 - **⛔ ABSOLUTE BAN:** The following names (and all their case variations, including uppercase/lowercase/mixed-case) are STRICTLY FORBIDDEN as either node names or parameter names:
   - **"result" and "results"** (e.g., `result`, `results`, `Result`, `Results`, `RESULT`, `RESULTS`). These cause critical system conflicts and must never be used anywhere.
   - System fields: `headers`, `query`, `value`, `list`, `array`, `vars`, `items`, `name`, `type`, `input`, `now`, `date`, `workflowName`, `workflowDescription`, `workflowUrl`, `workflowPath`, `executionId`
-  - String methods: `length`, `orEmpty`, `toString`, `toUpperCase`, `toLowerCase`, `substring`, `indexOf`, `contains`, `startsWith`, `endsWith`, `replace`, `replaceAll`, `regexReplace`, `hash`
+  - String methods: `length`, `orEmpty`, `toString`, `toUpperCase`, `toLowerCase`, `substring`, `indexOf`, `contains`, `startsWith`, `endsWith`, `replace`, `replaceAll`, `regexReplace`, `hash`, `base64Encode`, `base64Decode`
   - Array methods: `first`, `last`, `random`, `reverse`, `distinct`, `notNull`, `filter`, `map`, `sort`, `join`
   - HTTP fields: `status`, `body`
   - Execution/Workflow fields: `outputs`, `result`, `status`, `workflow_id` (and when `executeDoNotWait: true`, specifically `status`, `workflow_id`)
@@ -1532,7 +1532,7 @@ Notes:
 **⚠️ RESERVED VARIABLE NAMES**: The following names are RESERVED and CANNOT be used as `variableName`:
 - **⛔ ABSOLUTE BAN**: `result` and `results` are reserved and CANNOT be used as variable names!
 - System fields: `headers`, `query`, `value`, `list`, `array`, `vars`, `items`, `name`, `type`, `length`, `input`, `now`, `date`, `workflowName`, `workflowDescription`, `workflowUrl`, `workflowPath`, `executionId`
-- String methods: `orEmpty`, `toString`, `toUpperCase`, `toLowerCase`, `substring`, `indexOf`, `contains`, `startswith`, `endswith`, `replace`, `replaceAll`, `regexReplace`, `hash`
+- String methods: `orEmpty`, `toString`, `toUpperCase`, `toLowerCase`, `substring`, `indexOf`, `contains`, `startswith`, `endswith`, `replace`, `replaceAll`, `regexReplace`, `hash`, `base64Encode`, `base64Decode`
 - Array methods: `first`, `last`, `random`, `reverse`, `distinct`, `notNull`, `join`
 - HTTP response fields: `status`, `body`
 - Execute node fields: `outputs`, `result`, `status`, `workflow_id`
@@ -3697,6 +3697,8 @@ Create objects/dictionaries directly using curly brace syntax with any string ke
 - `join(separator, list)` - Join list
 - `replace(text, old, new)` - Replace text
 - `regexReplace(text, pattern, replacement)` - Replace with regex pattern
+- `base64Encode(text)` - Encode UTF-8 text as standard Base64
+- `base64Decode(text)` - Decode standard Base64 as UTF-8 text
 
 ### String Methods (on string values)
 - `.orEmpty()` - Return the string value, or `""` when the value is null/missing
@@ -3713,6 +3715,8 @@ Create objects/dictionaries directly using curly brace syntax with any string ke
 - `.replaceAll(old, new)` - Replace all occurrences
 - `.regexReplace(pattern, replacement)` - Replace with regex pattern
 - `.hash()` - MD5 hash of the string
+- `.base64Encode()` - Encode UTF-8 text as standard Base64
+- `.base64Decode()` - Decode standard Base64 as UTF-8 text
 - `.urlEncode()` - URL encode the string
 - `.urlDecode()` - URL decode the string
 
@@ -3834,7 +3838,7 @@ For boolean values, use them directly without `== true`:
 **For complex iteration logic, use the `loop` node!**
 
 **If a function is NOT in the documentation above, it DOES NOT EXIST!**
-Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `len()`, `abs()`, `min()`, `max()`, `round()`, `sum()`, `sorted()`, `randomInt()`, `range()`, `array()`, `notNull()`, `upper()`, `lower()`, `strip()`, `capitalize()`, `title()`, `split()`, `join()`, `replace()`, `regexReplace()`, `hash()`, and the documented string/array/object methods.
+Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `len()`, `abs()`, `min()`, `max()`, `round()`, `sum()`, `sorted()`, `randomInt()`, `range()`, `array()`, `notNull()`, `upper()`, `lower()`, `strip()`, `capitalize()`, `title()`, `split()`, `join()`, `replace()`, `regexReplace()`, `hash()`, `base64Encode()`, `base64Decode()`, and the documented string/array/object methods.
 
 ### 35. s3 (Amazon S3 Operations)
 - **Type**: `s3`
