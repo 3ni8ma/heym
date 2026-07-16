@@ -493,6 +493,7 @@ class LLMService:
                 api_key=self.api_key,
                 base_url=GOOGLE_OPENAI_BASE_URL,
                 timeout=self.request_timeout,
+                default_headers={"User-Agent": HEYM_USER_AGENT},
             ), "Google"
 
         if self.credential_type == CredentialType.custom:
@@ -505,10 +506,15 @@ class LLMService:
                 api_key=self.api_key,
                 base_url=base,
                 timeout=self.request_timeout,
+                default_headers={"User-Agent": HEYM_USER_AGENT},
             ), "Custom"
 
         # OpenAI (default)
-        client_kwargs: dict[str, Any] = {"api_key": self.api_key, "timeout": self.request_timeout}
+        client_kwargs: dict[str, Any] = {
+            "api_key": self.api_key,
+            "timeout": self.request_timeout,
+            "default_headers": {"User-Agent": HEYM_USER_AGENT},
+        }
         if self.base_url:
             client_kwargs["base_url"] = self.base_url
         return OpenAI(**client_kwargs), "OpenAI"
