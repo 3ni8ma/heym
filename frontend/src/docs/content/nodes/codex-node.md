@@ -30,6 +30,7 @@ OpenAI references:
 
 - [Codex authentication](https://developers.openai.com/codex/auth)
 - [Codex access tokens](https://developers.openai.com/codex/enterprise/access-tokens)
+- [Codex models](https://learn.chatgpt.com/docs/models?surface=cli)
 - [Codex non-interactive mode](https://developers.openai.com/codex/noninteractive)
 - [Codex pricing](https://developers.openai.com/codex/pricing)
 
@@ -41,7 +42,8 @@ OpenAI references:
 | GitHub Credential | GitHub PAT credential used for repository access |
 | Repository URL | HTTPS GitHub repository URL |
 | Base Branch | Branch to clone before Codex runs, default `main` |
-| Model | Optional Codex model (editable dropdown, e.g. `gpt-5.4`); empty uses Codex's default |
+| Model | Optional Codex model (editable dropdown, e.g. `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`); empty uses Codex's default |
+| Reasoning Effort | Codex reasoning depth: `low`, `medium`, `high`, `xhigh` (Extra High), `max`, or `ultra` (default `medium`) |
 | Task Prompt | Coding task for Codex; supports expressions such as `$input.text` |
 | Publish Mode | How changes are delivered (see table below) |
 | Branch Name | Working branch for PR/commit modes, default `codex/$executionId` |
