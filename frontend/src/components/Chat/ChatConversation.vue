@@ -442,9 +442,21 @@ function handleChatScrollbarPointerUp(): void {
 
 function focusInputWhenReady(): void {
   nextTick(() => {
-    if (canFocusInput.value) {
-      chatInputRef.value?.focus();
+    if (!canFocusInput.value) return;
+    // Do not steal focus from sidebar rename/edit fields (or any other input).
+    // Credential/model bootstrap flips canFocusInput after New Chat and would
+    // otherwise blur an in-progress list rename and cancel the edit.
+    const active = document.activeElement;
+    if (
+      active instanceof HTMLElement &&
+      active !== chatInputRef.value &&
+      (active.tagName === "INPUT" ||
+        active.tagName === "TEXTAREA" ||
+        active.isContentEditable)
+    ) {
+      return;
     }
+    chatInputRef.value?.focus();
   });
 }
 
