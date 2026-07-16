@@ -1,5 +1,7 @@
 import ast
 import asyncio
+import base64
+import binascii
 import copy
 import gc
 import hashlib
@@ -194,6 +196,24 @@ def _build_agent_execution_log_output(agent_result: dict) -> dict:
 
 class ExpressionFunctionError(ValueError):
     """Raised by expression functions to stop workflow execution."""
+
+
+def _base64_encode_text(value: object) -> str:
+    if not isinstance(value, str):
+        raise ExpressionFunctionError("$base64Encode(text) requires a string")
+    return base64.b64encode(value.encode("utf-8")).decode("ascii")
+
+
+def _base64_decode_text(value: object) -> str:
+    if not isinstance(value, str):
+        raise ExpressionFunctionError("$base64Decode(text) requires a string")
+    try:
+        decoded = base64.b64decode(value.encode("ascii"), validate=True)
+        return decoded.decode("utf-8")
+    except (binascii.Error, UnicodeError) as exc:
+        raise ExpressionFunctionError(
+            "$base64Decode(text) requires valid Base64-encoded UTF-8 text"
+        ) from exc
 
 
 class NodeTraceableExecutionError(ValueError):
@@ -1150,6 +1170,18 @@ class DotStr(str):
 
     def hash(self) -> "DotStr":
         return DotStr(hashlib.md5(self.encode("utf-8")).hexdigest())
+
+    def base64Encode(self) -> "DotStr":  # noqa: N802
+        return DotStr(_base64_encode_text(self))
+
+    def base64_encode(self) -> "DotStr":
+        return self.base64Encode()
+
+    def base64Decode(self) -> "DotStr":  # noqa: N802
+        return DotStr(_base64_decode_text(self))
+
+    def base64_decode(self) -> "DotStr":
+        return self.base64Decode()
 
     def urlEncode(self) -> "DotStr":  # noqa: N802
         return DotStr(quote(self, safe=""))
@@ -5766,6 +5798,8 @@ class WorkflowExecutor:
             "strip": lambda s: s.strip() if isinstance(s, str) else s,
             "capitalize": lambda s: s.capitalize() if isinstance(s, str) else s,
             "title": lambda s: s.title() if isinstance(s, str) else s,
+            "base64Encode": lambda s: DotStr(_base64_encode_text(s)),
+            "base64Decode": lambda s: DotStr(_base64_decode_text(s)),
             "split": lambda s, sep=None: (
                 DotList(list(s) if sep == "" else s.split(sep)) if isinstance(s, str) else s
             ),
@@ -6021,6 +6055,8 @@ class WorkflowExecutor:
                     "notNull": lambda lst: (
                         DotList([x for x in lst if x is not None]) if isinstance(lst, list) else lst
                     ),
+                    "base64Encode": lambda value: DotStr(_base64_encode_text(value)),
+                    "base64Decode": lambda value: DotStr(_base64_decode_text(value)),
                 }
                 if func_name in functions:
                     args = []
@@ -6045,6 +6081,8 @@ class WorkflowExecutor:
                 "capitalize": lambda s: s.capitalize(),
                 "title": lambda s: s.title(),
                 "length": lambda s: len(s),
+                "base64Encode": _base64_encode_text,
+                "base64Decode": _base64_decode_text,
                 "urlEncode": lambda s: quote(s, safe=""),
                 "urlDecode": lambda s: unquote(s),
                 "escape": lambda s: json.dumps(s),
