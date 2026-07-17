@@ -948,7 +948,7 @@ onUnmounted(() => {
       <div class="flex flex-col sm:flex-row gap-2 sm:gap-2 sm:flex-nowrap sm:items-end">
         <div class="grid grid-cols-2 gap-2 sm:flex sm:items-end sm:gap-2 flex-1 min-w-0">
           <div
-            class="chat-select-wrap flex flex-col min-w-0 sm:max-w-[140px]"
+            class="chat-select-wrap flex flex-col min-w-0 sm:max-w-[200px]"
             data-testid="chat-credential-selector"
           >
             <SearchableSelect
@@ -965,7 +965,7 @@ onUnmounted(() => {
           </div>
 
           <div
-            class="chat-select-wrap flex flex-col min-w-0 sm:max-w-[160px]"
+            class="chat-select-wrap flex flex-col min-w-0 sm:max-w-[200px]"
             data-testid="chat-model-selector"
           >
             <SearchableSelect
