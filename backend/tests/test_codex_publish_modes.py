@@ -59,6 +59,7 @@ class TestPublishModeConstants(unittest.TestCase):
         self.assertIn("Do NOT run git", prompt)
         self.assertIn("GitHub API", prompt)
         self.assertIn("Heym performs every git", prompt)
+        self.assertIn("frontend/.e2e-artifacts/", prompt)
         self.assertIn("translate the readme", prompt)
 
     def test_resume_prompt_forbids_git_and_github(self) -> None:
