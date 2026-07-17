@@ -844,7 +844,9 @@ onUnmounted(() => window.removeEventListener("keydown", handleCreateDialogEscape
             <p
               v-if="selectedTable.description"
               class="min-w-0 truncate text-sm leading-tight text-muted-foreground"
-            >{{ selectedTable.description }}</p>
+            >
+              {{ selectedTable.description }}
+            </p>
           </div>
         </div>
         <div class="flex max-w-full items-center gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch] sm:overflow-visible sm:pb-0">

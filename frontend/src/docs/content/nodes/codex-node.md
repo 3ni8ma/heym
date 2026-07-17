@@ -78,6 +78,10 @@ OpenAI references:
 | `patchUrl` | Download link for the diff in `patch_artifact` mode |
 | `usage` | Usage metadata reported by Codex CLI when available |
 
+## UI screenshots on pull requests
+
+For UI/frontend tasks, Codex should save PNG screenshots under a gitignored path such as `frontend/.e2e-artifacts/` (not in source). After Heym opens or updates the pull request, it uploads those images to a single shared GitHub **prerelease** (`codex-pr-assets`) as assets named `pr-<number>-…`, then embeds them in the PR description. 
+
 ## Follow-up Questions
 
 If Codex needs missing requirements or a product decision, it returns `needs_input`. Heym pauses the execution and exposes a `question` output handle. Connect that handle to a notification branch, for example Slack or Send Email, to send the reviewer the public follow-up link.
