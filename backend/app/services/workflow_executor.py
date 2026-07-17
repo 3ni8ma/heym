@@ -431,6 +431,28 @@ _HTTP_CLIENT_LOCK = Lock()
 _EXPRESSION_EVAL_CONTEXT_LOCAL = local()
 
 
+def _submit_allow_downstream_work(work: Callable[[], None]) -> Future:
+    """Run allowDownstream finalization off the shared node pool.
+
+    The waiter must not occupy a ``_SHARED_EXECUTOR`` worker: it blocks on other
+    pool futures, and scheduling it on the same pool can deadlock when workers
+    are saturated by long-running / blocked side branches.
+    """
+    future: Future = Future()
+
+    def _runner() -> None:
+        if future.set_running_or_notify_cancel():
+            try:
+                work()
+            except BaseException as exc:
+                future.set_exception(exc)
+            else:
+                future.set_result(None)
+
+    Thread(target=_runner, daemon=True, name="heym-allow-downstream").start()
+    return future
+
+
 @dataclass(frozen=True)
 class _ExpressionEvalContext:
     names: dict[str, Any]
@@ -2424,6 +2446,20 @@ class WorkflowExecutor:
     def _restore_internal_trace_id(output: dict[str, Any], trace_id: str | None) -> None:
         if trace_id:
             output["_trace_id"] = trace_id
+
+    def _is_early_return_node(self, node_id: str) -> bool:
+        """True when this node may complete the workflow before siblings finish."""
+        node = self.nodes.get(node_id, {})
+        node_type = node.get("type")
+        if node_type == "chartOutput" and self.return_on_chart_output:
+            return True
+        if node_type == "output" and node.get("data", {}).get("allowDownstream"):
+            return True
+        return False
+
+    def _prioritize_ready_node_ids(self, node_ids: list[str]) -> list[str]:
+        """Schedule early-return nodes ahead of siblings so they are not starved."""
+        return sorted(node_ids, key=lambda nid: 0 if self._is_early_return_node(nid) else 1)
 
     def get_input_nodes(self) -> list[str]:
         error_flow_nodes = self.get_error_flow_nodes()
@@ -7514,6 +7550,7 @@ class WorkflowExecutor:
                     completed_nodes=completed_nodes,
                     pending_count=pending_count,
                 )
+            ready_targets: list[str] = []
             for edge in active_edges:
                 if edge["source"] == source_node_id:
                     if self._source_handle_is_skipped(edge, skip_source_handles):
@@ -7569,13 +7606,19 @@ class WorkflowExecutor:
                         else:
                             already_running = any(nid == target for nid in running_futures.values())
                             if not already_running:
-                                inputs = self.get_node_inputs_for_edges(target, active_edges)
-                                new_future = _SHARED_EXECUTOR.submit(
-                                    self.execute_node_parallel, target, inputs
-                                )
-                                running_futures[new_future] = target
+                                ready_targets.append(target)
 
-        root_nodes = [nid for nid, count in pending_count.items() if count == 0]
+            for target in self._prioritize_ready_node_ids(ready_targets):
+                already_running = any(nid == target for nid in running_futures.values())
+                if already_running:
+                    continue
+                inputs = self.get_node_inputs_for_edges(target, active_edges)
+                new_future = _SHARED_EXECUTOR.submit(self.execute_node_parallel, target, inputs)
+                running_futures[new_future] = target
+
+        root_nodes = self._prioritize_ready_node_ids(
+            [nid for nid, count in pending_count.items() if count == 0]
+        )
         for node_id in root_nodes:
             self.check_cancelled()
             if node_id in self.skipped_nodes:
@@ -7735,7 +7778,9 @@ class WorkflowExecutor:
                                     completed_nodes.add(nid)
                         self.drain_bg_futures()
 
-                    allow_downstream_future = _SHARED_EXECUTOR.submit(run_remaining_downstream)
+                    allow_downstream_future = _submit_allow_downstream_work(
+                        run_remaining_downstream
+                    )
                     break
 
         if pending_result is not None:
@@ -8078,6 +8123,7 @@ def resume_workflow_execution(
                 completed_nodes=completed_nodes,
                 pending_count=pending_count,
             )
+        ready_targets: list[str] = []
         for edge in active_edges:
             if edge["source"] == source_node_id:
                 if wf_executor._source_handle_is_skipped(edge, skip_source_handles):
@@ -8138,12 +8184,20 @@ def resume_workflow_execution(
                             for pending_node_id in running_futures.values()
                         )
                         if not already_running:
-                            new_future = _SHARED_EXECUTOR.submit(
-                                wf_executor.execute_node_parallel,
-                                target,
-                                wf_executor.get_node_inputs_for_edges(target, active_edges),
-                            )
-                            running_futures[new_future] = target
+                            ready_targets.append(target)
+
+        for target in wf_executor._prioritize_ready_node_ids(ready_targets):
+            already_running = any(
+                pending_node_id == target for pending_node_id in running_futures.values()
+            )
+            if already_running:
+                continue
+            new_future = _SHARED_EXECUTOR.submit(
+                wf_executor.execute_node_parallel,
+                target,
+                wf_executor.get_node_inputs_for_edges(target, active_edges),
+            )
+            running_futures[new_future] = target
 
     with pending_lock:
         if hitl_resume_mode in {"rerun_agent", "continue_agent"}:
@@ -8275,7 +8329,7 @@ def resume_workflow_execution(
                             if not skip_add_to_completed:
                                 completed_nodes.add(nid)
 
-                _SHARED_EXECUTOR.submit(run_remaining_downstream)
+                _submit_allow_downstream_work(run_remaining_downstream)
                 break
 
     if pending_result is not None:
