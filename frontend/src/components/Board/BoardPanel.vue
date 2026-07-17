@@ -144,7 +144,7 @@ function closeErrorHistory(): void {
       <!-- SearchableSelect's root is w-full, so its wrapper controls the responsive width. -->
       <div
         v-if="boardStore.boards.length"
-        class="order-last w-full shrink-0 sm:order-none sm:ml-auto sm:w-56"
+        class="order-last w-full shrink-0 sm:order-none sm:ml-auto sm:w-auto sm:min-w-[200px]"
       >
         <!-- Keyed on the name: the combobox caches its display value, so a rename only
              shows up if the select is rebuilt. -->
