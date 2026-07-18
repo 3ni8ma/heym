@@ -101,6 +101,45 @@ class CustomCodeGateTests(unittest.TestCase):
                 executor._execute_playwright_node(node_data, {}, "pw1", "safe")
         self.assertIn("REACHED_SINK", str(ctx.exception))
 
+    def test_playwright_mode_code_uses_custom_code_even_when_steps_exist(self) -> None:
+        """UI Mode=Run Code must prefer playwrightCode over leftover steps."""
+        node_data = {
+            "label": "rce",
+            "playwrightMode": "code",
+            "playwrightCode": "print('hi')",
+            "playwrightSteps": [{"action": "navigate", "url": "https://example.com"}],
+        }
+        executor = _executor(node_data)
+        with (
+            patch.object(settings, "playwright_custom_code_enabled", True),
+            patch.dict(os.environ, {"HEYM_PLAYWRIGHT_SANDBOX": "auto"}),
+            patch("subprocess.Popen", side_effect=AssertionError("must not run in-process")),
+            patch.object(
+                playwright_sandbox,
+                "run_script",
+                return_value=(0, '{"status": "ok", "results": {"via": "code"}}', ""),
+            ) as mock_run,
+        ):
+            result = executor._execute_playwright_node(node_data, {}, "pw1", "rce")
+        mock_run.assert_called_once()
+        self.assertEqual(result["results"]["via"], "code")
+
+    def test_playwright_mode_steps_ignores_playwright_code(self) -> None:
+        node_data = {
+            "label": "safe",
+            "playwrightMode": "steps",
+            "playwrightCode": "print('should not run')",
+            "playwrightSteps": [{"action": "navigate", "url": "https://example.com"}],
+        }
+        executor = _executor(node_data)
+        with (
+            patch.object(settings, "playwright_custom_code_enabled", False),
+            patch("subprocess.Popen", side_effect=RuntimeError("REACHED_SINK")),
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                executor._execute_playwright_node(node_data, {}, "pw1", "safe")
+        self.assertIn("REACHED_SINK", str(ctx.exception))
+
 
 class GeneratorInjectionTests(unittest.TestCase):
     def test_boolean_fields_cannot_inject_python(self) -> None:
@@ -207,6 +246,37 @@ class PlaywrightSandboxHardeningTests(unittest.TestCase):
             cmd = playwright_sandbox.build_docker_command("img", "n")
         self.assertIn("--user", cmd)
         self.assertIn("65534:65534", cmd)
+
+    def test_resolve_image_falls_back_to_codex_docker_image(self) -> None:
+        # Compose and the GHCR release image set HEYM_CODEX_DOCKER_IMAGE; Playwright
+        # must reuse it so resolution does not depend on docker inspect.
+        with patch.dict(
+            os.environ,
+            {
+                "HEYM_PLAYWRIGHT_SANDBOX_IMAGE": "",
+                "HEYM_CODEX_DOCKER_IMAGE": "ghcr.io/heymrun/heym:1.2.3",
+            },
+            clear=False,
+        ):
+            self.assertEqual(
+                playwright_sandbox._resolve_image(),
+                "ghcr.io/heymrun/heym:1.2.3",
+            )
+
+    def test_sandbox_python_prefers_release_layout_when_present(self) -> None:
+        with (
+            patch.dict(os.environ, {"HEYM_PLAYWRIGHT_SANDBOX_PYTHON": ""}, clear=False),
+            patch.object(playwright_sandbox.sys, "executable", "/usr/bin/python3"),
+            patch.object(
+                playwright_sandbox.os.path,
+                "isfile",
+                side_effect=lambda p: p == "/app/backend/.venv/bin/python",
+            ),
+        ):
+            self.assertEqual(
+                playwright_sandbox._sandbox_python(),
+                "/app/backend/.venv/bin/python",
+            )
 
 
 if __name__ == "__main__":

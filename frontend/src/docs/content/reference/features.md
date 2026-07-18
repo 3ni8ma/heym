@@ -334,7 +334,7 @@ Pairs with [HTTP](../nodes/http-node.md), [Playwright](../nodes/playwright-node.
 
 #### [Playwright](../nodes/playwright-node.md)
 
-The Playwright node automates browser interactions with configurable steps (navigate, click, type, screenshot, extract, aiStep). It supports custom Playwright code, headless mode, timeouts, optional network capture (responses, cookies, localStorage, sessionStorage), cookie/storageState auth bootstrap from [Global Variables](./global-variables.md) expressions such as `$global.authState`, fallback login steps when auth restore fails, and an AI step with Auto Heal when selectors fail. Use it for web scraping, form filling, and browser-based workflows.
+The Playwright node automates browser interactions with configurable steps (navigate, click, type, screenshot, extract, aiStep) or **Run Code** mode for custom Playwright Python (sandboxed; off by default via `HEYM_PLAYWRIGHT_CUSTOM_CODE_ENABLED`). It supports headless mode, timeouts, optional network capture (responses, cookies, localStorage, sessionStorage), cookie/storageState auth bootstrap from [Global Variables](./global-variables.md) expressions such as `$global.authState`, fallback login steps when auth restore fails, and an AI step with Auto Heal when selectors fail. Use it for web scraping, form filling, and browser-based workflows.
 
 See also [Crawler](../nodes/crawler-node.md), [HTTP](../nodes/http-node.md), and [Execution History](./execution-history.md) for browser automation and debugging.
 

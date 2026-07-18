@@ -80,6 +80,17 @@ lifetimes) that override these code defaults when you copy it.
 
 > While the guard is on, MCP HTTP/SSE tool fetches connect directly (they do not honor `HTTP_PROXY`/`HTTPS_PROXY`) so the pinned target IP is authoritative, matching the Drive download guard.
 
+## Playwright custom code sandbox
+
+The Playwright node's **Run Code** mode (`playwrightCode`) is off by default. When enabled it runs in a hardened throwaway sibling container (Compose / GHCR) or, for native `./run.sh`, falls back to `subprocess`. Step-based Playwright nodes are unaffected.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `HEYM_PLAYWRIGHT_CUSTOM_CODE_ENABLED` | Allow executing custom `playwrightCode` / Run Code mode. | `false` |
+| `HEYM_PLAYWRIGHT_SANDBOX` | `auto`/`docker` (sibling container, fail-closed) or `subprocess` (in-process; trusted/local only). `./run.sh` sets `subprocess` when no image is configured. | `auto` |
+| `HEYM_PLAYWRIGHT_SANDBOX_IMAGE` | Sibling runner image. Compose defaults to `heym-backend:local`; GHCR release image defaults to `ghcr.io/heymrun/heym:<version>`. Empty falls back to `HEYM_CODEX_DOCKER_IMAGE`, then container inspect. | — |
+| `HEYM_PLAYWRIGHT_SANDBOX_PYTHON` | Interpreter inside the sibling image. Empty auto-detects `/app/backend/.venv/bin/python` (GHCR) or `/app/.venv/bin/python` (Compose). | auto |
+
 ## Agent Python tool sandbox
 
 | Variable | Description | Default |

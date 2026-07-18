@@ -203,6 +203,8 @@ docker run --rm \
 
 > **Skill sandbox.** Python skills on the Agent node run in a hardened sibling container that shares the `heym-codex-workspaces` volume, so keep that volume mount for skills too — not just Codex. Each run gets an isolated per-run subpath, and the sibling receives neither the Docker socket nor backend secrets. This needs **Docker Engine 25.0+**; on older engines, or without the volume, `HEYM_PYTHON_TOOL_SANDBOX=auto` fails closed — set `HEYM_PYTHON_TOOL_SANDBOX=subprocess` only for trusted single-user setups. See [Security](../reference/security.md#skill-sandbox).
 
+> **Playwright Run Code.** Custom Playwright Python needs `HEYM_PLAYWRIGHT_CUSTOM_CODE_ENABLED=true` and the Docker socket mount above. The release image sets `HEYM_PLAYWRIGHT_SANDBOX_IMAGE` / `HEYM_PLAYWRIGHT_SANDBOX_PYTHON` for the GHCR layout (`/app/backend/.venv`). Compose `./deploy.sh` defaults the sandbox image to `heym-backend:local`. Keep `--no-sandbox` in Chromium launch args inside sandbox containers.
+
 **Minimum environment variables for direct image runs:**
 
 | Variable | Required | Purpose |

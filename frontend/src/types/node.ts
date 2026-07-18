@@ -823,6 +823,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
     outputs: 1,
     defaultData: {
       label: "playwright",
+      playwrightMode: "steps",
       playwrightSteps: [],
       playwrightCode: "",
       playwrightHeadless: true,

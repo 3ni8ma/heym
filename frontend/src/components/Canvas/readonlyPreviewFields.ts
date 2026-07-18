@@ -65,6 +65,7 @@ const SELECT_FIELDS = new Set([
   "vectorStoreId",
   "bqOperation",
   "gsOperation",
+  "playwrightMode",
 ]);
 
 const FIELD_LABELS: Record<string, string> = {
@@ -105,6 +106,7 @@ const FIELD_LABELS: Record<string, string> = {
   driveOperation: "Drive Operation",
   vectorStoreId: "Vector Store",
   arrayExpression: "Array Expression",
+  playwrightMode: "Mode",
   playwrightCode: "Code",
   playwrightHeadless: "Headless",
   playwrightTimeout: "Timeout (ms)",

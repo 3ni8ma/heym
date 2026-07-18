@@ -34,11 +34,18 @@ import logging
 import os
 import socket
 import subprocess
+import sys
 import uuid
 
 logger = logging.getLogger(__name__)
 
 _docker_available_cache: bool | None = None
+
+# Compose backend image layout vs single-container GHCR release layout.
+_DEFAULT_SANDBOX_PYTHONS = (
+    "/app/backend/.venv/bin/python",
+    "/app/.venv/bin/python",
+)
 
 
 class PlaywrightSandboxUnavailableError(RuntimeError):
@@ -71,9 +78,38 @@ def _docker_available() -> bool:
     return _docker_available_cache
 
 
+def _sandbox_python() -> str:
+    """Python interpreter path inside the sibling sandbox image.
+
+    Compose backend images use ``/app/.venv/...``; the single GHCR release image
+    keeps the backend under ``/app/backend/.venv/...``. Prefer an explicit
+    override, then any ``/app/...`` interpreter that exists in *this* container
+    (same layout as the sibling), then known defaults.
+    """
+    override = os.environ.get("HEYM_PLAYWRIGHT_SANDBOX_PYTHON", "").strip()
+    if override:
+        return override
+    exe = (sys.executable or "").strip()
+    if exe.startswith("/app/") and os.path.isfile(exe):
+        return exe
+    for candidate in _DEFAULT_SANDBOX_PYTHONS:
+        if os.path.isfile(candidate):
+            return candidate
+    return _DEFAULT_SANDBOX_PYTHONS[-1]
+
+
 def _resolve_image() -> str | None:
-    """Resolve the image to run scripts in: explicit override, else this container's image."""
-    override = os.environ.get("HEYM_PLAYWRIGHT_SANDBOX_IMAGE", "").strip()
+    """Resolve the image to run scripts in.
+
+    Prefers an explicit override, then the Codex/OpenCode runner image (Compose
+    and the GHCR release image already set ``HEYM_CODEX_DOCKER_IMAGE`` to the
+    backend image), and finally ``docker inspect`` of this container. Env
+    fallbacks matter because inspect is not reliable in every deployment.
+    """
+    override = (
+        os.environ.get("HEYM_PLAYWRIGHT_SANDBOX_IMAGE", "").strip()
+        or os.environ.get("HEYM_CODEX_DOCKER_IMAGE", "").strip()
+    )
     if override:
         return override
     try:
@@ -142,11 +178,11 @@ def build_docker_command(image: str, name: str) -> list[str]:
     if user:
         cmd += ["--user", user]
     cmd += [
-        # entrypoint.sh starts uvicorn and ignores args, so override it to run python
-        # reading the streamed script from stdin. Use the backend image's uv venv
-        # interpreter (bare `python` lacks playwright and the app dependencies).
+        # entrypoint.sh / release-entrypoint starts the app and ignores args, so
+        # override it to run python reading the streamed script from stdin. Use the
+        # image's uv venv interpreter (bare `python` lacks playwright).
         "--entrypoint",
-        os.environ.get("HEYM_PLAYWRIGHT_SANDBOX_PYTHON", "/app/.venv/bin/python"),
+        _sandbox_python(),
         "--env",
         "PYTHONIOENCODING=utf-8",
         "--env",
@@ -170,7 +206,9 @@ def require_image() -> str:
     if not image:
         raise PlaywrightSandboxUnavailableError(
             "Custom Playwright code Docker sandbox is enabled but the runner image could "
-            "not be resolved. Set HEYM_PLAYWRIGHT_SANDBOX_IMAGE to the backend image."
+            "not be resolved. Set HEYM_PLAYWRIGHT_SANDBOX_IMAGE to the backend image "
+            "(e.g. heym-backend:local), or set HEYM_PLAYWRIGHT_SANDBOX=subprocess for "
+            "trusted / local native development (run.sh does this automatically)."
         )
     return image
 

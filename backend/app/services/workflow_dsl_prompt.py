@@ -3036,8 +3036,9 @@ This returns: `["news/my-article.html", "blog/another-post.html", ...]`
 - **Inputs**: 1 | **Outputs**: 1
 - **Data fields**:
   - `label`: Node identifier (camelCase)
-  - `playwrightSteps`: Array of step definitions (required for execution)
-  - `playwrightCode`: Optional custom Playwright Python code (alternative to steps; auth bootstrap does not apply to custom code). Runs arbitrary backend Python and is DISABLED by default (operator must set `HEYM_PLAYWRIGHT_CUSTOM_CODE_ENABLED=true`). Prefer `playwrightSteps` — do not emit `playwrightCode` unless explicitly requested.
+  - `playwrightMode`: `"steps"` (default) or `"code"` (Run Code). When `"code"`, execution uses `playwrightCode` even if steps are also present.
+  - `playwrightSteps`: Array of step definitions (required when mode is steps)
+  - `playwrightCode`: Custom Playwright Python code used when `playwrightMode` is `"code"` (or legacy: steps empty and code set). Auth bootstrap does not apply. DISABLED by default (operator must set `HEYM_PLAYWRIGHT_CUSTOM_CODE_ENABLED=true`). Prefer `playwrightSteps` — do not emit `playwrightCode` / mode `"code"` unless explicitly requested.
   - `playwrightHeadless`: Boolean - run browser headless (default: true)
   - `playwrightTimeout`: Overall timeout in milliseconds (default: 30000)
   - `playwrightCaptureNetwork`: Boolean - capture JSON API responses, headers, cookies, localStorage, and sessionStorage
@@ -3143,7 +3144,7 @@ This returns: `["news/my-article.html", "blog/another-post.html", ...]`
 }
 ```
 
-**Note**: Add steps in the Properties Panel. Steps are executed in order at runtime. Execution requires at least one step in `playwrightSteps`.
+**Note**: Prefer Steps mode in the Properties Panel (`playwrightMode: "steps"`). Steps are executed in order at runtime. Execution requires at least one step in `playwrightSteps` unless Mode is Run Code (`playwrightMode: "code"` with `playwrightCode`).
 If `playwrightAuthEnabled` is true, the first item in `playwrightSteps` must be `navigate`, auth bootstrap works only with step-based execution, and `playwrightAuthFallbackSteps` should leave the browser on the authenticated page expected by the remaining main steps.
 
 ### 32. drive (Drive File Management)

@@ -244,6 +244,15 @@ if [ "${HEYM_PYTHON_TOOL_SANDBOX:-auto}" = "auto" ] && [ -z "${HEYM_PYTHON_TOOL_
     export HEYM_PYTHON_TOOL_SANDBOX=subprocess
 fi
 
+# Same for custom Playwright code (playwrightCode / Run Code mode): auto Docker
+# sandbox resolves the runner image via `docker inspect` of this process's
+# container, which fails on native run.sh. Default to the in-process path for
+# local dev unless the operator set HEYM_PLAYWRIGHT_SANDBOX or
+# HEYM_PLAYWRIGHT_SANDBOX_IMAGE explicitly.
+if [ "${HEYM_PLAYWRIGHT_SANDBOX:-auto}" = "auto" ] && [ -z "${HEYM_PLAYWRIGHT_SANDBOX_IMAGE:-}" ]; then
+    export HEYM_PLAYWRIGHT_SANDBOX=subprocess
+fi
+
 echo -e "\n${YELLOW}Starting backend on port ${BACKEND_PORT:-10105}...${NC}"
 if [ "$DEBUG_MODE" = true ]; then
     echo -e "${BLUE}Debug mode enabled - showing DEBUG level logs${NC}"

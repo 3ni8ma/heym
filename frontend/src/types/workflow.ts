@@ -707,6 +707,8 @@ export interface NodeData {
   crawlerSelectors?: CrawlerSelector[];
   logMessage?: string;
   playwrightSteps?: PlaywrightStep[];
+  /** Steps (default) or Run Code (custom Playwright Python). */
+  playwrightMode?: "steps" | "code";
   playwrightCode?: string;
   playwrightHeadless?: boolean;
   playwrightTimeout?: number;
