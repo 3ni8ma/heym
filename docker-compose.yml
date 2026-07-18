@@ -64,6 +64,15 @@ services:
       HEYM_PLUGINS_ENABLED: ${HEYM_PLUGINS_ENABLED:-false}
       HEYM_PLUGIN_ADMIN_EMAILS: ${HEYM_PLUGIN_ADMIN_EMAILS:-}
       HEYM_PLUGINS_DIR: ${HEYM_PLUGINS_DIR:-/app/data/plugins}
+      # Custom Playwright code (the `playwrightCode` field) is arbitrary Python.
+      # Disabled by default. When enabled, it does NOT run in the backend process:
+      # it runs in a hardened, throwaway sibling container (no socket, no backend
+      # mounts, no backend secrets, dropped caps) via HEYM_PLAYWRIGHT_SANDBOX below,
+      # which fails closed if Docker is unavailable. `subprocess` opts back into the
+      # in-process path for trusted / local dev only.
+      HEYM_PLAYWRIGHT_CUSTOM_CODE_ENABLED: ${HEYM_PLAYWRIGHT_CUSTOM_CODE_ENABLED:-false}
+      HEYM_PLAYWRIGHT_SANDBOX: ${HEYM_PLAYWRIGHT_SANDBOX:-auto}
+      HEYM_PLAYWRIGHT_SANDBOX_IMAGE: ${HEYM_PLAYWRIGHT_SANDBOX_IMAGE:-}
       # Codex node: run Codex CLI in a dedicated sibling runner container so
       # bubblewrap sandboxing works inside Docker without exposing backend secrets.
       HEYM_CODEX_CLI_COMMAND: ${HEYM_CODEX_CLI_COMMAND:-/usr/local/bin/heym-codex-docker}

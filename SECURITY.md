@@ -85,3 +85,8 @@ vulnerabilities in Heym:
   credentials (GHSA-vxpw-x7j7-8723), and for reporting unsandboxed skill code
   execution where Agent Python skills ran outside the Docker isolation mandated
   for Python tools (GHSA-hcv7-mg77-pg73).
+- [@EQSTLab](https://github.com/EQSTLab) (reporter) and
+  [@min8282](https://github.com/min8282) (finder) for reporting a backend remote
+  code execution in the Playwright node, where the custom `playwrightCode` field
+  let any authenticated user run arbitrary Python in the backend process
+  (GHSA-mp23-7m6r-jfw4).

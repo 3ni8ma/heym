@@ -3037,7 +3037,7 @@ This returns: `["news/my-article.html", "blog/another-post.html", ...]`
 - **Data fields**:
   - `label`: Node identifier (camelCase)
   - `playwrightSteps`: Array of step definitions (required for execution)
-  - `playwrightCode`: Optional custom Playwright Python code (alternative to steps; auth bootstrap does not apply to custom code)
+  - `playwrightCode`: Optional custom Playwright Python code (alternative to steps; auth bootstrap does not apply to custom code). Runs arbitrary backend Python and is DISABLED by default (operator must set `HEYM_PLAYWRIGHT_CUSTOM_CODE_ENABLED=true`). Prefer `playwrightSteps` — do not emit `playwrightCode` unless explicitly requested.
   - `playwrightHeadless`: Boolean - run browser headless (default: true)
   - `playwrightTimeout`: Overall timeout in milliseconds (default: 30000)
   - `playwrightCaptureNetwork`: Boolean - capture JSON API responses, headers, cookies, localStorage, and sessionStorage

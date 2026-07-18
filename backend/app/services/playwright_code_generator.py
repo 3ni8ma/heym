@@ -22,6 +22,19 @@ def _expr_to_python(expr: str, default: str = '""') -> str:
     return result
 
 
+def _as_py_bool_literal(value: object) -> str:
+    """Coerce a step field to the literal ``"True"`` or ``"False"``.
+
+    Boolean-intended step fields (checkboxes) are interpolated directly into generated
+    Python. Without coercion an attacker-controlled string such as
+    ``(__import__("os").system("id"), False)[1]`` would be injected verbatim, turning the
+    step-based path into code execution. This always returns a safe boolean literal.
+    """
+    if isinstance(value, str):
+        return "True" if value.strip().lower() in ("true", "1", "yes", "on") else "False"
+    return "True" if bool(value) else "False"
+
+
 def _step_timeout_kwarg(step: dict) -> str:
     """Return 'timeout=X' if step has timeout, else ''."""
     t = step.get("timeout")
@@ -217,10 +230,10 @@ def _generate_step_lines(
         ai_instructions = _expr_to_python(step.get("instructions", ""), '""')
         ai_credential_id = _expr_to_python(step.get("credentialId", ""), '""')
         ai_model = _expr_to_python(step.get("model", ""), '""')
-        ai_log = step.get("logStepsToConsole", False)
-        ai_save = step.get("saveStepsForFuture", False)
-        ai_auto_heal = step.get("autoHealMode", False)
-        ai_screenshot = step.get("sendScreenshot", False)
+        ai_log = _as_py_bool_literal(step.get("logStepsToConsole", False))
+        ai_save = _as_py_bool_literal(step.get("saveStepsForFuture", False))
+        ai_auto_heal = _as_py_bool_literal(step.get("autoHealMode", False))
+        ai_screenshot = _as_py_bool_literal(step.get("sendScreenshot", False))
         ai_timeout_ms = step.get("aiStepTimeout", 30000)
         ai_saved = step.get("savedSteps") or []
         try:
