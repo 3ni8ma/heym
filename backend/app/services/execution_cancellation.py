@@ -9,7 +9,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Literal
+from typing import Any, Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,6 +42,10 @@ class ExecutionCancellationHandle:
     trigger_source: str | None = None
     actor_user_id: uuid.UUID | None = None
     recoverable: bool = True
+    running_node_ids: set[str] = field(default_factory=set)
+    node_results: list[dict[str, Any]] = field(default_factory=list)
+    progress_version: int = 0
+    synced_progress_version: int = 0
 
 
 @dataclass(frozen=True)
@@ -52,6 +56,9 @@ class ActiveExecutionRecord:
     workflow_id: uuid.UUID
     workflow_name: str
     started_at: datetime
+    inputs: dict = field(default_factory=dict)
+    running_node_ids: list[str] = field(default_factory=list)
+    node_results: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -131,6 +138,69 @@ def list_active_executions() -> list[ExecutionCancellationHandle]:
     """Return a snapshot of all currently active executions."""
     with _LOCK:
         return list(_ACTIVE_EXECUTIONS.values())
+
+
+def get_active_execution_progress(
+    execution_id: uuid.UUID,
+    *,
+    workflow_id: uuid.UUID,
+) -> tuple[list[str], list[dict[str, Any]]] | None:
+    """Return a thread-safe copy of one local execution's live node progress."""
+    with _LOCK:
+        handle = _ACTIVE_EXECUTIONS.get(execution_id)
+        if handle is None or handle.workflow_id != workflow_id or handle.event.is_set():
+            return None
+        return sorted(handle.running_node_ids), list(handle.node_results)
+
+
+def get_active_execution_inputs(
+    execution_id: uuid.UUID,
+    *,
+    workflow_id: uuid.UUID,
+) -> dict | None:
+    """Return a thread-safe copy of one local execution's original inputs."""
+    with _LOCK:
+        handle = _ACTIVE_EXECUTIONS.get(execution_id)
+        if handle is None or handle.workflow_id != workflow_id or handle.event.is_set():
+            return None
+        return dict(handle.inputs)
+
+
+def record_execution_node_started(execution_id: str, node_id: str) -> None:
+    """Record a node start in the cross-worker live execution snapshot."""
+    try:
+        parsed_execution_id = uuid.UUID(str(execution_id))
+    except (TypeError, ValueError):
+        return
+
+    with _LOCK:
+        handle = _ACTIVE_EXECUTIONS.get(parsed_execution_id)
+        if handle is None:
+            return
+        normalized_node_id = str(node_id)
+        if normalized_node_id not in handle.running_node_ids:
+            handle.running_node_ids.add(normalized_node_id)
+            handle.progress_version += 1
+
+
+def record_execution_node_completed(
+    execution_id: str,
+    node_id: str,
+    node_result: dict[str, Any],
+) -> None:
+    """Record a completed node so observers can stream the same log as the runner."""
+    try:
+        parsed_execution_id = uuid.UUID(str(execution_id))
+    except (TypeError, ValueError):
+        return
+
+    with _LOCK:
+        handle = _ACTIVE_EXECUTIONS.get(parsed_execution_id)
+        if handle is None:
+            return
+        handle.running_node_ids.discard(str(node_id))
+        handle.node_results.append(node_result)
+        handle.progress_version += 1
 
 
 class ActiveExecutionRegistry:
@@ -258,6 +328,8 @@ class ActiveExecutionRegistry:
                         actor_user_id=command.actor_user_id,
                         attempt=0,
                         recoverable=command.recoverable,
+                        running_node_ids=[],
+                        node_results=[],
                     )
                     .on_conflict_do_update(
                         index_elements=["execution_id"],
@@ -273,6 +345,8 @@ class ActiveExecutionRegistry:
                             "inputs": command.inputs or {},
                             "trigger_source": command.trigger_source,
                             "actor_user_id": command.actor_user_id,
+                            "running_node_ids": [],
+                            "node_results": [],
                         },
                     )
                 )
@@ -291,6 +365,25 @@ class ActiveExecutionRegistry:
 
         handles_by_id = {handle.execution_id: handle for handle in handles}
         execution_ids = list(handles_by_id)
+        progress_snapshots: dict[
+            uuid.UUID,
+            tuple[ExecutionCancellationHandle, list[str], list[dict[str, Any]], int, bool],
+        ] = {}
+        with _LOCK:
+            for execution_id, listed_handle in handles_by_id.items():
+                current_handle = _ACTIVE_EXECUTIONS.get(execution_id)
+                if current_handle is not listed_handle:
+                    continue
+                progress_changed = (
+                    current_handle.progress_version != current_handle.synced_progress_version
+                )
+                progress_snapshots[execution_id] = (
+                    current_handle,
+                    sorted(current_handle.running_node_ids) if progress_changed else [],
+                    list(current_handle.node_results) if progress_changed else [],
+                    current_handle.progress_version,
+                    progress_changed,
+                )
         now = _utcnow()
         async with async_session_maker() as session:
             cancel_result = await session.execute(
@@ -300,12 +393,35 @@ class ActiveExecutionRegistry:
                 )
             )
             cancelled_ids = list(cancel_result.scalars().all())
-            await session.execute(
-                update(ActiveWorkflowExecution)
-                .where(ActiveWorkflowExecution.execution_id.in_(execution_ids))
-                .values(heartbeat_at=now, worker_id=_WORKER_ID)
-            )
+            for execution_id, snapshot in progress_snapshots.items():
+                _handle, running_node_ids, node_results, _version, progress_changed = snapshot
+                update_values: dict[str, Any] = {
+                    "heartbeat_at": now,
+                    "worker_id": _WORKER_ID,
+                }
+                if progress_changed:
+                    update_values.update(
+                        running_node_ids=running_node_ids,
+                        node_results=node_results,
+                    )
+                await session.execute(
+                    update(ActiveWorkflowExecution)
+                    .where(ActiveWorkflowExecution.execution_id == execution_id)
+                    .values(**update_values)
+                )
             await session.commit()
+
+        with _LOCK:
+            for execution_id, snapshot in progress_snapshots.items():
+                snapshotted_handle, _running, _results, version, progress_changed = snapshot
+                if not progress_changed:
+                    continue
+                current_handle = _ACTIVE_EXECUTIONS.get(execution_id)
+                if current_handle is snapshotted_handle:
+                    current_handle.synced_progress_version = max(
+                        current_handle.synced_progress_version,
+                        version,
+                    )
 
         for execution_id in cancelled_ids:
             handle = handles_by_id.get(execution_id)
@@ -437,6 +553,9 @@ async def list_persisted_active_executions_for_user(
             ActiveWorkflowExecution.workflow_id,
             ActiveWorkflowExecution.started_at,
             Workflow.name,
+            ActiveWorkflowExecution.inputs,
+            ActiveWorkflowExecution.running_node_ids,
+            ActiveWorkflowExecution.node_results,
         )
         .join(Workflow, Workflow.id == ActiveWorkflowExecution.workflow_id)
         .where(
@@ -458,6 +577,9 @@ async def list_persisted_active_executions_for_user(
             workflow_id=row.workflow_id,
             workflow_name=row.name,
             started_at=row.started_at,
+            inputs=dict(row.inputs or {}),
+            running_node_ids=list(row.running_node_ids or []),
+            node_results=list(row.node_results or []),
         )
         for row in result.all()
     ]

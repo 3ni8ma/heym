@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from "vue";
+import { useRouter } from "vue-router";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import {
@@ -9,6 +10,7 @@ import {
   Loader2,
   Paperclip,
   Play,
+  Radio,
   Trash2,
   User as UserIcon,
 } from "lucide-vue-next";
@@ -25,6 +27,7 @@ const props = defineProps<{ open: boolean; cardId: string | null }>();
 const emit = defineEmits<{ (e: "close"): void }>();
 
 const boardStore = useBoardStore();
+const router = useRouter();
 const detail = ref<CardDetail | null>(null);
 const loading = ref(false);
 const comment = ref("");
@@ -35,6 +38,7 @@ const activityAtBottom = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
 const uploading = ref(false);
 const dragActive = ref(false);
+const DETAIL_POLL_INTERVAL_MS = 1000;
 
 // Attachments live on the card metadata, which is what the workflows receive.
 const attachments = computed<CardAttachment[]>(() => {
@@ -122,7 +126,7 @@ function syncPolling(): void {
   if (active && pollTimer === null) {
     pollTimer = setInterval(() => {
       void reload();
-    }, 2500);
+    }, DETAIL_POLL_INTERVAL_MS);
   } else if (!active) {
     stopPolling();
   }
@@ -158,6 +162,18 @@ async function reload(): Promise<void> {
   announceStatus(next);
   syncPolling();
 }
+
+const activeBoardCardStatus = computed(
+  () =>
+    boardStore.activeBoard?.cards.find((card) => card.id === props.cardId)?.run_status ?? null,
+);
+
+// A card can start from the board while this dialog is already mounted. Refresh immediately
+// when the board observes that transition instead of waiting for the detail poll to discover it.
+watch(activeBoardCardStatus, (status) => {
+  if (!props.open || !props.cardId || !status || status === detail.value?.card.run_status) return;
+  void reload();
+});
 
 onUnmounted(stopPolling);
 
@@ -233,6 +249,9 @@ async function removeActivity(activityId: string): Promise<void> {
 }
 
 const copiedRunId = ref<string | null>(null);
+const activeLiveRun = computed<CardRun | null>(() =>
+  detail.value?.runs.find((run) => Boolean(run.active_execution_id)) ?? null,
+);
 
 async function copyRun(run: CardRun): Promise<void> {
   const text = Object.keys(run.output).length
@@ -248,6 +267,18 @@ async function copyRun(run: CardRun): Promise<void> {
     // clipboard unavailable; ignore
   }
 }
+
+function openLiveRun(run: CardRun): void {
+  if (!run.workflow_id || !run.active_execution_id) return;
+  void router.push({
+    name: "editor",
+    params: {
+      id: run.workflow_id,
+      executionId: run.active_execution_id,
+    },
+  });
+  emit("close");
+}
 </script>
 
 <template>
@@ -260,17 +291,29 @@ async function copyRun(run: CardRun): Promise<void> {
       v-if="detail"
       #subtitle
     >
-      <span
-        class="inline-block rounded-full px-2 py-0.5 text-xs font-medium"
-        :class="{
-          'bg-emerald-500/15 text-emerald-500': detail.card.run_status === 'success',
-          'bg-red-500/15 text-red-500': detail.card.run_status === 'failed',
-          'bg-amber-500/15 text-amber-500':
-            detail.card.run_status === 'running' || detail.card.run_status === 'pending',
-          'bg-muted text-muted-foreground': detail.card.run_status === 'idle',
-        }"
-      >
-        {{ detail.card.run_status }}
+      <span class="inline-flex items-center gap-1.5">
+        <span
+          class="inline-block rounded-full px-2 py-0.5 text-xs font-medium"
+          :class="{
+            'bg-emerald-500/15 text-emerald-500': detail.card.run_status === 'success',
+            'bg-red-500/15 text-red-500': detail.card.run_status === 'failed',
+            'bg-amber-500/15 text-amber-500':
+              detail.card.run_status === 'running' || detail.card.run_status === 'pending',
+            'bg-muted text-muted-foreground': detail.card.run_status === 'idle',
+          }"
+        >
+          {{ detail.card.run_status }}
+        </span>
+        <button
+          v-if="activeLiveRun"
+          class="inline-flex items-center gap-1 rounded border border-blue-500/40 bg-blue-500/10 px-1.5 py-0.5 text-xs text-blue-500 hover:bg-blue-500/20"
+          :data-testid="`run-open-live-${activeLiveRun.id}`"
+          :aria-label="`Open ${activeLiveRun.workflow_name} live canvas`"
+          @click.stop="openLiveRun(activeLiveRun)"
+        >
+          <Radio class="h-3 w-3" />
+          Open live
+        </button>
       </span>
     </template>
     <template #header-trailing>

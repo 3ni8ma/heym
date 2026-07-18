@@ -365,6 +365,162 @@ test("runs a column workflow chain to completion when a card enters", async ({ p
   }
 });
 
+test("opens a running card workflow on the live canvas", async ({ page }) => {
+  const wf = await createWorkflow(
+    page,
+    `Board Live WF ${Date.now()}`,
+    [
+      {
+        id: "input_board_live",
+        type: "textInput",
+        position: { x: 100, y: 100 },
+        data: { label: "boardInput", inputFields: [{ key: "board" }] },
+      },
+      {
+        id: "wait_board_live",
+        type: "wait",
+        position: { x: 400, y: 100 },
+        data: { label: "waitBoardLive", duration: 12_000 },
+      },
+      {
+        id: "output_board_live",
+        type: "output",
+        position: { x: 700, y: 100 },
+        data: { label: "out", message: "board live complete" },
+      },
+    ],
+    [
+      { id: "edge_board_input", source: "input_board_live", target: "wait_board_live" },
+      { id: "edge_board_live", source: "wait_board_live", target: "output_board_live" },
+    ],
+  );
+
+  let activeExecutionId = "";
+  let cardRunId = "";
+  let liveInputText = "";
+  try {
+    const { boardId, cardId, columns } = await createBoardWithCard(page, "watch live");
+    const planning = columns.find((column) => column.name === "Planning")!;
+    await page.request.patch(`/api/boards/${boardId}/columns/${planning.id}`, {
+      data: { workflow_ids: [wf.id] },
+    });
+    await page.request.post(`/api/boards/${boardId}/cards/${cardId}/move`, {
+      data: { to_column_id: planning.id },
+    });
+
+    await expect
+      .poll(async () => {
+        const response = await page.request.get(`/api/boards/${boardId}/cards/${cardId}`);
+        const detail = (await response.json()) as {
+          runs: Array<{ id: string; active_execution_id: string | null }>;
+        };
+        cardRunId = detail.runs[0]?.id ?? "";
+        activeExecutionId = detail.runs[0]?.active_execution_id ?? "";
+        return activeExecutionId;
+      })
+      .not.toBe("");
+
+    await expect
+      .poll(async () => {
+        const response = await page.request.get("/api/workflows/executions/active");
+        const active = (await response.json()) as Array<{
+          execution_id: string;
+          inputs: Record<string, unknown>;
+        }>;
+        const inputs = active.find(
+          (entry) => entry.execution_id === activeExecutionId,
+        )?.inputs;
+        liveInputText = inputs?.board ? JSON.stringify(inputs.board) : "";
+        return liveInputText;
+      })
+      .not.toBe("");
+
+    await page.goto(`/?tab=board&board=${boardId}`);
+    await page.getByTestId(`board-card-${cardId}`).click();
+    await page.getByTestId(`run-open-live-${cardRunId}`).click();
+    await expect
+      .poll(() => new URL(page.url()).pathname)
+      .toBe(`/workflows/${wf.id}/${activeExecutionId}`);
+    await expect(page.locator('[data-id="wait_board_live"] .node-base')).toHaveClass(
+      /animate-heartbeat/,
+    );
+    await expect(page.getByPlaceholder("Enter board...")).toHaveValue(liveInputText);
+  } finally {
+    if (activeExecutionId) {
+      await page.request.post(
+        `/api/workflows/${wf.id}/executions/${activeExecutionId}/cancel`,
+      );
+    }
+    await deleteAllBoards(page);
+    await deleteWorkflow(page, wf.id);
+  }
+});
+
+test("shows the live canvas action after starting a card from its dialog", async ({ page }) => {
+  const wf = await createWorkflow(
+    page,
+    `Board Dialog Live WF ${Date.now()}`,
+    [
+      {
+        id: "wait_board_dialog_live",
+        type: "wait",
+        position: { x: 100, y: 100 },
+        data: { label: "waitBoardDialogLive", duration: 12_000 },
+      },
+      {
+        id: "output_board_dialog_live",
+        type: "output",
+        position: { x: 400, y: 100 },
+        data: { label: "out", message: "dialog live complete" },
+      },
+    ],
+    [
+      {
+        id: "edge_board_dialog_live",
+        source: "wait_board_dialog_live",
+        target: "output_board_dialog_live",
+      },
+    ],
+  );
+
+  let activeExecutionId = "";
+  try {
+    const { boardId, cardId, columns } = await createBoardWithCard(page, "run live from dialog");
+    const backlog = columns.find((column) => column.name === "Backlog")!;
+    await page.request.patch(`/api/boards/${boardId}/columns/${backlog.id}`, {
+      data: { workflow_ids: [wf.id] },
+    });
+
+    await page.goto(`/?tab=board&board=${boardId}`);
+    await page.getByTestId(`board-card-${cardId}`).click();
+    await page.getByTestId("card-run-followup").click();
+
+    await expect
+      .poll(async () => {
+        const response = await page.request.get(`/api/boards/${boardId}/cards/${cardId}`);
+        const detail = (await response.json()) as {
+          runs: Array<{ active_execution_id: string | null }>;
+        };
+        activeExecutionId = detail.runs[0]?.active_execution_id ?? "";
+        return activeExecutionId;
+      })
+      .not.toBe("");
+
+    const openLive = page.locator('[data-testid^="run-open-live-"]');
+    await expect(openLive).toBeVisible();
+    await openLive.click();
+    await expect
+      .poll(() => new URL(page.url()).pathname)
+      .toBe(`/workflows/${wf.id}/${activeExecutionId}`);
+  } finally {
+    if (activeExecutionId) {
+      await page.request.post(`/api/workflows/${wf.id}/executions/${activeExecutionId}/cancel`);
+    }
+    await deleteAllBoards(page);
+    await deleteWorkflow(page, wf.id);
+  }
+});
+
 test("planning runs but waits there — it does not auto-advance", async ({ page }) => {
   const wf = await createSetOutputWorkflow(page);
   try {

@@ -155,3 +155,200 @@ test("brings a past execution onto the canvas via /workflows/:id/:executionId", 
     await deleteWorkflow(page, workflow.id);
   }
 });
+
+test("opens one running execution live from both history dialogs", async ({ page }) => {
+  const workflow = await createWorkflow(
+    page,
+    `Live Execution Canvas ${Date.now()}`,
+    [
+      workflowNode("input_live", "textInput", 80, 160, {
+        label: "inputLive",
+        inputFields: [{ key: "text" }],
+      }),
+      workflowNode("wait_live", "wait", 340, 160, {
+        label: "waitLive",
+        duration: 6_000,
+      }),
+      workflowNode("set_live", "set", 600, 160, {
+        label: "setLive",
+        mappings: [{ key: "text", value: "$waitLive.text" }],
+      }),
+      workflowNode("wait_live_two", "wait", 860, 160, {
+        label: "waitLiveTwo",
+        duration: 3_000,
+      }),
+      workflowNode("output_live", "jsonOutputMapper", 1_120, 160, {
+        label: "outputLive",
+        mappings: [{ key: "message", value: "$waitLiveTwo.text" }],
+      }),
+    ],
+    [
+      workflowEdge("edge_input_wait", "input_live", "wait_live"),
+      workflowEdge("edge_wait_set", "wait_live", "set_live"),
+      workflowEdge("edge_set_wait_two", "set_live", "wait_live_two"),
+      workflowEdge("edge_wait_two_output", "wait_live_two", "output_live"),
+    ],
+  );
+
+  let executionId = "";
+  const allHistoryPage = await page.context().newPage();
+  try {
+    await page.goto(`/workflows/${workflow.id}`);
+    await expect(page.locator(".vue-flow__node")).toHaveCount(5);
+    await page.evaluate((workflowId) => {
+      void fetch(`/api/workflows/${workflowId}/execute?trigger_source=E2E`, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json",
+          "x-simple-response": "false",
+        },
+        body: JSON.stringify({ text: "live input payload" }),
+      });
+    }, workflow.id);
+
+    await expect
+      .poll(async () => {
+        const response = await page.request.get("/api/workflows/executions/active");
+        const active = (await response.json()) as Array<{
+          execution_id: string;
+          workflow_id: string;
+        }>;
+        executionId =
+          active.find((entry) => entry.workflow_id === workflow.id)?.execution_id ?? "";
+        return executionId;
+      })
+      .not.toBe("");
+
+    await page.getByRole("button", { name: "History", exact: true }).click();
+    await page.getByTestId(`open-live-execution-${executionId}`).click();
+    await expectExecutionPath(page, workflow.id, executionId);
+    await expect(page.locator('[data-id="wait_live"] .node-base')).toHaveClass(
+      /animate-heartbeat/,
+    );
+    await expect(page.getByPlaceholder("Enter text...")).toHaveValue("live input payload");
+    await expect(page.getByTestId("debug-node-result-input_live")).toContainText("inputLive");
+
+    await allHistoryPage.goto("/");
+    await allHistoryPage.getByRole("button", { name: "History", exact: true }).click();
+    await expect(
+      allHistoryPage.getByRole("heading", { name: "All Execution History" }),
+    ).toBeVisible();
+    await allHistoryPage.getByTestId(`open-live-execution-${executionId}`).click();
+    await expectExecutionPath(allHistoryPage, workflow.id, executionId);
+    await expect(allHistoryPage.locator('[data-id="wait_live"] .node-base')).toHaveClass(
+      /animate-heartbeat/,
+    );
+    await expect(allHistoryPage.getByPlaceholder("Enter text...")).toHaveValue(
+      "live input payload",
+    );
+
+    await expect(page.locator('[data-id="wait_live_two"] .node-base')).toHaveClass(
+      /animate-heartbeat/,
+      { timeout: 10_000 },
+    );
+    await expect(page.getByTestId("debug-node-result-wait_live_two")).toContainText(
+      "waitLiveTwo",
+    );
+
+    await expect(page.getByTestId("execution-highlights-panel")).toBeVisible({
+      timeout: 8_000,
+    });
+    await expect(allHistoryPage.getByTestId("execution-highlights-panel")).toBeVisible({
+      timeout: 8_000,
+    });
+    await page.getByTitle("Execution timeline").click();
+    await expect(page.getByTestId("execution-timeline-row-wait_live_two")).toContainText(
+      "waitLiveTwo",
+    );
+  } finally {
+    if (executionId) {
+      await page.request.post(
+        `/api/workflows/${workflow.id}/executions/${executionId}/cancel`,
+      );
+    }
+    await allHistoryPage.close();
+    await deleteWorkflow(page, workflow.id);
+  }
+});
+
+test("keeps the dashboard responsive while a canvas workflow is running", async ({
+  page,
+}) => {
+  const workflow = await createWorkflow(
+    page,
+    `Responsive Canvas Navigation ${Date.now()}`,
+    [
+      workflowNode("responsive_input", "textInput", 80, 160, {
+        label: "start",
+        inputFields: [{ key: "text" }],
+      }),
+      workflowNode("responsive_wait_a", "wait", 340, 160, {
+        label: "wait",
+        duration: 30_000,
+      }),
+      workflowNode("responsive_set", "set", 600, 160, {
+        label: "set",
+        mappings: [{ key: "text", value: "$wait.text" }],
+      }),
+      workflowNode("responsive_wait_b", "wait", 860, 160, {
+        label: "wait1",
+        duration: 10_000,
+      }),
+      workflowNode("responsive_output", "jsonOutputMapper", 1_120, 160, {
+        label: "jsonResponse",
+        mappings: [{ key: "message", value: "$wait1.text" }],
+      }),
+    ],
+    [
+      workflowEdge("edge_responsive_a", "responsive_input", "responsive_wait_a"),
+      workflowEdge("edge_responsive_b", "responsive_wait_a", "responsive_set"),
+      workflowEdge("edge_responsive_c", "responsive_set", "responsive_wait_b"),
+      workflowEdge("edge_responsive_d", "responsive_wait_b", "responsive_output"),
+    ],
+  );
+
+  let executionId = "";
+  try {
+    await page.goto(`/workflows/${workflow.id}`);
+    await expect(page.locator(".vue-flow__node")).toHaveCount(5);
+    await page.getByRole("button", { name: "Run Workflow" }).click();
+
+    await expect(page.locator('[data-id="responsive_wait_a"] .node-base')).toHaveClass(
+      /animate-heartbeat/,
+    );
+
+    await expect
+      .poll(async () => {
+        const response = await page.request.get("/api/workflows/executions/active");
+        const active = (await response.json()) as Array<{
+          execution_id: string;
+          workflow_id: string;
+        }>;
+        executionId =
+          active.find((entry) => entry.workflow_id === workflow.id)?.execution_id ?? "";
+        return executionId;
+      })
+      .not.toBe("");
+
+    const navigationStartedAt = Date.now();
+    await page.locator('header a[href="/"]').first().click();
+    await expect(page).toHaveURL(/\/$/, { timeout: 4_000 });
+    await expect(page.getByTestId(`workflow-card-${workflow.id}`)).toBeVisible({
+      timeout: 4_000,
+    });
+    expect(Date.now() - navigationStartedAt).toBeLessThan(4_000);
+
+    const healthResponse = await page.request.get("/api/health", {
+      timeout: 2_000,
+    });
+    expect(healthResponse.ok()).toBeTruthy();
+  } finally {
+    if (executionId) {
+      await page.request.post(
+        `/api/workflows/${workflow.id}/executions/${executionId}/cancel`,
+      );
+    }
+    await deleteWorkflow(page, workflow.id);
+  }
+});

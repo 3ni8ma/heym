@@ -66,6 +66,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
   const isHistoryDetailLoading = ref(false);
   const currentExecutionId = ref<string | null>(null);
   const isExecuting = ref(false);
+  const isObservingExecution = ref(false);
   const isSaving = ref(false);
   const hasUnsavedChanges = ref(false);
   const runningNodeId = ref<string | null>(null);
@@ -536,10 +537,12 @@ export const useWorkflowStore = defineStore("workflow", () => {
   function applyExecutionHistoryEntry(entry: ExecutionHistoryEntry): void {
     if (!entry.result) return;
     upsertExecutionHistoryEntry(entry);
-    applyExecutionResultSnapshot({
+    const result: ExecutionResult = {
       ...entry.result,
       execution_history_id: entry.id,
-    });
+    };
+    loadHistoryInputs(entry.inputs, result.node_results, result);
+    applyExecutionResultSnapshot(result);
   }
 
   async function loadWorkflow(id: string): Promise<void> {
@@ -1424,6 +1427,123 @@ export const useWorkflowStore = defineStore("workflow", () => {
     }
   }
 
+  async function observeExecution(executionId: string): Promise<void> {
+    const workflowId = currentWorkflow.value?.id;
+    if (!workflowId || !executionId) return;
+    if (isExecuting.value && currentExecutionId.value === executionId) return;
+
+    if (abortController.value) {
+      abortController.value.abort();
+    }
+    abortController.value = new AbortController();
+    const streamAbort = abortController.value;
+    isExecuting.value = true;
+    isObservingExecution.value = true;
+    currentExecutionId.value = executionId;
+    executionResult.value = null;
+    timelinePickedNodeResultIndex.value = null;
+    clearEvaluateLoopSelection();
+    nodeResults.value = [];
+    agentProgressLogs.value = new Map();
+    llmBatchProgressLogs.value = new Map();
+    clearNodeStatuses();
+    nodes.value.forEach((node) => setNodeStatus(node.id, "pending"));
+
+    await new Promise<void>((resolve, reject) => {
+      workflowApi.streamActiveExecution(
+        workflowId,
+        executionId,
+        (data) => {
+          currentExecutionId.value = data.execution_id;
+          loadHistoryInputs(data.inputs);
+        },
+        (nodeId) => {
+          setNodeStatus(nodeId, "running");
+          const existingRunningResult = nodeResults.value.some(
+            (result) => result.node_id === nodeId && result.status === "running",
+          );
+          if (!existingRunningResult) {
+            const node = nodes.value.find((candidate) => candidate.id === nodeId);
+            nodeResults.value = [
+              ...nodeResults.value,
+              {
+                node_id: nodeId,
+                node_label: node?.data.label || nodeId,
+                node_type: node?.type || "unknown",
+                status: "running",
+                output: {},
+                execution_time_ms: 0,
+                error: null,
+              },
+            ];
+          }
+        },
+        (data) => {
+          setNodeStatus(
+            data.node_id,
+            data.status as "success" | "error" | "pending" | "skipped",
+          );
+          const row: NodeResult = {
+            node_id: data.node_id,
+            node_label: data.node_label || data.node_id,
+            node_type: data.node_type || "unknown",
+            status: data.status as "success" | "error" | "pending" | "skipped",
+            output: data.output,
+            execution_time_ms: data.execution_time_ms,
+            error: data.error ?? null,
+          };
+          if (data.metadata && typeof data.metadata === "object") {
+            row.metadata = data.metadata;
+          }
+          const runningResultIndex = nodeResults.value.findIndex(
+            (result) => result.node_id === data.node_id && result.status === "running",
+          );
+          if (runningResultIndex >= 0) {
+            const nextResults = [...nodeResults.value];
+            nextResults.splice(runningResultIndex, 1, row);
+            nodeResults.value = nextResults;
+          } else {
+            nodeResults.value = [...nodeResults.value, row];
+          }
+        },
+        async (result) => {
+          const historyId = result.execution_history_id;
+          const historyEntry = historyId
+            ? await fetchExecutionHistoryEntry(historyId, true)
+            : null;
+          if (historyEntry?.result) {
+            applyExecutionHistoryEntry(historyEntry);
+          } else {
+            applyExecutionResultSnapshot(result);
+          }
+          isObservingExecution.value = false;
+          resolve();
+        },
+        (error) => {
+          clearNodeStatuses();
+          isExecuting.value = false;
+          isObservingExecution.value = false;
+          runningNodeId.value = null;
+          abortController.value = null;
+          currentExecutionId.value = null;
+          reject(error);
+        },
+        () => resolve(),
+        streamAbort.signal,
+      );
+    });
+  }
+
+  function disconnectExecutionObservation(): void {
+    if (!isObservingExecution.value) return;
+    abortController.value?.abort();
+    abortController.value = null;
+    isObservingExecution.value = false;
+    isExecuting.value = false;
+    currentExecutionId.value = null;
+    clearNodeStatuses();
+  }
+
   async function stopExecution(): Promise<void> {
     const workflowId = currentWorkflow.value?.id;
     const executionId = currentExecutionId.value;
@@ -1439,6 +1559,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
       abortController.value = null;
     }
     isExecuting.value = false;
+    isObservingExecution.value = false;
     runningNodeId.value = null;
     clearNodeStatuses();
     currentExecutionId.value = null;
@@ -2995,6 +3116,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     applyExecutionHistoryEntry,
     applyExecutionResultSnapshot,
     isExecuting,
+    isObservingExecution,
     isSaving,
     hasUnsavedChanges,
     runningNodeId,
@@ -3038,6 +3160,8 @@ export const useWorkflowStore = defineStore("workflow", () => {
     setNodeStatus,
     clearNodeStatuses,
     executeWorkflow,
+    observeExecution,
+    disconnectExecutionObservation,
     stopExecution,
     clearWorkflow,
     clearExecution,
