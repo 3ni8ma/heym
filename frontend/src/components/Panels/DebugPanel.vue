@@ -22,6 +22,7 @@ import Button from "@/components/ui/Button.vue";
 import ClarifyCard from "@/components/ui/ClarifyCard.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import JsonTree from "@/components/ui/JsonTree.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Textarea from "@/components/ui/Textarea.vue";
 import type { ClarifyAnswer, ClarifyQuestion } from "@/types/clarify";
 import {
@@ -1259,6 +1260,11 @@ interface ChatMessage {
   clarifyAnswered?: boolean;
 }
 
+interface SelectOption {
+  value: string;
+  label: string;
+}
+
 interface SpeechRecognitionResultAlternative {
   transcript: string;
 }
@@ -1306,6 +1312,18 @@ const aiModels = ref<LLMModel[]>([]);
 const selectedCredentialId = ref("");
 const selectedModel = ref("");
 const loadingModels = ref(false);
+const aiCredentialOptions = computed<SelectOption[]>(() =>
+  aiCredentials.value.map((credential) => ({
+    value: credential.id,
+    label: credential.is_shared ? `${credential.name} - shared` : credential.name,
+  })),
+);
+const aiModelOptions = computed<SelectOption[]>(() =>
+  aiModels.value.map((model) => ({
+    value: model.id,
+    label: model.name,
+  })),
+);
 
 const aiMessages = ref<ChatMessage[]>([]);
 const aiInputMessage = ref("");
@@ -3419,51 +3437,43 @@ function renderContent(content: string): string {
         <div class="ai-panel-config">
           <div class="config-row">
             <label class="config-label">Credential</label>
-            <select
-              v-model="selectedCredentialId"
-              class="config-select"
-              :title="aiCredentials.find(c => c.id === selectedCredentialId)?.name || ''"
+            <div
+              class="flex-1 min-w-0"
+              data-testid="ai-assistant-credential-selector"
             >
-              <option
-                value=""
-                disabled
-              >
-                Select...
-              </option>
-              <option
-                v-for="cred in aiCredentials"
-                :key="cred.id"
-                :value="cred.id"
-                :title="cred.is_shared ? `${cred.name} - shared` : cred.name"
-              >
-                {{ cred.is_shared ? `${cred.name} - shared` : cred.name }}
-              </option>
-            </select>
+              <SearchableSelect
+                id="ai-assistant-credential-select"
+                :model-value="selectedCredentialId"
+                :options="aiCredentialOptions"
+                placeholder="Select..."
+                search-placeholder="Search credentials..."
+                empty-text="No credentials found."
+                select-class="h-8 min-h-0 rounded-md border-border bg-background shadow-none"
+                content-class="z-[110]"
+                @update:model-value="selectedCredentialId = $event ?? ''"
+              />
+            </div>
           </div>
 
           <div class="config-row">
             <label class="config-label">Model</label>
-            <select
-              v-model="selectedModel"
-              :disabled="!selectedCredentialId || loadingModels"
-              class="config-select"
-              :title="aiModels.find(m => m.id === selectedModel)?.name || ''"
+            <div
+              class="flex-1 min-w-0"
+              data-testid="ai-assistant-model-selector"
             >
-              <option
-                value=""
-                disabled
-              >
-                {{ loadingModels ? "Loading..." : "Select..." }}
-              </option>
-              <option
-                v-for="model in aiModels"
-                :key="model.id"
-                :value="model.id"
-                :title="model.name"
-              >
-                {{ model.name }}
-              </option>
-            </select>
+              <SearchableSelect
+                id="ai-assistant-model-select"
+                :model-value="selectedModel"
+                :options="aiModelOptions"
+                :placeholder="loadingModels ? 'Loading...' : 'Select...'"
+                search-placeholder="Search models..."
+                empty-text="No models found."
+                :disabled="!selectedCredentialId || loadingModels"
+                select-class="h-8 min-h-0 rounded-md border-border bg-background shadow-none"
+                content-class="z-[110]"
+                @update:model-value="selectedModel = $event ?? ''"
+              />
+            </div>
           </div>
         </div>
 
@@ -3803,46 +3813,10 @@ function renderContent(content: string): string {
   flex-shrink: 0;
 }
 
-.config-row .config-select {
-  flex: 1;
-  min-width: 0;
-}
-
 .config-label {
   font-size: 12px;
   color: hsl(var(--muted-foreground));
   white-space: nowrap;
-}
-
-.config-select {
-  height: 32px;
-  padding: 0 10px;
-  border: 1px solid hsl(var(--border));
-  border-radius: 6px;
-  background: hsl(var(--background));
-  color: hsl(var(--foreground));
-  font-size: 13px;
-  cursor: pointer;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  padding-right: 28px;
-  min-width: 0;
-  text-overflow: ellipsis;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.config-select:focus {
-  outline: none;
-  border-color: hsl(var(--primary));
-  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.15);
-}
-
-.config-select:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .ai-messages {

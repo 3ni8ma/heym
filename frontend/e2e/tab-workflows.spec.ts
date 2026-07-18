@@ -141,6 +141,98 @@ test("renders long model options outside the properties panel without clipping",
   }
 });
 
+test("filters AI Assistant and Analyzer credentials and models", async ({ page }) => {
+  const openAiCredentialId = "22222222-2222-4222-8222-222222222227";
+  const cerebrasCredentialId = "22222222-2222-4222-8222-222222222228";
+  const workflow = await createWorkflow(page, `Canvas AI selectors ${Date.now()}`);
+  const now = new Date().toISOString();
+
+  await page.route("**/api/credentials/llm", async (route) => {
+    await route.fulfill({
+      json: [
+        {
+          id: openAiCredentialId,
+          name: "OpenAI Canvas",
+          type: "openai",
+          masked_value: "sk-...",
+          header_key: null,
+          created_at: now,
+        },
+        {
+          id: cerebrasCredentialId,
+          name: "Cerebras Canvas",
+          type: "openai",
+          masked_value: "csk-...",
+          header_key: null,
+          created_at: now,
+        },
+      ],
+    });
+  });
+  await page.route(`**/api/credentials/${openAiCredentialId}/models`, async (route) => {
+    await route.fulfill({
+      json: [
+        {
+          id: "gpt-4o-canvas",
+          name: "GPT-4o Canvas",
+          is_reasoning: false,
+          supports_batch: false,
+          batch_support_reason: null,
+          context_window: 128000,
+        },
+      ],
+    });
+  });
+  await page.route(`**/api/credentials/${cerebrasCredentialId}/models`, async (route) => {
+    await route.fulfill({
+      json: [
+        {
+          id: "llama-canvas",
+          name: "Llama Canvas",
+          is_reasoning: false,
+          supports_batch: false,
+          batch_support_reason: null,
+          context_window: 32768,
+        },
+        {
+          id: "zai-glm-canvas",
+          name: "ZAI GLM Canvas",
+          is_reasoning: false,
+          supports_batch: false,
+          batch_support_reason: null,
+          context_window: 65536,
+        },
+      ],
+    });
+  });
+
+  try {
+    await page.goto(`/workflows/${workflow.id}`);
+    await page.getByTitle("AI Assistant").click();
+
+    const assistantCredential = page.getByTestId("ai-assistant-credential-selector");
+    const assistantModel = page.getByTestId("ai-assistant-model-selector");
+    await expect(assistantCredential.getByRole("combobox")).toHaveValue("OpenAI Canvas");
+    await expect(assistantModel.getByRole("combobox")).toHaveValue("GPT-4o Canvas");
+    await selectSearchableOption(page, assistantCredential, "Cerebras Canvas");
+    await expect(assistantModel.getByRole("combobox")).toHaveValue("ZAI GLM Canvas");
+    await selectSearchableOption(page, assistantModel, "Llama Canvas");
+    await expect(assistantModel.getByRole("combobox")).toHaveValue("Llama Canvas");
+
+    await page.getByRole("button", { name: "Analyze", exact: true }).click();
+    const analyzerCredential = page.getByTestId("ai-analyzer-credential-selector");
+    const analyzerModel = page.getByTestId("ai-analyzer-model-selector");
+    await expect(analyzerCredential.getByRole("combobox")).toHaveValue("OpenAI Canvas");
+    await expect(analyzerModel.getByRole("combobox")).toHaveValue("GPT-4o Canvas");
+    await selectSearchableOption(page, analyzerCredential, "Cerebras Canvas");
+    await expect(analyzerModel.getByRole("combobox")).toHaveValue("ZAI GLM Canvas");
+    await selectSearchableOption(page, analyzerModel, "Llama Canvas");
+    await expect(analyzerModel.getByRole("combobox")).toHaveValue("Llama Canvas");
+  } finally {
+    await deleteWorkflow(page, workflow.id);
+  }
+});
+
 test("creates a folder and filters workflows with search", async ({ page }) => {
   const workflowName = `Searchable Workflow ${Date.now()}`;
   const folderName = `E2E Folder ${Date.now()}`;

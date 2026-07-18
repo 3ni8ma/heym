@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import DOMPurify from "dompurify";
 import {
   AlertTriangle,
-  ChevronDown,
   Eye,
   Loader2,
   Pencil,
@@ -14,17 +13,19 @@ import {
 import { marked } from "marked";
 import { isAxiosError } from "axios";
 
+import type { CredentialListItem, LLMModel } from "@/types/credential";
+import type { AnalysisNoteEditor, AnalysisNoteResponse } from "@/services/api";
+
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import { preserveExplicitOrderedListNumbers } from "@/lib/markdown";
 import { cn } from "@/lib/utils";
-import {
-  aiApi,
-  credentialsApi,
-  workflowApi,
-  type AnalysisNoteEditor,
-  type AnalysisNoteResponse,
-} from "@/services/api";
-import type { CredentialListItem, LLMModel } from "@/types/credential";
+import { aiApi, credentialsApi, workflowApi } from "@/services/api";
 import { useWorkflowStore } from "@/stores/workflow";
+
+interface SelectOption {
+  value: string;
+  label: string;
+}
 
 interface AnalysisWorkflowPayload {
   id?: string;
@@ -57,6 +58,18 @@ const credentials = ref<CredentialListItem[]>([]);
 const credentialId = ref("");
 const models = ref<LLMModel[]>([]);
 const model = ref("");
+const credentialOptions = computed<SelectOption[]>(() =>
+  credentials.value.map((credential) => ({
+    value: credential.id,
+    label: credential.is_shared ? `${credential.name} - shared` : credential.name,
+  })),
+);
+const modelOptions = computed<SelectOption[]>(() =>
+  models.value.map((availableModel) => ({
+    value: availableModel.id,
+    label: availableModel.name,
+  })),
+);
 
 const analyzing = ref(false);
 const running = ref(false);
@@ -142,6 +155,11 @@ async function loadModels(): Promise<void> {
   if (models.value.length > 0) {
     model.value = models.value[models.value.length - 1].id;
   }
+}
+
+function handleCredentialSelect(value: string | undefined): void {
+  credentialId.value = value ?? "";
+  void loadModels();
 }
 
 const EXECUTION_CANCELLED = "Execution cancelled";
@@ -324,47 +342,38 @@ onBeforeUnmount(() => {
     <template v-else>
       <div class="px-4 py-2 border-b border-border/40 space-y-2 shrink-0">
         <div class="flex items-center gap-2">
-          <div class="relative flex-1 min-w-0">
-            <select
-              v-model="credentialId"
-              class="h-9 w-full min-w-0 truncate rounded-md border border-border bg-background pl-2.5 pr-9 text-sm appearance-none cursor-pointer"
+          <div
+            class="flex-1 min-w-0"
+            data-testid="ai-analyzer-credential-selector"
+          >
+            <SearchableSelect
+              id="ai-analyzer-credential-select"
+              :model-value="credentialId"
+              :options="credentialOptions"
+              :placeholder="credentials.length === 0 ? 'No LLM credential' : 'Select credential...'"
+              search-placeholder="Search credentials..."
+              empty-text="No credentials found."
               :disabled="analyzing"
-              @change="loadModels"
-            >
-              <option
-                v-if="credentials.length === 0"
-                value=""
-              >
-                No LLM credential
-              </option>
-              <option
-                v-for="c in credentials"
-                :key="c.id"
-                :value="c.id"
-              >
-                {{ c.name }}
-              </option>
-            </select>
-            <ChevronDown
-              class="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 shrink-0 text-muted-foreground"
+              select-class="h-9 min-h-0 rounded-md border-border bg-background shadow-none"
+              content-class="z-[70]"
+              @update:model-value="handleCredentialSelect"
             />
           </div>
-          <div class="relative flex-1 min-w-0">
-            <select
-              v-model="model"
-              class="h-9 w-full min-w-0 truncate rounded-md border border-border bg-background pl-2.5 pr-9 text-sm appearance-none cursor-pointer disabled:opacity-50"
+          <div
+            class="flex-1 min-w-0"
+            data-testid="ai-analyzer-model-selector"
+          >
+            <SearchableSelect
+              id="ai-analyzer-model-select"
+              :model-value="model"
+              :options="modelOptions"
+              placeholder="Select model..."
+              search-placeholder="Search models..."
+              empty-text="No models found."
               :disabled="analyzing || models.length === 0"
-            >
-              <option
-                v-for="m in models"
-                :key="m.id"
-                :value="m.id"
-              >
-                {{ m.name }}
-              </option>
-            </select>
-            <ChevronDown
-              class="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 shrink-0 text-muted-foreground"
+              select-class="h-9 min-h-0 rounded-md border-border bg-background shadow-none"
+              content-class="z-[70]"
+              @update:model-value="model = $event ?? ''"
             />
           </div>
         </div>
