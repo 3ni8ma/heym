@@ -6487,6 +6487,41 @@ export function usePropertiesPanelController() {
     { value: "aiStep", label: "AI Step" },
   ];
 
+  const playwrightModeOptions: { value: "steps" | "code"; label: string }[] = [
+    { value: "steps", label: "Steps" },
+    { value: "code", label: "Run Code" },
+  ];
+
+  const playwrightMode = computed((): "steps" | "code" => {
+    const node = workflowStore.selectedNode;
+    if (!node || node.type !== "playwright") {
+      return "steps";
+    }
+    const explicit = node.data.playwrightMode;
+    if (explicit === "code" || explicit === "steps") {
+      return explicit;
+    }
+    // Legacy: custom code with no steps implied Run Code mode.
+    const hasCode = Boolean((node.data.playwrightCode || "").trim());
+    const hasSteps = (node.data.playwrightSteps || []).length > 0;
+    if (hasCode && !hasSteps) {
+      return "code";
+    }
+    return "steps";
+  });
+
+  function setPlaywrightMode(mode: "steps" | "code"): void {
+    const node = workflowStore.selectedNode;
+    if (!node || node.type !== "playwright") {
+      return;
+    }
+    updateNodeData("playwrightMode", mode);
+    if (mode === "code" && node.data.playwrightAuthEnabled === true) {
+      // Auth bootstrap is step-only; disable it when switching to Run Code.
+      updateNodeData("playwrightAuthEnabled", false);
+    }
+  }
+
   const playwrightAiStepModelsCache = ref<Record<string, { value: string; label: string }[]>>({});
 
   async function loadPlaywrightAiStepModels(credentialId: string): Promise<void> {
@@ -9097,6 +9132,9 @@ export function usePropertiesPanelController() {
     updateCrawlerSelector,
     updateCrawlerSelectorAttributes,
     playwrightStepActionOptions,
+    playwrightModeOptions,
+    playwrightMode,
+    setPlaywrightMode,
     loadPlaywrightAiStepModels,
     playwrightAiStepModelOptions,
     playwrightStepSections,

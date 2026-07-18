@@ -1112,6 +1112,7 @@ function getDefaultNodeData(type: NodeType): WorkflowNode["data"] {
     consoleLog: { label: "consoleLog", logMessage: "$input" },
     playwright: {
       label: "playwright",
+      playwrightMode: "steps",
       playwrightSteps: [],
       playwrightCode: "",
       playwrightHeadless: true,

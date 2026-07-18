@@ -6904,13 +6904,24 @@ class WorkflowExecutor:
         steps = node_data.get("playwrightSteps") or []
         auth_enabled = node_data.get("playwrightAuthEnabled", False) is True
         playwright_code = node_data.get("playwrightCode", "").strip()
+        playwright_mode = str(node_data.get("playwrightMode") or "").strip().lower()
         capture_network = node_data.get("playwrightCaptureNetwork", False)
         auth_state: dict[str, object] | None = None
         auth_check_selector = ""
         auth_check_timeout = 5000
         auth_fallback_steps = node_data.get("playwrightAuthFallbackSteps") or []
 
+        # Mode "code" forces the custom playwrightCode path. Legacy nodes without
+        # playwrightMode still use custom code when steps are empty and code is set.
+        use_custom_code = playwright_mode == "code" or (
+            playwright_mode != "steps" and not steps and bool(playwright_code)
+        )
+
         if auth_enabled:
+            if use_custom_code:
+                raise ValueError(
+                    "Playwright auth bootstrap requires step-based execution. Custom code is not supported."
+                )
             if not steps:
                 raise ValueError(
                     "Playwright auth bootstrap requires step-based execution. Custom code is not supported."
@@ -6944,7 +6955,28 @@ class WorkflowExecutor:
             )
 
         is_custom_code = False
-        if steps:
+        if use_custom_code:
+            # Custom code path: `playwrightCode` is attacker-controllable Python. Fail closed
+            # unless an operator has explicitly opted in. Checked here at the execution sink so
+            # it also covers already-stored workflows and cron / sub-workflow / anonymous
+            # execution paths, not just the update endpoint. When enabled it runs in a hardened
+            # isolated container (see below), not the backend process.
+            is_custom_code = True
+            if not playwright_code:
+                raise ValueError(
+                    "Playwright Run Code mode requires playwrightCode. Paste Playwright Python "
+                    "or switch Mode back to Steps."
+                )
+            from app.config import settings
+
+            if not settings.playwright_custom_code_enabled:
+                raise ValueError(
+                    "Custom Playwright code execution is disabled. This field runs arbitrary "
+                    "Python and is off by default. Use step-based Playwright actions instead, "
+                    "or have an administrator set HEYM_PLAYWRIGHT_CUSTOM_CODE_ENABLED=true "
+                    "to enable it (only on trusted, isolated deployments)."
+                )
+        elif steps:
             playwright_code = generate_playwright_code(
                 steps,
                 capture_network=capture_network,
@@ -6954,27 +6986,10 @@ class WorkflowExecutor:
                 auth_check_timeout=auth_check_timeout,
                 auth_fallback_steps=auth_fallback_steps,
             )
-        elif not playwright_code:
+        else:
             raise ValueError(
                 "Playwright node requires steps. Add at least one step (navigate, click, etc.)."
             )
-        else:
-            # Custom code path: `playwrightCode` is attacker-controllable Python. Fail closed
-            # unless an operator has explicitly opted in. Checked here at the execution sink so
-            # it also covers already-stored workflows and cron / sub-workflow / anonymous
-            # execution paths, not just the update endpoint. When enabled it runs in a hardened
-            # isolated container (see below), not the backend process.
-            is_custom_code = True
-            from app.config import settings
-
-            if not settings.playwright_custom_code_enabled:
-                raise ValueError(
-                    "Custom Playwright code execution is disabled. This field runs arbitrary "
-                    "Python in the backend process and is off by default. Use step-based "
-                    "Playwright actions instead, or have an administrator set "
-                    "HEYM_PLAYWRIGHT_CUSTOM_CODE_ENABLED=true to enable it (only on trusted, "
-                    "isolated deployments)."
-                )
 
         headless = node_data.get("playwrightHeadless", True)
         # In Docker/headless environments (no DISPLAY), force headless to avoid "Missing X server" errors

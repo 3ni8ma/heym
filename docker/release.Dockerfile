@@ -123,7 +123,9 @@ ENV HEYM_CODEX_CLI_COMMAND=/usr/local/bin/heym-codex-docker \
     HEYM_CODEX_DOCKER_WORKSPACE_VOLUME=heym-codex-workspaces \
     HEYM_CODEX_NETWORK_ACCESS=true \
     HEYM_CODEX_WORKSPACE_DIR=/app/data/codex-workspaces \
-    HEYM_SKILL_IMAGE=ghcr.io/heymrun/heym:${APP_VERSION}
+    HEYM_SKILL_IMAGE=ghcr.io/heymrun/heym:${APP_VERSION} \
+    HEYM_PLAYWRIGHT_SANDBOX_IMAGE=ghcr.io/heymrun/heym:${APP_VERSION} \
+    HEYM_PLAYWRIGHT_SANDBOX_PYTHON=/app/backend/.venv/bin/python
 
 RUN chmod +x /app/release-entrypoint.sh /usr/local/bin/heym-codex-docker
 
