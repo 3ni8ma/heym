@@ -2,7 +2,10 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock
 
+from app.config import settings
+from app.services.coding_agent import pr_publish
 from app.services.opencode_runner_service import OpenCodeRunnerService, OpenCodeRunRequest
 
 _WS = Path("/tmp/heym-oc-ws/run1")
@@ -41,6 +44,8 @@ class TestOpenCodeRunCommand(unittest.TestCase):
         self.assertEqual(cmd[cmd.index("--agent") + 1], "build")
         self.assertNotIn("--variant", cmd)
         self.assertIn("Task:", cmd[-1])
+        self.assertIn("Do NOT run git", cmd[-1])
+        self.assertIn("./check.sh", cmd[-1])
 
     def test_run_command_pins_workspace_dir(self):
         cmd = self.svc.build_run_command("opencode/kimi-k3", _request(), _WS)
@@ -115,3 +120,69 @@ class TestOpenCodeParser(unittest.TestCase):
         result = self.svc.parse_events("")
         self.assertEqual(result.status, "completed")
         self.assertTrue(result.summary)
+
+
+class TestOpenCodeExecFailureFormatting(unittest.TestCase):
+    def test_event_stream_is_not_dumped_as_error(self) -> None:
+        stdout = "\n".join(
+            [
+                json.dumps({"type": "step_start", "sessionID": "ses_1"}),
+                json.dumps(
+                    {
+                        "type": "tool_use",
+                        "part": {
+                            "tool": "bash",
+                            "state": {
+                                "status": "completed",
+                                "title": "./check.sh",
+                                "output": "FATAL ERROR: JavaScript heap out of memory",
+                                "metadata": {"exit": 134},
+                            },
+                        },
+                    }
+                ),
+                json.dumps({"type": "step_start", "sessionID": "ses_1"}),
+            ]
+        )
+        detail = OpenCodeRunnerService._format_exec_failure(137, stdout, "")
+        self.assertNotIn('"sessionID"', detail)
+        self.assertIn("bash: ./check.sh failed", detail)
+        self.assertIn("heap out of memory", detail)
+        self.assertIn("exited with code 137", detail)
+        self.assertIn("OOM", detail)
+
+    def test_plain_stderr_is_preserved(self) -> None:
+        detail = OpenCodeRunnerService._format_exec_failure(1, "", "opencode: command failed")
+        self.assertEqual(detail, "opencode: command failed")
+
+
+class TestOpenCodePushBranch(unittest.TestCase):
+    def setUp(self) -> None:
+        self.runner = OpenCodeRunnerService(workspace_root="/tmp/heym-oc-ws")
+        self.runner._run_command = MagicMock()  # type: ignore[method-assign]
+        self.workspace = Path("/tmp/ws")
+        self.request = _request(publish_mode="update_existing_pr", branch_name="opencode/run")
+
+    def test_existing_remote_branch_rebase_includes_git_identity(self) -> None:
+        self.runner._git_output = MagicMock(  # type: ignore[method-assign]
+            return_value="abc123\trefs/heads/opencode/run\n"
+        )
+
+        self.runner._push_branch(self.workspace, self.request, "opencode/run")
+
+        commands = [call.args[0] for call in self.runner._run_command.call_args_list]
+        self.assertEqual(
+            commands[1],
+            [
+                "git",
+                *pr_publish.git_identity_args(
+                    settings.opencode_git_author_name, settings.opencode_git_author_email
+                ),
+                "pull",
+                "--rebase",
+                "--strategy-option=theirs",
+                "origin",
+                "opencode/run",
+            ],
+        )
+        self.assertEqual(commands[2], ["git", "push", "-u", "origin", "opencode/run"])

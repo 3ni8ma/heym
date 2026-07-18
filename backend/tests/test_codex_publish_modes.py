@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from app.config import settings
 from app.services.codex_runner_service import (
     _CODEX_REMOTE_PUBLISH_MODES,
     CODEX_FINAL_OUTPUT_SCHEMA,
@@ -10,6 +11,7 @@ from app.services.codex_runner_service import (
     CodexRunRequest,
     CodexRunResult,
 )
+from app.services.coding_agent import pr_publish
 
 
 class TestOutputSchema(unittest.TestCase):
@@ -124,6 +126,9 @@ class TestPushBranch(unittest.TestCase):
             commands[1],
             [
                 "git",
+                *pr_publish.git_identity_args(
+                    settings.codex_git_author_name, settings.codex_git_author_email
+                ),
                 "pull",
                 "--rebase",
                 "--strategy-option=theirs",
