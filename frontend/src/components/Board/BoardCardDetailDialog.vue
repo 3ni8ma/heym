@@ -268,9 +268,12 @@ async function copyRun(run: CardRun): Promise<void> {
   }
 }
 
-function openLiveRun(run: CardRun): void {
+async function openLiveRun(run: CardRun): Promise<void> {
   if (!run.workflow_id || !run.active_execution_id) return;
-  void router.push({
+  // Replace the dialog history entry with the editor route so Back returns to the board.
+  // Dialog unmount must not history.back() after this — useDialogBackHistory skips rewind
+  // when the URL has already left the dialog entry.
+  await router.replace({
     name: "editor",
     params: {
       id: run.workflow_id,
@@ -285,6 +288,7 @@ function openLiveRun(run: CardRun): void {
   <Dialog
     :open="open"
     :title="detail?.card.title ?? 'Card'"
+    close-on-back
     @close="emit('close')"
   >
     <template

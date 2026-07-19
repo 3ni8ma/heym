@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
 import {
   createWorkflow,
@@ -25,13 +25,30 @@ const DEFAULT_COLUMNS = ["Backlog", "Planning", "Development", "Done"];
 type ApiColumn = { id: string; name: string };
 type ApiCard = { id: string; column_id: string; run_status: string };
 
+interface BoardSetupOptions {
+  mapperCredentialId?: string;
+}
+
+interface TouchPoint {
+  x: number;
+  y: number;
+}
+
 /** The board dialogs require an Agentic Kanban Model, so the account needs a credential the
- *  API accepts as its own (the models come from the provider catalog, no provider call). */
+ *  API accepts as its own (the models come from the provider catalog, no provider call).
+ *  Credential names are unique per user, so reuse an existing Board model across serial tests. */
 async function setUpMapperCredential(page: Page): Promise<string> {
+  const listResponse = await page.request.get("/api/credentials");
+  expect(listResponse.ok()).toBeTruthy();
+  const existing = (await listResponse.json()) as Array<{ id: string; name: string; type: string }>;
+  const found = existing.find((credential) => credential.name === "Board model");
+  if (found) return found.id;
+
   const response = await page.request.post("/api/credentials", {
     data: { name: "Board model", type: "openai", config: { api_key: "sk-board-e2e" } },
   });
-  const credential = await response.json();
+  expect(response.ok()).toBeTruthy();
+  const credential = (await response.json()) as { id: string };
   return credential.id;
 }
 
@@ -48,17 +65,66 @@ async function pickMapperModel(page: Page): Promise<void> {
 async function createBoardWithCard(
   page: Page,
   title: string,
+  options?: BoardSetupOptions,
 ): Promise<{ boardId: string; cardId: string; columns: ApiColumn[] }> {
-  const board = await (await page.request.post("/api/boards", { data: { name: "Test" } })).json();
-  const state = await (await page.request.get(`/api/boards/${board.id}`)).json();
+  const createResponse = await page.request.post("/api/boards", {
+    data: {
+      name: "Test",
+      mapper_model: options?.mapperCredentialId ? "gpt-4o" : undefined,
+      mapper_credential_id: options?.mapperCredentialId,
+    },
+  });
+  expect(createResponse.ok()).toBeTruthy();
+  const board = (await createResponse.json()) as { id: string };
+  const stateResponse = await page.request.get(`/api/boards/${board.id}`);
+  expect(stateResponse.ok()).toBeTruthy();
+  const state = (await stateResponse.json()) as {
+    columns: ApiColumn[];
+    mapper_model: string | null;
+    mapper_credential_id: string | null;
+  };
+  if (options?.mapperCredentialId) {
+    expect(state.mapper_credential_id).toBe(options.mapperCredentialId);
+    expect(state.mapper_model).toBe("gpt-4o");
+  }
   const columns: ApiColumn[] = state.columns;
   const backlog = columns.find((c) => c.name === "Backlog")!;
-  const card = await (
-    await page.request.post(`/api/boards/${board.id}/cards`, {
-      data: { title, column_id: backlog.id },
-    })
-  ).json();
+  const cardResponse = await page.request.post(`/api/boards/${board.id}/cards`, {
+    data: { title, column_id: backlog.id },
+  });
+  expect(cardResponse.ok()).toBeTruthy();
+  const card = (await cardResponse.json()) as { id: string };
   return { boardId: board.id, cardId: card.id, columns };
+}
+
+async function dispatchSingleTouch(
+  target: Locator,
+  type: "touchstart" | "touchmove" | "touchend" | "touchcancel",
+  point: TouchPoint,
+): Promise<void> {
+  await target.evaluate(
+    (element, eventInit) => {
+      const touch = new Touch({
+        identifier: 1,
+        target: element,
+        clientX: eventInit.x,
+        clientY: eventInit.y,
+        screenX: eventInit.x,
+        screenY: eventInit.y,
+      });
+      const ended = eventInit.type === "touchend" || eventInit.type === "touchcancel";
+      element.dispatchEvent(
+        new TouchEvent(eventInit.type, {
+          bubbles: true,
+          cancelable: true,
+          touches: ended ? [] : [touch],
+          targetTouches: ended ? [] : [touch],
+          changedTouches: [touch],
+        }),
+      );
+    },
+    { type, ...point },
+  );
 }
 
 /** Poll the board until the card settles, returning its final column and status. */
@@ -311,6 +377,118 @@ test("fits board controls and lanes within a mobile viewport", async ({ page }) 
     return element.scrollLeft;
   });
   expect(scrollLeft).toBeGreaterThan(0);
+});
+
+test("mobile Back closes card detail without leaving the board", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const { boardId, cardId } = await createBoardWithCard(page, "Mobile detail");
+  await page.goto(`/?tab=board&board=${boardId}`);
+  const boardUrl = page.url();
+
+  await page.getByTestId(`board-card-${cardId}`).click();
+  await expect(page.getByPlaceholder("Describe the job for this card")).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => window.history.state?.heymDialog ?? null))
+    .not.toBeNull();
+
+  await page.evaluate(() => window.history.back());
+  await expect(page.getByPlaceholder("Describe the job for this card")).not.toBeVisible();
+  expect(page.url()).toBe(boardUrl);
+
+  // A normal close consumes the synthetic entry too, so the next Back is never wasted.
+  await page.getByTestId(`board-card-${cardId}`).click();
+  await expect(page.getByPlaceholder("Describe the job for this card")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByPlaceholder("Describe the job for this card")).not.toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => window.history.state?.heymDialog ?? null))
+    .toBeNull();
+  expect(page.url()).toBe(boardUrl);
+});
+
+test("drags a card between columns with touch and shows drop feedback", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const mapperCredentialId = await setUpMapperCredential(page);
+  const { boardId, cardId, columns } = await createBoardWithCard(page, "Touch move", {
+    mapperCredentialId,
+  });
+  const planning = columns.find((column) => column.name === "Planning")!;
+  await page.goto(`/?tab=board&board=${boardId}`);
+
+  const card = page.getByTestId(`board-card-${cardId}`);
+  // Touch drag is gated on the Agentic Kanban Model; wait until the card is actionable.
+  await expect(card).toHaveAttribute("draggable", "true");
+  const cardBox = await card.boundingBox();
+  expect(cardBox).not.toBeNull();
+  const start = {
+    x: cardBox!.x + cardBox!.width / 2,
+    y: cardBox!.y + cardBox!.height / 2,
+  };
+  await dispatchSingleTouch(card, "touchstart", start);
+  await page.waitForTimeout(350);
+  await expect(card).toHaveAttribute("aria-grabbed", "true");
+
+  await dispatchSingleTouch(card, "touchcancel", start);
+  await expect(card).toHaveAttribute("aria-grabbed", "false");
+  await expect(page.getByTestId("board-column-Backlog")).not.toHaveAttribute(
+    "data-touch-drag-over",
+    "true",
+  );
+  await dispatchSingleTouch(card, "touchstart", start);
+  await page.waitForTimeout(350);
+  await expect(card).toHaveAttribute("aria-grabbed", "true");
+
+  // Holding near the edge scrolls the horizontal board until the next lane is reachable.
+  for (let index = 0; index < 20; index += 1) {
+    await dispatchSingleTouch(card, "touchmove", { x: 385, y: start.y });
+  }
+  const canvasScroll = await page.getByTestId("board-canvas").evaluate((element) =>
+    element.scrollLeft
+  );
+  expect(canvasScroll).toBeGreaterThan(0);
+
+  const planningLane = page.getByTestId("board-column-Planning");
+  const planningBox = await planningLane.boundingBox();
+  expect(planningBox).not.toBeNull();
+  const destination = {
+    x: Math.max(20, Math.min(370, planningBox!.x + planningBox!.width / 2)),
+    y: planningBox!.y + Math.min(140, planningBox!.height / 2),
+  };
+  await dispatchSingleTouch(card, "touchmove", destination);
+  await expect(planningLane).toHaveAttribute("data-touch-drag-over", "true");
+  await page.screenshot({ path: ".e2e-artifacts/mobile-kanban-touch-drag.png" });
+
+  await dispatchSingleTouch(card, "touchend", destination);
+  await expect(planningLane.getByTestId(`board-card-${cardId}`)).toBeVisible();
+  await expect(page.getByPlaceholder("Describe the job for this card")).toHaveCount(0);
+  await expect
+    .poll(async () => {
+      const state = await (await page.request.get(`/api/boards/${boardId}`)).json();
+      return (state.cards as ApiCard[]).find((entry) => entry.id === cardId)?.column_id;
+    })
+    .toBe(planning.id);
+});
+
+test("keeps desktop card drag and drop working", async ({ page }) => {
+  const mapperCredentialId = await setUpMapperCredential(page);
+  const { boardId, cardId, columns } = await createBoardWithCard(page, "Desktop move", {
+    mapperCredentialId,
+  });
+  const planning = columns.find((column) => column.name === "Planning")!;
+  await page.goto(`/?tab=board&board=${boardId}`);
+
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await page.getByTestId(`board-card-${cardId}`).dispatchEvent("dragstart", { dataTransfer });
+  await page.getByTestId("board-column-Planning").dispatchEvent("drop", { dataTransfer });
+
+  await expect(page.getByTestId("board-column-Planning").getByTestId(`board-card-${cardId}`))
+    .toBeVisible();
+  await expect
+    .poll(async () => {
+      const state = await (await page.request.get(`/api/boards/${boardId}`)).json();
+      return (state.cards as ApiCard[]).find((entry) => entry.id === cardId)?.column_id;
+    })
+    .toBe(planning.id);
 });
 
 test("moves a card to the top whenever it is updated", async ({ page }) => {
