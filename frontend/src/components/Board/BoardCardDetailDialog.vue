@@ -270,8 +270,9 @@ async function copyRun(run: CardRun): Promise<void> {
 
 async function openLiveRun(run: CardRun): Promise<void> {
   if (!run.workflow_id || !run.active_execution_id) return;
-  // Replace the dialog's same-URL history entry with the editor route. This leaves the
-  // board directly behind the editor and avoids racing the dialog's close cleanup.
+  // Replace the dialog history entry with the editor route so Back returns to the board.
+  // Dialog unmount must not history.back() after this — useDialogBackHistory skips rewind
+  // when the URL has already left the dialog entry.
   await router.replace({
     name: "editor",
     params: {

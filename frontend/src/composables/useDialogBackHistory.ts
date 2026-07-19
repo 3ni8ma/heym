@@ -18,6 +18,7 @@ export function useDialogBackHistory(
 ): UseDialogBackHistoryResult {
   const dialogHistoryId = `dialog-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   let ownsHistoryEntry = false;
+  let dialogHistoryHref: string | null = null;
 
   function currentHistoryBelongsToDialog(): boolean {
     const state = window.history.state as Record<string, unknown> | null;
@@ -27,6 +28,7 @@ export function useDialogBackHistory(
   function handlePopState(event: PopStateEvent): void {
     if (!ownsHistoryEntry || !options.isOpen()) return;
     ownsHistoryEntry = false;
+    dialogHistoryHref = null;
     window.removeEventListener("popstate", handlePopState, captureOptions);
     event.stopImmediatePropagation();
     options.onBack();
@@ -39,10 +41,11 @@ export function useDialogBackHistory(
       currentState !== null && typeof currentState === "object"
         ? (currentState as Record<string, unknown>)
         : {};
+    dialogHistoryHref = window.location.href;
     window.history.pushState(
       { ...state, [DIALOG_HISTORY_STATE_KEY]: dialogHistoryId },
       "",
-      window.location.href,
+      dialogHistoryHref,
     );
     ownsHistoryEntry = true;
     // Capture runs before Vue Router and the app-wide overlay handler. The pushed URL is
@@ -54,7 +57,12 @@ export function useDialogBackHistory(
     window.removeEventListener("popstate", handlePopState, captureOptions);
     if (!ownsHistoryEntry) return;
     ownsHistoryEntry = false;
+    const pushedHref = dialogHistoryHref;
+    dialogHistoryHref = null;
     if (!currentHistoryBelongsToDialog()) return;
+    // Navigating away (e.g. Open live → editor) already replaced/left this entry. Calling
+    // history.back() here would undo that route and land back on the board (`/` pathname).
+    if (pushedHref !== null && window.location.href !== pushedHref) return;
 
     // The global overlay handler must ignore the pop used only to remove this dialog's
     // same-URL history entry after a close button, backdrop click, or Escape press.
