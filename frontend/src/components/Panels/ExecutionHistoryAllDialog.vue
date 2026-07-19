@@ -766,9 +766,9 @@ function bringToCanvas(): void {
     @close="emit('close')"
     @escape="handleDialogEscape"
   >
-    <div class="space-y-4">
-      <div class="flex items-start justify-between gap-3">
-        <div class="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+    <div class="space-y-3 sm:space-y-4">
+      <div class="flex items-start justify-between gap-2 sm:gap-3">
+        <div class="flex min-w-0 flex-1 flex-col gap-1.5 sm:gap-2 sm:flex-row sm:items-center">
           <p class="text-sm text-muted-foreground shrink-0">
             {{ totalCount }} run(s)
           </p>
@@ -782,7 +782,7 @@ function bringToCanvas(): void {
             clear-aria-label="Clear tag filter"
           />
         </div>
-        <div class="flex items-center gap-2 flex-wrap justify-end">
+        <div class="flex items-center gap-1 sm:gap-2 flex-wrap justify-end">
           <AutoRefreshControl
             :active="open"
             :preset-options="[...HISTORY_AUTO_REFRESH_PRESETS]"
@@ -820,15 +820,15 @@ function bringToCanvas(): void {
             :loading="clearing"
             @click="clearAllHistory"
           >
-            <Trash2 class="w-4 h-4 mr-1" />
-            Clear All
+            <Trash2 class="w-4 h-4 sm:mr-1" />
+            <span class="hidden sm:inline">Clear All</span>
           </Button>
         </div>
       </div>
 
       <div
         v-if="searchActive"
-        class="flex flex-col gap-3 sm:flex-row sm:items-center"
+        class="flex flex-col gap-2 sm:gap-3 sm:flex-row sm:items-center"
       >
         <div
           class="relative flex-1"
@@ -876,7 +876,7 @@ function bringToCanvas(): void {
 
       <div
         v-else
-        class="grid gap-4"
+        class="grid gap-3 sm:gap-4"
         :class="{ 'opacity-50 pointer-events-none': isRefreshing }"
       >
         <!-- Running executions -->
@@ -887,7 +887,7 @@ function bringToCanvas(): void {
           <div
             v-for="active in activeExecutions"
             :key="active.execution_id"
-            class="flex items-center justify-between gap-3 p-2.5 rounded-md border border-blue-500/30 bg-blue-500/10"
+            class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3 p-2.5 rounded-md border border-blue-500/30 bg-blue-500/10"
           >
             <div class="min-w-0 flex-1">
               <div class="flex items-center gap-2">
@@ -901,7 +901,7 @@ function bringToCanvas(): void {
                 {{ active.workflow_name }} · In progress...
               </div>
             </div>
-            <div class="flex shrink-0 items-center gap-1.5">
+            <div class="flex shrink-0 items-center gap-1 sm:gap-1.5">
               <Button
                 variant="outline"
                 size="sm"
@@ -909,8 +909,8 @@ function bringToCanvas(): void {
                 :data-testid="`open-live-execution-${active.execution_id}`"
                 @click="openActiveExecution(active)"
               >
-                <Radio class="mr-1 h-3 w-3" />
-                Open live canvas
+                <Radio class="sm:mr-1 h-3 w-3" />
+                <span class="hidden sm:inline">Open live canvas</span>
               </Button>
               <Button
                 variant="destructive"
@@ -1002,7 +1002,7 @@ function bringToCanvas(): void {
 
         <div
           ref="detailContainerRef"
-          class="border-t pt-4 flex flex-col"
+          class="border-t pt-3 sm:pt-4 flex flex-col"
           :style="capturedMinHeight ? { minHeight: `${capturedMinHeight}px` } : undefined"
         >
           <div
@@ -1036,11 +1036,11 @@ function bringToCanvas(): void {
             <div class="text-sm text-muted-foreground">
               {{ selectedEntry?.workflow_name }}
             </div>
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between gap-2">
               <div class="text-sm font-semibold">
                 Inputs
               </div>
-              <div class="flex items-center gap-1">
+              <div class="flex items-center gap-0.5 sm:gap-1 flex-wrap justify-end">
                 <Button
                   v-if="pendingHitlUrl"
                   variant="ghost"
@@ -1076,7 +1076,7 @@ function bringToCanvas(): void {
               </div>
             </div>
             <pre class="text-xs bg-muted/30 p-3 rounded-md max-h-32 overflow-auto whitespace-pre-wrap break-all">{{ JSON.stringify(selectedEntry?.inputs ?? {}, null, 2) }}</pre>
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between gap-2">
               <div class="text-sm font-semibold">
                 Outputs
               </div>
@@ -1099,7 +1099,7 @@ function bringToCanvas(): void {
               v-if="stepsForDisplay.length > 0"
               class="space-y-2"
             >
-              <div class="flex items-center justify-between">
+              <div class="flex items-center justify-between gap-2">
                 <div class="text-sm font-semibold">
                   Steps
                 </div>

@@ -126,15 +126,15 @@ function toggleFullscreen(): void {
           :class="[
             'dialog-content relative z-50 w-full border border-border/60',
             'bg-card',
-            'p-6 md:p-7 flex flex-col',
+            'p-4 sm:p-6 md:p-7 flex flex-col',
             isFullscreen ? 'max-h-[100vh]' : 'max-h-[90vh] sm:max-h-[85vh] rounded-2xl',
             'overflow-hidden',
             sizeClasses
           ]"
           @click.stop
         >
-          <div class="dialog-header flex items-center justify-between pb-4 mb-5 shrink-0 gap-2">
-            <div class="flex items-center gap-2 md:gap-4 min-w-0 flex-1 overflow-hidden">
+          <div class="dialog-header flex items-center justify-between pb-3 sm:pb-4 mb-3 sm:mb-5 shrink-0 gap-1.5 sm:gap-2">
+            <div class="flex items-center gap-1.5 sm:gap-2 md:gap-4 min-w-0 flex-1 overflow-hidden">
               <div
                 v-if="title || $slots.subtitle"
                 class="min-w-0"
@@ -142,13 +142,13 @@ function toggleFullscreen(): void {
                 <h2
                   v-if="title"
                   :title="title"
-                  class="text-base md:text-lg font-semibold tracking-tight truncate"
+                  class="text-sm sm:text-base md:text-lg font-semibold tracking-tight line-clamp-1"
                 >
                   {{ title }}
                 </h2>
                 <div
                   v-if="$slots.subtitle"
-                  class="truncate leading-none"
+                  class="line-clamp-1 leading-snug sm:leading-none"
                 >
                   <slot name="subtitle" />
                 </div>
@@ -160,7 +160,7 @@ function toggleFullscreen(): void {
                 </div>
               </template>
             </div>
-            <div class="flex items-center gap-1.5 flex-shrink-0">
+            <div class="flex items-center gap-1 sm:gap-1.5 flex-shrink-0">
               <button
                 v-if="allowFullscreen"
                 class="dialog-btn flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground transition-all duration-200"
@@ -189,7 +189,7 @@ function toggleFullscreen(): void {
               </button>
             </div>
           </div>
-          <div class="dialog-body overflow-y-auto overflow-x-hidden flex-1 min-h-0 -ml-1 pl-1 -mr-4 pr-4 md:-mr-5 md:pr-5">
+          <div class="dialog-body overflow-y-auto overflow-x-hidden flex-1 min-h-0 -ml-1 pl-1 -mr-3 pr-3 sm:-mr-4 sm:pr-4 md:-mr-5 md:pr-5">
             <slot />
           </div>
         </div>
