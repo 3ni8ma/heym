@@ -41,18 +41,18 @@ function formatK(n: number): string {
 <template>
   <div
     v-if="contextUsage"
-    class="relative inline-flex shrink-0 pl-0 pr-2.5"
+    class="relative inline-flex shrink-0 pl-0 pr-1 sm:pr-2.5"
     @mouseenter="isOpen = true"
     @mouseleave="isOpen = false"
   >
     <button
       type="button"
-      class="inline-flex h-9 w-9 min-h-[36px] min-w-[36px] items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground"
+      class="inline-flex h-7 w-7 sm:h-9 sm:w-9 min-h-7 min-w-7 sm:min-h-[36px] sm:min-w-[36px] items-center justify-center rounded-lg sm:rounded-xl text-muted-foreground transition-colors hover:bg-muted/80 hover:text-foreground"
       :aria-label="`Context usage ${pct}%`"
       @click="isOpen = !isOpen"
     >
       <span
-        class="h-4 w-4 rounded-full"
+        class="h-3.5 w-3.5 sm:h-4 sm:w-4 rounded-full"
         :style="ringStyle"
       />
     </button>

@@ -101,6 +101,7 @@ async function handleLogout(): Promise<void> {
       </div>
 
       <div class="flex items-center gap-1.5 sm:gap-2">
+        <slot name="before-docs" />
         <router-link
           v-if="!hideDocsLink"
           to="/docs"

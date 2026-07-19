@@ -6,6 +6,8 @@ import { SquarePen, ChevronLeft, Trash2, Check, X } from "lucide-vue-next";
 import { useChatStore } from "@/stores/chat";
 import ChatListItem from "@/components/Chat/ChatListItem.vue";
 
+const MOBILE_SIDEBAR_MEDIA_QUERY = "(max-width: 767px)";
+
 interface Props {
   activeConversationId?: string;
 }
@@ -22,9 +24,16 @@ onMounted(() => {
   chatStore.loadConversations();
 });
 
+function closeSidebarIfMobile(): void {
+  if (typeof window !== "undefined" && window.matchMedia(MOBILE_SIDEBAR_MEDIA_QUERY).matches) {
+    chatStore.closeSidebar();
+  }
+}
+
 async function createNew(): Promise<void> {
   if (isCreatingConversation.value) return;
   isCreatingConversation.value = true;
+  closeSidebarIfMobile();
   try {
     const conv = await chatStore.createConversation();
     await router.push(`/chats/${conv.id}`);
@@ -35,6 +44,7 @@ async function createNew(): Promise<void> {
 
 function select(id: string): void {
   void chatStore.markConversationRead(id);
+  closeSidebarIfMobile();
   router.push(`/chats/${id}`);
 }
 
