@@ -70,15 +70,68 @@ def git_identity_args(name: str, email: str) -> list[str]:
     return ["-c", f"user.name={name}", "-c", f"user.email={email}"]
 
 
+# Placeholder agent closings that must never become a GitHub PR/commit subject.
+_MEANINGLESS_TITLE_RE = re.compile(
+    r"^(?:"
+    r"done|ok|okay|fixed|completed|finished|ready|success|all done|lgtm|wip|"
+    r"changes?(?:\s+are)?\s+done|task(?:\s+is)?\s+complete(?:d)?"
+    r")[.!]?\s*$",
+    re.IGNORECASE,
+)
+_PR_TITLE_LINE_RE = re.compile(r"(?im)^\s*PR_TITLE:\s*(.+?)\s*$")
+
+
+def normalize_title_candidate(text: str) -> str:
+    """Collapse whitespace and strip a leading ``PR_TITLE:`` label if present."""
+    cleaned = re.sub(r"\s+", " ", str(text or "")).strip()
+    cleaned = re.sub(r"^PR_TITLE:\s*", "", cleaned, flags=re.IGNORECASE).strip()
+    return cleaned.strip("\"'`")
+
+
+def is_meaningful_commit_title(title: str) -> bool:
+    """Return False for empty/short/placeholder titles such as ``Done.``."""
+    normalized = normalize_title_candidate(title)
+    if len(normalized) < 8:
+        return False
+    return _MEANINGLESS_TITLE_RE.match(normalized) is None
+
+
+def extract_pr_title_line(summary: str) -> tuple[str, str]:
+    """Parse a trailing ``PR_TITLE: …`` line from an agent summary.
+
+    Returns ``(title, summary_without_title_line)``. When no line is present the
+    original summary is returned unchanged and the title is empty.
+    """
+    text = str(summary or "")
+    match = None
+    for candidate in _PR_TITLE_LINE_RE.finditer(text):
+        match = candidate
+    if match is None:
+        return "", text
+    title = normalize_title_candidate(match.group(1))
+    cleaned = (text[: match.start()] + text[match.end() :]).strip()
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return title, cleaned
+
+
 def commit_title(pull_request_title: str, summary: str, *, fallback: str) -> str:
-    """Prefer the dedicated PR title; else the first sentence of the summary; else ``fallback``."""
-    title = re.sub(r"\s+", " ", str(pull_request_title or "")).strip()
-    if title:
-        return title
-    normalized = re.sub(r"\s+", " ", str(summary or "")).strip()
-    if not normalized:
-        return fallback
-    return re.split(r"(?<=[.!?])\s", normalized, maxsplit=1)[0]
+    """Prefer a meaningful dedicated PR title; else a summary sentence; else ``fallback``.
+
+    Skips placeholder subjects such as ``Done.`` that coding agents often emit as
+    the first sentence of an otherwise useful summary.
+    """
+    extracted_title, summary_without_title = extract_pr_title_line(summary)
+    candidates: list[str] = [
+        normalize_title_candidate(pull_request_title),
+        extracted_title,
+    ]
+    normalized = re.sub(r"\s+", " ", str(summary_without_title or "")).strip()
+    if normalized:
+        candidates.extend(re.split(r"(?<=[.!?])\s+", normalized))
+    for candidate in candidates:
+        if is_meaningful_commit_title(candidate):
+            return normalize_title_candidate(candidate)
+    return fallback
 
 
 def commit_body(summary: str, validation: str) -> str:

@@ -53,8 +53,48 @@ class TestPrPublishHelpers(unittest.TestCase):
             pr_publish.commit_title("", "Fix the bug. More detail.", fallback="fb"), "Fix the bug."
         )
 
+    def test_commit_title_skips_placeholder_done(self):
+        self.assertEqual(
+            pr_publish.commit_title(
+                "",
+                "Done. Move the chat list toggle before History on mobile.",
+                fallback="Apply changes",
+            ),
+            "Move the chat list toggle before History on mobile.",
+        )
+
+    def test_commit_title_skips_placeholder_pr_title(self):
+        self.assertEqual(
+            pr_publish.commit_title(
+                "Done.",
+                "Close the mobile sidebar after selecting a chat.",
+                fallback="Apply changes",
+            ),
+            "Close the mobile sidebar after selecting a chat.",
+        )
+
+    def test_commit_title_uses_pr_title_line(self):
+        self.assertEqual(
+            pr_publish.commit_title(
+                "",
+                "Implemented the mobile drawer fix.\n\nPR_TITLE: Reorder mobile chat header actions",
+                fallback="Apply changes",
+            ),
+            "Reorder mobile chat header actions",
+        )
+
     def test_commit_title_fallback(self):
         self.assertEqual(pr_publish.commit_title("", "", fallback="Apply changes"), "Apply changes")
+        self.assertEqual(
+            pr_publish.commit_title("Done.", "Done.", fallback="Apply changes"), "Apply changes"
+        )
+
+    def test_extract_pr_title_line(self):
+        title, summary = pr_publish.extract_pr_title_line(
+            "Finished the work.\nPR_TITLE: Fix mobile chat drawer\n"
+        )
+        self.assertEqual(title, "Fix mobile chat drawer")
+        self.assertEqual(summary, "Finished the work.")
 
     def test_pr_number_from_url(self):
         self.assertEqual(pr_publish.pr_number_from_url("https://github.com/a/b/pull/42"), 42)

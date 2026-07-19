@@ -33,11 +33,15 @@ _LOCAL_ONLY_RULES = (
     "Heym already checked out the correct branch. Do NOT run git at all (no status, checkout, "
     "fetch, commit, push, or branch commands); do NOT use the GitHub API or any remote tool to "
     "modify the repository — Heym performs every git and GitHub operation after you finish. "
-    "Do NOT install package managers, run ./check.sh, bun/npm/pnpm install, or full "
-    "lint/typecheck/test suites — the runner container is memory-limited and Heym validates "
-    "changes after you finish. For UI/frontend visual changes, save at least one PNG screenshot "
-    "under a gitignored path such as `frontend/.e2e-artifacts/`; Heym uploads those images onto "
-    "the pull request afterward."
+    "For UI/frontend visual changes you MUST save at least one PNG screenshot under a "
+    "gitignored path such as `frontend/.e2e-artifacts/`. If frontend dependencies are missing, "
+    "you MAY run a package install (for example `bun install`, `npm install`, or `pnpm install`) "
+    "and start a short-lived preview/dev server solely to capture the UI, then stop the server. "
+    "Do not commit screenshot binaries into source; Heym uploads those images onto the pull "
+    "request afterward. "
+    "End your final assistant message with a dedicated line "
+    "`PR_TITLE: <imperative one-line change description, ideally <=72 chars>` — never use "
+    "placeholders such as Done, Fixed, or Update."
 )
 _MAX_ERROR_DETAIL_CHARS = 4000
 
@@ -167,7 +171,13 @@ class OpenCodeRunnerService:
                 summary = text
         if not summary:
             summary = "OpenCode completed without a final assistant message."
-        return OpenCodeRunResult(status="completed", summary=summary, raw_events=events)
+        pull_request_title, cleaned_summary = pr_publish.extract_pr_title_line(summary)
+        return OpenCodeRunResult(
+            status="completed",
+            summary=cleaned_summary,
+            pull_request_title=pull_request_title,
+            raw_events=events,
+        )
 
     @staticmethod
     def _event_assistant_text(event: dict) -> str:
@@ -373,9 +383,7 @@ class OpenCodeRunnerService:
         if cls._looks_like_event_stream(stdout):
             parts.append(
                 f"OpenCode exited with code {returncode} before successful completion. "
-                "The runner container may have been killed (OOM) or the session aborted "
-                "mid-step — avoid heavy ./check.sh / install / typecheck work inside the "
-                "OpenCode node; Heym validates after the run."
+                "The runner container may have been killed (OOM) or the session aborted mid-step."
             )
         elif not parts:
             detail = (stdout or "").strip() or f"OpenCode exec failed (exit code {returncode})"

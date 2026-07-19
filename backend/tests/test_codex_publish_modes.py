@@ -62,6 +62,8 @@ class TestPublishModeConstants(unittest.TestCase):
         self.assertIn("GitHub API", prompt)
         self.assertIn("Heym performs every git", prompt)
         self.assertIn("frontend/.e2e-artifacts/", prompt)
+        self.assertIn("bun install", prompt)
+        self.assertIn("Never use placeholder titles", prompt)
         self.assertIn("translate the readme", prompt)
 
     def test_resume_prompt_forbids_git_and_github(self) -> None:
@@ -97,6 +99,17 @@ class TestCommitMessage(unittest.TestCase):
             summary="README.md translated. Headings, tables, notes localized; commands preserved.",
         )
         self.assertEqual(CodexRunnerService._commit_title(result), "README.md translated.")
+
+    def test_commit_title_skips_placeholder_done(self) -> None:
+        result = CodexRunResult(
+            status="completed",
+            summary="Done. Reorder the mobile chat header actions.",
+            pull_request_title="Done.",
+        )
+        self.assertEqual(
+            CodexRunnerService._commit_title(result),
+            "Reorder the mobile chat header actions.",
+        )
 
     def test_commit_body_has_full_summary_and_validation(self) -> None:
         result = CodexRunResult(

@@ -45,7 +45,10 @@ class TestOpenCodeRunCommand(unittest.TestCase):
         self.assertNotIn("--variant", cmd)
         self.assertIn("Task:", cmd[-1])
         self.assertIn("Do NOT run git", cmd[-1])
-        self.assertIn("./check.sh", cmd[-1])
+        self.assertIn("bun install", cmd[-1])
+        self.assertIn("PR_TITLE:", cmd[-1])
+        self.assertNotIn("./check.sh", cmd[-1])
+        self.assertNotIn("Do NOT install package managers", cmd[-1])
 
     def test_run_command_pins_workspace_dir(self):
         cmd = self.svc.build_run_command("opencode/kimi-k3", _request(), _WS)
@@ -112,6 +115,21 @@ class TestOpenCodeParser(unittest.TestCase):
         stdout = "not json\n" + json.dumps({"role": "assistant", "text": "Done."})
         self.assertEqual(self.svc.parse_events(stdout).summary, "Done.")
 
+    def test_parse_extracts_pr_title_line(self):
+        stdout = json.dumps(
+            {
+                "role": "assistant",
+                "text": (
+                    "Moved the chat list toggle before History.\n\n"
+                    "PR_TITLE: Reorder mobile chat header actions"
+                ),
+            }
+        )
+        result = self.svc.parse_events(stdout)
+        self.assertEqual(result.pull_request_title, "Reorder mobile chat header actions")
+        self.assertEqual(result.summary, "Moved the chat list toggle before History.")
+        self.assertNotIn("PR_TITLE:", result.summary)
+
     def test_parse_ignores_user_role(self):
         stdout = json.dumps({"role": "user", "text": "the task"})
         self.assertNotEqual(self.svc.parse_events(stdout).summary, "the task")
@@ -150,6 +168,7 @@ class TestOpenCodeExecFailureFormatting(unittest.TestCase):
         self.assertIn("heap out of memory", detail)
         self.assertIn("exited with code 137", detail)
         self.assertIn("OOM", detail)
+        self.assertNotIn("avoid heavy ./check.sh", detail)
 
     def test_plain_stderr_is_preserved(self) -> None:
         detail = OpenCodeRunnerService._format_exec_failure(1, "", "opencode: command failed")
