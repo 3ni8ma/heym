@@ -7,8 +7,7 @@ from app.services.node_execution.base import NodeExecutionContext
 
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the http node."""
-    _workflow_executor = import_module("app.services.workflow_executor")
-    get_http_client = _workflow_executor.get_http_client
+    ssrf_guard = import_module("app.services.ssrf_guard")
     self = ctx.executor
     node_id = ctx.node_id
     inputs = ctx.inputs
@@ -19,9 +18,13 @@ def execute(ctx: NodeExecutionContext) -> object:
     method, url, headers, body, follow_redirects = self.parse_curl(curl_command)
     if not url:
         raise ValueError("HTTP node requires a URL")
+    # Refuse targets that resolve to internal/metadata addresses before dialing
+    # (SSRF, GHSA-8wj7-v2w6-wfcx). The guarded client additionally pins the
+    # resolved IP so redirects and DNS rebinding cannot reach internal hosts.
+    ssrf_guard.guard_http_url(url)
     if body:
         body = self.evaluate_message_template(body, inputs, node_id)
-    http_client = get_http_client()
+    http_client = ssrf_guard.get_guarded_http_client()
     response = http_client.request(
         method,
         url,

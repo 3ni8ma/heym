@@ -462,7 +462,10 @@ class WorkflowExecutorBranchingTests(unittest.TestCase):
         request = httpx.Request("GET", "https://example.test/health")
         response = httpx.Response(200, json={"status": "healthy"}, request=request)
 
-        with patch("app.services.workflow_executor.get_http_client") as mock_get_client:
+        with (
+            patch("app.services.ssrf_guard.guard_http_url"),
+            patch("app.services.ssrf_guard.get_guarded_http_client") as mock_get_client,
+        ):
             mock_get_client.return_value.request.return_value = response
             executor = WorkflowExecutor(nodes=nodes, edges=edges)
 
