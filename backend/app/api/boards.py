@@ -545,6 +545,20 @@ async def delete_column(
             detail="Move or delete the cards in this column first",
         )
     await db.delete(column)
+    # Keep positions a dense 0..n-1 sequence — the planning gate is positional.
+    remaining = list(
+        (
+            await db.execute(
+                select(BoardColumn)
+                .where(BoardColumn.board_id == board.id)
+                .order_by(BoardColumn.position)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for position, item in enumerate(remaining):
+        item.position = position
     await db.commit()
 
 
@@ -848,6 +862,21 @@ async def run_card_chain(
     board, _ = await _get_board_for_user(db, board_id, current_user, write=True)
     card = await _get_board_card(db, board, card_id)
     column = await _get_board_column(db, board, card.column_id)
+    # Enforce the positional planning gate server-side: the leftmost column and the
+    # one to its right never auto-advance on Run — a comment releases them.
+    ordered = list(
+        (
+            await db.execute(
+                select(BoardColumn.id)
+                .where(BoardColumn.board_id == board.id)
+                .order_by(BoardColumn.position)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    column_index = ordered.index(column.id) if column.id in ordered else -1
+    allow_advance = column_index >= board_run_service.GATE_COLUMN_INDEX and not skip_auto_advance
     enqueued = await board_run_service.enqueue_card_chain(
         db,
         card=card,
@@ -855,7 +884,7 @@ async def run_card_chain(
         board=board,
         move=None,
         rerun=True,
-        allow_advance=not skip_auto_advance,
+        allow_advance=allow_advance,
     )
     if not enqueued:
         raise HTTPException(

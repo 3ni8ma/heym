@@ -46,9 +46,11 @@ MAX_HISTORY_ENTRIES = 200
 ACTIVE_RUN_STATUSES = ("running", "pending")
 _OUTPUT_SNIPPET_LIMIT = 500
 
-# Cards only auto-advance once they are past the planning gate. Index 0 (Backlog) and
-# index 1 (Planning) run their chain but wait there for a human answer; from index 2 on
-# a successful column cascades the card to the right.
+# The planning gate is positional, not name-based: the leftmost column (index 0) and
+# the column immediately to its right (index 1) run their chain then wait for a human.
+# From index 2 on, a successful chain cascades the card to the right. Column labels
+# (Backlog / Planning / Development / …) are defaults only — renaming or deleting
+# "Planning" does not move the gate.
 GATE_COLUMN_INDEX = 2
 
 # The event loop only keeps weak references to tasks, so a fire-and-forget
@@ -502,14 +504,14 @@ async def _run_chain(
             await _set_card_status(db, card_id, "success")
             await db.commit()
         if allow_advance:
-            # A follow-up round means the human already answered, so it releases the
-            # planning gate and the card flows on.
+            # Run never bypasses the positional planning gate — only a comment does
+            # (answer_card_comment passes ignore_gate=True). Follow-up runs in the
+            # gate columns stay put until the human answers.
             await _auto_advance(
                 card_id=card_id,
                 board_id=board_id,
                 from_column_id=column_id,
                 session_factory=session_factory,
-                ignore_gate=rerun,
             )
     except Exception as exc:  # noqa: BLE001 - chain must never crash the server
         logger.exception("Board chain failed for card %s: %s", card_id, exc)
@@ -829,9 +831,9 @@ async def _auto_advance(
     that column's chain. Empty columns are passed through; the cascade continues until the
     last column. Never raises (best-effort automation).
 
-    The planning gate: a card sitting in the first two columns (index 0 = Backlog,
-    index 1 = Planning) never cascades on its own. Planning runs its chain automatically,
-    but the card waits there for a human answer. Auto-advance only applies from index 2 on.
+    The planning gate is positional: a card in the leftmost column or the one to its
+    right never cascades on its own. That second column runs its chain, then waits for
+    a human answer. Auto-advance only applies from the third column onward.
     """
     try:
         async with session_factory() as db:
@@ -851,7 +853,7 @@ async def _auto_advance(
                 return
             from_index = ids.index(from_column_id)
             if not ignore_gate and from_index < GATE_COLUMN_INDEX:
-                # Backlog/Planning: run, then wait for the human. No cascade.
+                # Leftmost + its right neighbor: run, then wait for the human.
                 return
             prev_name = columns[from_index].name
             for target in columns[from_index + 1 :]:
