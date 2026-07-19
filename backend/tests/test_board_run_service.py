@@ -582,3 +582,24 @@ class TestEnqueueHoldsTaskReference(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0)
             await asyncio.sleep(0)
         self.assertEqual(len(board_run_service._BACKGROUND_CHAIN_TASKS), 0)
+
+
+class TestFailOpenRuns(unittest.IsolatedAsyncioTestCase):
+    async def test_clears_active_execution_id(self):
+        run = SimpleNamespace(
+            status="running",
+            error=None,
+            active_execution_id=uuid.uuid4(),
+            finished_at=None,
+        )
+        runs_res = MagicMock()
+        runs_res.scalars.return_value.all.return_value = [run]
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=runs_res)
+
+        await board_run_service._fail_open_runs(db, uuid.uuid4(), "chain crashed")
+
+        self.assertEqual(run.status, "failed")
+        self.assertEqual(run.error, "chain crashed")
+        self.assertIsNone(run.active_execution_id)
+        self.assertIsNotNone(run.finished_at)
