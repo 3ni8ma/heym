@@ -55,9 +55,9 @@ frontend/.e2e-artifacts/
 # Docker data
 data/
 
-# Lock files (keep these in git usually, but listing for awareness)
-# package-lock.json
-# yarn.lock
+# Lock files — bun.lock is the source of truth for frontend
+package-lock.json
+yarn.lock
 # bun.lockb
 # uv.lock
 .worktrees/

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
 import type { CredentialListItem } from "@/types/credential";
@@ -205,6 +205,34 @@ const confirmNewPassword = ref("");
 const passwordError = ref<string | null>(null);
 const passwordSuccess = ref<string | null>(null);
 
+const tabbarRef = ref<HTMLElement | null>(null);
+const showLeftShadow = ref(false);
+const showRightShadow = ref(false);
+let tabbarResizeObserver: ResizeObserver | null = null;
+
+function updateTabbarShadows(): void {
+  const container = tabbarRef.value;
+  if (!container) return;
+  showLeftShadow.value = container.scrollLeft > 2;
+  showRightShadow.value =
+    container.scrollLeft + container.clientWidth < container.scrollWidth - 2;
+}
+
+function setupTabbarObservers(): void {
+  nextTick(() => {
+    const container = tabbarRef.value;
+    if (!container) return;
+    updateTabbarShadows();
+    tabbarResizeObserver = new ResizeObserver(() => updateTabbarShadows());
+    tabbarResizeObserver.observe(container);
+  });
+}
+
+function teardownTabbarObservers(): void {
+  tabbarResizeObserver?.disconnect();
+  tabbarResizeObserver = null;
+}
+
 watch(
   () => props.open,
   (isOpen) => {
@@ -226,6 +254,11 @@ watch(
       if (activeTab.value === "plugins") {
         void loadPlugins();
       }
+      setupTabbarObservers();
+    } else {
+      teardownTabbarObservers();
+      showLeftShadow.value = false;
+      showRightShadow.value = false;
     }
   },
   { immediate: true },
@@ -254,6 +287,14 @@ async function handleSaveProfile(): Promise<void> {
     savingProfile.value = false;
   }
 }
+
+onMounted(() => {
+  setupTabbarObservers();
+});
+
+onUnmounted(() => {
+  teardownTabbarObservers();
+});
 
 async function handleChangePassword(): Promise<void> {
   passwordError.value = null;
@@ -323,55 +364,75 @@ async function handleChangePassword(): Promise<void> {
     @close="emit('close')"
   >
     <div class="space-y-5 -mt-3">
-      <div class="flex border-b border-border pb-1 overflow-x-auto">
-        <button
-          type="button"
-          class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
-          :class="activeTab === 'profile' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
-          @click="activeTab = 'profile'"
+      <div class="relative">
+        <Transition name="tab-fade">
+          <div
+            v-if="showLeftShadow"
+            class="pointer-events-none absolute left-0 top-0 bottom-0 w-8 z-10"
+            style="background: linear-gradient(to right, hsl(var(--card)) 0%, transparent 100%)"
+          />
+        </Transition>
+        <Transition name="tab-fade">
+          <div
+            v-if="showRightShadow"
+            class="pointer-events-none absolute right-0 top-0 bottom-0 w-8 z-10"
+            style="background: linear-gradient(to left, hsl(var(--card)) 0%, transparent 100%)"
+          />
+        </Transition>
+        <div
+          ref="tabbarRef"
+          class="flex border-b border-border pb-1 overflow-x-auto scrollbar-thin"
+          @scroll="updateTabbarShadows"
         >
-          Profile
-        </button>
-        <button
-          type="button"
-          class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
-          :class="activeTab === 'security' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
-          @click="activeTab = 'security'"
-        >
-          Security
-        </button>
-        <button
-          type="button"
-          class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
-          :class="activeTab === 'voice' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
-          @click="activeTab = 'voice'"
-        >
-          Voice
-        </button>
-        <button
-          type="button"
-          class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
-          :class="activeTab === 'ai-defaults' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
-          @click="activeTab = 'ai-defaults'"
-        >
-          AI Defaults
-        </button>
-        <button
-          type="button"
-          class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
-          :class="activeTab === 'observability' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
-          @click="activeTab = 'observability'"
-        >
-          Observability
-        </button>
-        <button
-          type="button"
-          class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
-          :class="activeTab === 'plugins' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
-          @click="activeTab = 'plugins'"
-        >
-          Plugins
-        </button>
+          <button
+            type="button"
+            class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
+            :class="activeTab === 'profile' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
+            @click="activeTab = 'profile'"
+          >
+            Profile
+          </button>
+          <button
+            type="button"
+            class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
+            :class="activeTab === 'security' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
+            @click="activeTab = 'security'"
+          >
+            Security
+          </button>
+          <button
+            type="button"
+            class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
+            :class="activeTab === 'voice' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
+            @click="activeTab = 'voice'"
+          >
+            Voice
+          </button>
+          <button
+            type="button"
+            class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
+            :class="activeTab === 'ai-defaults' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
+            @click="activeTab = 'ai-defaults'"
+          >
+            AI Defaults
+          </button>
+          <button
+            type="button"
+            class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
+            :class="activeTab === 'observability' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
+            @click="activeTab = 'observability'"
+          >
+            Observability
+          </button>
+          <button
+            type="button"
+            class="px-3 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap shrink-0"
+            :class="activeTab === 'plugins' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'"
+            @click="activeTab = 'plugins'"
+          >
+            Plugins
+          </button>
+        </div>
       </div>
 
       <form
@@ -786,3 +847,14 @@ HEYM_PLUGIN_ADMIN_EMAILS=you@example.com</pre>
     </div>
   </Dialog>
 </template>
+
+<style scoped>
+.tab-fade-enter-active,
+.tab-fade-leave-active {
+  transition: opacity 0.15s ease;
+}
+.tab-fade-enter-from,
+.tab-fade-leave-to {
+  opacity: 0;
+}
+</style>
