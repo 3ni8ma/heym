@@ -1,10 +1,12 @@
 """SSRF egress-guard tests for the HTTP workflow node (GHSA-8wj7-v2w6-wfcx)."""
 
+import os
 import socket
 import unittest
 from unittest.mock import MagicMock, patch
 
 import httpcore
+import httpx
 
 from app.services import ssrf_guard
 from app.services.ssrf_guard import (
@@ -182,8 +184,33 @@ class GuardedClientTests(unittest.TestCase):
         with patch.object(ssrf_guard.settings, "http_allow_private_urls", False):
             broken = MagicMock()
             broken._transport = None
+            broken._mounts = {}
             with self.assertRaises(RuntimeError):
                 _install_egress_pin(broken)
+
+    def test_env_proxy_is_ignored(self) -> None:
+        # HTTP_PROXY/HTTPS_PROXY must not add unpinned proxy transports; a proxy
+        # would dial the target itself and let a public URL be redirected onto an
+        # internal host outside the pinned backend (GHSA-8wj7-v2w6-wfcx follow-up).
+        with (
+            patch.object(ssrf_guard.settings, "http_allow_private_urls", False),
+            patch.dict(
+                os.environ,
+                {"HTTP_PROXY": "http://127.0.0.1:9", "HTTPS_PROXY": "http://127.0.0.1:9"},
+            ),
+        ):
+            client = get_guarded_http_client()
+            self.assertFalse(getattr(client, "_mounts", None))
+            backend = client._transport._pool._network_backend
+            self.assertIsInstance(backend, _HttpEgressPinBackend)
+
+    def test_install_refuses_proxy_mounts(self) -> None:
+        # A client that carries proxy/mount transports must be refused fail-closed.
+        with patch.object(ssrf_guard.settings, "http_allow_private_urls", False):
+            client_with_proxy = httpx.Client(proxy="http://127.0.0.1:9")
+            self.addCleanup(client_with_proxy.close)
+            with self.assertRaises(RuntimeError):
+                _install_egress_pin(client_with_proxy)
 
 
 class HttpNodeIntegrationTests(unittest.TestCase):

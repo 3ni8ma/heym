@@ -60,9 +60,7 @@ lifetimes) that override these code defaults when you copy it.
 | `BACKEND_BIND_HOST` | Address the backend binds to (single-image runtime). | `127.0.0.1` |
 | `BACKEND_PROXY_HOST` | Host the frontend proxies API calls to (single-image runtime). | `127.0.0.1` |
 | `TIMEZONE` | IANA timezone for scheduling/display. Empty falls back to `TZ`, then `UTC`. | — |
-| `HEYM_HTTP_ALLOW_PRIVATE_URLS` | Disable the SSRF egress guard on the **HTTP node**. When `false` (default) HTTP node URLs must resolve to a public address; loopback, private, link-local, multicast, and cloud-metadata (`169.254.169.254`) targets are refused, and the resolved IP is pinned at dial time to defeat DNS rebinding and redirect-based bypasses. The `http`/`https` scheme restriction applies either way. Set `true` only on trusted self-hosted instances that intentionally call internal HTTP services. **Keep `false` on hosted/multi-tenant deployments.** | `false` |
-
-> The guard applies only to the user-URL **HTTP node**. Integration nodes that reach operator-configured hosts (crawler/FlareSolverr, Telegram, Slack, Discord) are unaffected. This mirrors the MCP egress guard (`HEYM_MCP_ALLOW_PRIVATE_URLS`).
+| `HEYM_HTTP_ALLOW_PRIVATE_URLS` | Disable the SSRF egress guard on the **HTTP node**. When `false` (default) HTTP node URLs must resolve to a public address; loopback, private, link-local, multicast, and cloud-metadata (`169.254.169.254`) targets are refused, and the resolved IP is pinned at dial time to defeat DNS rebinding and redirect-based bypasses. While the guard is on, the HTTP node connects directly (it does not honor `HTTP_PROXY`/`HTTPS_PROXY`) so the pinned target IP stays authoritative. The `http`/`https` scheme restriction applies either way. Set `true` only on trusted self-hosted instances that intentionally call internal HTTP services. **Keep `false` on hosted/multi-tenant deployments.** | `false` |
 
 ## Files & storage
 

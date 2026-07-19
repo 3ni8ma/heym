@@ -13,7 +13,10 @@ Two layers, matching the MCP guard:
 * ``get_guarded_http_client`` returns a client whose network backend re-checks
   and pins the resolved IP at dial time, so a DNS-rebinding answer or a redirect
   to an internal host cannot bounce the real connection onto a private address
-  after the pre-connection check passed.
+  after the pre-connection check passed. The client is built with
+  ``trust_env=False`` so environment proxies cannot add unpinned proxy
+  transports that would dial the target (and thus an internal redirect hop)
+  outside the pinned backend.
 
 Self-hosted operators who intentionally call internal hosts can opt out with
 ``HEYM_HTTP_ALLOW_PRIVATE_URLS=true``. The scheme check still applies even then;
@@ -187,10 +190,18 @@ def _install_egress_pin(client: httpx.Client) -> None:
 
     Fail-closed: if the private-URL opt-out is off and the httpx/httpcore pool
     internals are not the expected shape, raise instead of returning a client
-    that would send unprotected requests.
+    that would send unprotected requests. A client carrying proxy/mount
+    transports is also refused, since a proxy dials the target itself and would
+    route around the pinned backend (the client must be built with
+    ``trust_env=False`` and no proxy).
     """
     if settings.http_allow_private_urls:
         return
+    if getattr(client, "_mounts", None):
+        raise RuntimeError(
+            "HTTP node SSRF egress pin refuses a client with proxy/mount transports "
+            "(a proxy would bypass the pinned backend); build it with trust_env=False"
+        )
     transport = getattr(client, "_transport", None)
     pool = getattr(transport, "_pool", None)
     backend = getattr(pool, "_network_backend", None)
@@ -219,11 +230,17 @@ def get_guarded_http_client() -> httpx.Client:
                 max_connections=_wf.HTTP_POOL_SIZE,
                 max_keepalive_connections=_wf.HTTP_KEEPALIVE_CONNECTIONS,
             )
+            # trust_env=False keeps the dial direct: env proxies (HTTP_PROXY /
+            # HTTPS_PROXY) would otherwise add unpinned proxy transports that dial
+            # the target themselves, so a public URL could be redirected onto an
+            # internal host through the proxy. Direct connections keep the pinned
+            # egress backend authoritative (matches the MCP guard).
             client = httpx.Client(
                 limits=limits,
                 timeout=_wf.HTTP_TIMEOUT,
                 follow_redirects=False,
                 headers={"User-Agent": HEYM_USER_AGENT},
+                trust_env=False,
             )
             try:
                 _install_egress_pin(client)
