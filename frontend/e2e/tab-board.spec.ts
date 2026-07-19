@@ -35,12 +35,20 @@ interface TouchPoint {
 }
 
 /** The board dialogs require an Agentic Kanban Model, so the account needs a credential the
- *  API accepts as its own (the models come from the provider catalog, no provider call). */
+ *  API accepts as its own (the models come from the provider catalog, no provider call).
+ *  Credential names are unique per user, so reuse an existing Board model across serial tests. */
 async function setUpMapperCredential(page: Page): Promise<string> {
+  const listResponse = await page.request.get("/api/credentials");
+  expect(listResponse.ok()).toBeTruthy();
+  const existing = (await listResponse.json()) as Array<{ id: string; name: string; type: string }>;
+  const found = existing.find((credential) => credential.name === "Board model");
+  if (found) return found.id;
+
   const response = await page.request.post("/api/credentials", {
     data: { name: "Board model", type: "openai", config: { api_key: "sk-board-e2e" } },
   });
-  const credential = await response.json();
+  expect(response.ok()).toBeTruthy();
+  const credential = (await response.json()) as { id: string };
   return credential.id;
 }
 
@@ -59,23 +67,33 @@ async function createBoardWithCard(
   title: string,
   options?: BoardSetupOptions,
 ): Promise<{ boardId: string; cardId: string; columns: ApiColumn[] }> {
-  const board = await (
-    await page.request.post("/api/boards", {
-      data: {
-        name: "Test",
-        mapper_model: options?.mapperCredentialId ? "gpt-4o" : undefined,
-        mapper_credential_id: options?.mapperCredentialId,
-      },
-    })
-  ).json();
-  const state = await (await page.request.get(`/api/boards/${board.id}`)).json();
+  const createResponse = await page.request.post("/api/boards", {
+    data: {
+      name: "Test",
+      mapper_model: options?.mapperCredentialId ? "gpt-4o" : undefined,
+      mapper_credential_id: options?.mapperCredentialId,
+    },
+  });
+  expect(createResponse.ok()).toBeTruthy();
+  const board = (await createResponse.json()) as { id: string };
+  const stateResponse = await page.request.get(`/api/boards/${board.id}`);
+  expect(stateResponse.ok()).toBeTruthy();
+  const state = (await stateResponse.json()) as {
+    columns: ApiColumn[];
+    mapper_model: string | null;
+    mapper_credential_id: string | null;
+  };
+  if (options?.mapperCredentialId) {
+    expect(state.mapper_credential_id).toBe(options.mapperCredentialId);
+    expect(state.mapper_model).toBe("gpt-4o");
+  }
   const columns: ApiColumn[] = state.columns;
   const backlog = columns.find((c) => c.name === "Backlog")!;
-  const card = await (
-    await page.request.post(`/api/boards/${board.id}/cards`, {
-      data: { title, column_id: backlog.id },
-    })
-  ).json();
+  const cardResponse = await page.request.post(`/api/boards/${board.id}/cards`, {
+    data: { title, column_id: backlog.id },
+  });
+  expect(cardResponse.ok()).toBeTruthy();
+  const card = (await cardResponse.json()) as { id: string };
   return { boardId: board.id, cardId: card.id, columns };
 }
 
@@ -398,6 +416,8 @@ test("drags a card between columns with touch and shows drop feedback", async ({
   await page.goto(`/?tab=board&board=${boardId}`);
 
   const card = page.getByTestId(`board-card-${cardId}`);
+  // Touch drag is gated on the Agentic Kanban Model; wait until the card is actionable.
+  await expect(card).toHaveAttribute("draggable", "true");
   const cardBox = await card.boundingBox();
   expect(cardBox).not.toBeNull();
   const start = {
