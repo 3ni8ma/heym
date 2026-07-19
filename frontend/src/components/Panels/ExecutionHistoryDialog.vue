@@ -622,8 +622,8 @@ function bringToCanvas(): void {
     @escape="handleDialogEscape"
   >
     <!-- Top bar: count, filter, actions -->
-    <div class="flex items-start justify-between gap-3 mb-4 shrink-0">
-      <div class="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+    <div class="flex items-start justify-between gap-2 sm:gap-3 mb-3 sm:mb-4 shrink-0">
+      <div class="flex min-w-0 flex-1 flex-col gap-1.5 sm:gap-2 sm:flex-row sm:items-center">
         <p class="text-sm text-muted-foreground flex items-center gap-2 shrink-0">
           <template v-if="isHistoryLoading">
             <Loader2 class="w-3 h-3 animate-spin" />
@@ -643,7 +643,7 @@ function bringToCanvas(): void {
           clear-aria-label="Clear tag filter"
         />
       </div>
-      <div class="flex items-center gap-1 shrink-0 flex-wrap justify-end">
+      <div class="flex items-center gap-0.5 sm:gap-1 shrink-0 flex-wrap justify-end">
         <AutoRefreshControl
           :active="open"
           :preset-options="[...HISTORY_AUTO_REFRESH_PRESETS]"
@@ -682,14 +682,14 @@ function bringToCanvas(): void {
           @click="clearHistory"
         >
           <Trash2 class="w-4 h-4" />
-          Clear history
+          <span class="hidden sm:inline">Clear history</span>
         </Button>
       </div>
     </div>
 
     <div
       v-if="searchActive"
-      class="flex flex-col gap-3 mb-4 sm:flex-row sm:items-center"
+      class="flex flex-col gap-2 sm:gap-3 mb-3 sm:mb-4 sm:flex-row sm:items-center"
     >
       <div class="relative flex-1">
         <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
@@ -723,10 +723,10 @@ function bringToCanvas(): void {
     <!-- Two-column layout -->
     <div
       v-else
-      class="flex gap-4 min-h-0 h-[60vh]"
+      class="flex flex-col sm:flex-row gap-3 sm:gap-4 min-h-0 h-[75vh] sm:h-[60vh]"
     >
       <!-- LEFT: run list -->
-      <div class="w-64 shrink-0 flex flex-col overflow-hidden border-r border-border/40 pr-3">
+      <div class="w-full sm:w-52 md:w-64 shrink-0 flex flex-col overflow-hidden border-b sm:border-b-0 sm:border-r border-border/40 pb-3 sm:pb-0 sm:pr-3 max-h-[30vh] sm:max-h-none">
         <!-- Active executions -->
         <div
           v-if="activeExecutions.length > 0"
@@ -846,7 +846,7 @@ function bringToCanvas(): void {
       </div>
 
       <!-- RIGHT: execution detail -->
-      <div class="flex-1 min-w-0 overflow-y-auto">
+      <div class="flex-1 min-w-0 overflow-y-auto sm:min-h-0">
         <div
           v-if="isHistoryDetailLoading && !selectedEntry"
           class="flex items-center justify-center h-full text-sm text-muted-foreground gap-2"
@@ -862,7 +862,7 @@ function bringToCanvas(): void {
         </div>
         <div
           v-else
-          class="space-y-3 pr-1"
+          class="space-y-2 sm:space-y-3 pr-1"
           :class="{ 'opacity-50 pointer-events-none': isHistoryDetailLoading }"
         >
           <div
@@ -881,11 +881,11 @@ function bringToCanvas(): void {
             </span>
           </div>
           <!-- Inputs -->
-          <div class="flex items-center justify-between">
+          <div class="flex items-center justify-between gap-2">
             <div class="text-sm font-semibold">
               Inputs
             </div>
-            <div class="flex items-center gap-1">
+            <div class="flex items-center gap-0.5 sm:gap-1 flex-wrap justify-end">
               <Button
                 v-if="pendingHitlUrl"
                 variant="ghost"
@@ -922,7 +922,7 @@ function bringToCanvas(): void {
           <pre class="text-xs bg-muted/30 p-3 rounded-md max-h-40 overflow-auto whitespace-pre-wrap break-all">{{ JSON.stringify(selectedEntry?.inputs ?? {}, null, 2) }}</pre>
 
           <!-- Outputs -->
-          <div class="flex items-center justify-between">
+          <div class="flex items-center justify-between gap-2">
             <div class="text-sm font-semibold">
               Outputs
             </div>
@@ -946,7 +946,7 @@ function bringToCanvas(): void {
             v-if="nodeResults.length > 0"
             class="space-y-2"
           >
-            <div class="flex items-center justify-between">
+            <div class="flex items-center justify-between gap-2">
               <div class="text-sm font-semibold">
                 Node Execution Logs
               </div>
