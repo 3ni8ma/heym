@@ -158,15 +158,17 @@ onUnmounted(() => {
   <WorkspaceShell :showcase-context="chatsShowcaseContext">
     <div class="h-screen flex flex-col bg-background overflow-hidden">
       <AppHeader :on-open-command-palette="() => { showCommandPalette = true; pushOverlayState(); }">
-        <template #actions>
+        <template #before-docs>
           <button
-            v-if="!chatStore.isSidebarOpen"
+            v-if="isMobileViewport && !chatStore.isSidebarOpen"
             class="p-2 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
             title="Open chat list"
             @click="chatStore.toggleSidebar"
           >
             <ChevronRight class="w-4 h-4" />
           </button>
+        </template>
+        <template #actions>
           <Button
             variant="ghost"
             size="sm"

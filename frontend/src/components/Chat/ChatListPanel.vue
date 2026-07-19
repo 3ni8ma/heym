@@ -24,9 +24,16 @@ onMounted(() => {
   chatStore.loadConversations();
 });
 
+function closeSidebarIfMobile(): void {
+  if (typeof window !== "undefined" && window.matchMedia(MOBILE_SIDEBAR_MEDIA_QUERY).matches) {
+    chatStore.closeSidebar();
+  }
+}
+
 async function createNew(): Promise<void> {
   if (isCreatingConversation.value) return;
   isCreatingConversation.value = true;
+  closeSidebarIfMobile();
   try {
     const conv = await chatStore.createConversation();
     await router.push(`/chats/${conv.id}`);
@@ -37,9 +44,7 @@ async function createNew(): Promise<void> {
 
 function select(id: string): void {
   void chatStore.markConversationRead(id);
-  if (typeof window !== "undefined" && window.matchMedia(MOBILE_SIDEBAR_MEDIA_QUERY).matches) {
-    chatStore.closeSidebar();
-  }
+  closeSidebarIfMobile();
   router.push(`/chats/${id}`);
 }
 

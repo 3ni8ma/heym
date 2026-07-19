@@ -1366,7 +1366,7 @@ onUnmounted(() => {
       @close="interactiveVoiceOpen = false"
     />
 
-    <div class="chat-input-area shrink-0 px-3 sm:px-4 pt-3 sm:pt-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+    <div class="chat-input-area shrink-0 px-2 sm:px-4 pt-3 sm:pt-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
       <input
         ref="fileInputRef"
         type="file"
@@ -1503,12 +1503,12 @@ onUnmounted(() => {
         </div>
       </div>
       <form
-        class="flex items-center gap-2 rounded-2xl bg-muted/40 border border-border/40 px-3 py-2 min-h-[52px] focus-within:border-primary/30 focus-within:bg-muted/50 transition-colors"
+        class="flex items-center gap-0.5 sm:gap-2 rounded-2xl bg-muted/40 border border-border/40 px-1.5 sm:px-3 py-1.5 sm:py-2 min-h-[44px] sm:min-h-[52px] focus-within:border-primary/30 focus-within:bg-muted/50 transition-colors"
         @submit.prevent="send"
       >
         <button
           type="button"
-          class="shrink-0 h-9 w-9 min-h-[36px] min-w-[36px] rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 disabled:opacity-50 disabled:pointer-events-none touch-manipulation transition-colors"
+          class="shrink-0 h-7 w-7 sm:h-9 sm:w-9 min-h-7 min-w-7 sm:min-h-[36px] sm:min-w-[36px] rounded-lg sm:rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 disabled:opacity-50 disabled:pointer-events-none touch-manipulation transition-colors"
           :disabled="attachmentLoading"
           title="Attach file"
           aria-label="Attach file"
@@ -1516,11 +1516,11 @@ onUnmounted(() => {
         >
           <Loader2
             v-if="attachmentLoading"
-            class="w-4 h-4 animate-spin"
+            class="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin"
           />
           <Paperclip
             v-else
-            class="w-4 h-4"
+            class="w-3.5 h-3.5 sm:w-4 sm:h-4"
           />
         </button>
         <textarea
@@ -1528,7 +1528,7 @@ onUnmounted(() => {
           v-model="input"
           rows="1"
           placeholder="Type a message..."
-          class="chat-input flex-1 min-h-[44px] max-h-40 resize-none bg-transparent border-0 px-1 py-3 text-sm text-left focus:outline-none focus:ring-0 disabled:opacity-50 touch-manipulation placeholder:text-muted-foreground leading-5"
+          class="chat-input flex-1 min-w-0 min-h-[36px] sm:min-h-[44px] max-h-40 resize-none bg-transparent border-0 px-0.5 sm:px-1 py-2 sm:py-3 text-sm text-left focus:outline-none focus:ring-0 disabled:opacity-50 touch-manipulation placeholder:text-muted-foreground leading-5"
           :disabled="!canSendMessage || !selectedCredentialId || !selectedModel || modelsLoadFailed"
           @keydown="onKeydown"
           @input="resizeChatInput"
@@ -1540,12 +1540,12 @@ onUnmounted(() => {
           <span class="inline-flex shrink-0">
             <button
               type="button"
-              class="h-9 w-9 min-h-[36px] min-w-[36px] rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 disabled:opacity-50 disabled:pointer-events-none touch-manipulation transition-colors"
+              class="h-7 w-7 sm:h-9 sm:w-9 min-h-7 min-w-7 sm:min-h-[36px] sm:min-w-[36px] rounded-lg sm:rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 disabled:opacity-50 disabled:pointer-events-none touch-manipulation transition-colors"
               :disabled="!canSendMessage || !selectedCredentialId || !selectedModel || modelsLoadFailed"
               aria-label="Hands-free voice mode"
               @click="openInteractiveVoice"
             >
-              <AudioLines class="w-4 h-4" />
+              <AudioLines class="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
           </span>
         </Tooltip>
@@ -1557,19 +1557,19 @@ onUnmounted(() => {
           <span class="inline-flex shrink-0">
             <button
               type="button"
-              class="h-9 w-9 min-h-[36px] min-w-[36px] rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 disabled:opacity-50 disabled:pointer-events-none touch-manipulation transition-colors"
+              class="h-7 w-7 sm:h-9 sm:w-9 min-h-7 min-w-7 sm:min-h-[36px] sm:min-w-[36px] rounded-lg sm:rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 disabled:opacity-50 disabled:pointer-events-none touch-manipulation transition-colors"
               :disabled="!canSendMessage || isFixingTranscription || !selectedCredentialId || !selectedModel || modelsLoadFailed"
               :aria-label="speechInputTooltip"
               @click="toggleSpeechInput"
             >
               <Loader2
                 v-if="isFixingTranscription"
-                class="w-4 h-4 animate-spin"
+                class="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-spin"
               />
               <component
                 :is="isListening ? MicOff : Mic"
                 v-else
-                class="w-4 h-4"
+                class="w-3.5 h-3.5 sm:w-4 sm:h-4"
               />
             </button>
           </span>
@@ -1584,9 +1584,9 @@ onUnmounted(() => {
           size="icon"
           aria-label="Send message"
           :disabled="!input.trim() || !canSendMessage || !selectedCredentialId || !selectedModel || modelsLoadFailed || !!attachmentError || attachmentLoading"
-          class="shrink-0 !h-9 !w-9 !min-h-[36px] !min-w-[36px] rounded-xl touch-manipulation"
+          class="shrink-0 !h-7 !w-7 sm:!h-9 sm:!w-9 !min-h-7 !min-w-7 sm:!min-h-[36px] sm:!min-w-[36px] rounded-lg sm:rounded-xl touch-manipulation"
         >
-          <Send class="w-4 h-4" />
+          <Send class="w-3.5 h-3.5 sm:w-4 sm:h-4" />
         </Button>
         <Button
           v-if="isThisConvStreaming"
@@ -1594,10 +1594,10 @@ onUnmounted(() => {
           variant="destructive"
           size="icon"
           aria-label="Stop response"
-          class="shrink-0 !h-9 !w-9 !min-h-[36px] !min-w-[36px] rounded-xl touch-manipulation"
+          class="shrink-0 !h-7 !w-7 sm:!h-9 sm:!w-9 !min-h-7 !min-w-7 sm:!min-h-[36px] sm:!min-w-[36px] rounded-lg sm:rounded-xl touch-manipulation"
           @click="stopStreaming"
         >
-          <Square class="w-4 h-4" />
+          <Square class="w-3.5 h-3.5 sm:w-4 sm:h-4" />
         </Button>
       </form>
       <p
