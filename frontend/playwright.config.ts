@@ -64,6 +64,9 @@ export default defineConfig({
         "PLAYWRIGHT_INSTALL_AT_STARTUP=false",
         "HEYM_PYTHON_TOOL_SANDBOX=subprocess",
         "HEYM_LLM_PRICING_SYNC_ENABLED=false",
+        // E2E hits the local /api/e2e-http-error fixture via the HTTP node; the
+        // SSRF egress guard blocks loopback unless this opt-out is set.
+        "HEYM_HTTP_ALLOW_PRIVATE_URLS=true",
         `uv run uvicorn app.main:app --host 127.0.0.1 --port ${backendPort}`,
       ].join(" "),
       url: `${backendUrl}/api/health`,
