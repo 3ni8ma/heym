@@ -163,29 +163,29 @@ function toggleFullscreen(): void {
             <div class="flex items-center gap-1.5 flex-shrink-0">
               <button
                 v-if="allowFullscreen"
-                class="dialog-btn flex items-center justify-center w-11 h-11 min-h-[44px] min-w-[44px] md:w-8 md:h-8 rounded-xl text-muted-foreground hover:text-foreground transition-all duration-200"
+                class="dialog-btn flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground transition-all duration-200"
                 @click="toggleFullscreen"
               >
                 <Minimize2
                   v-if="isFullscreen"
-                  class="h-4 w-4"
+                  class="h-3.5 w-3.5"
                 />
                 <Maximize2
                   v-else
-                  class="h-4 w-4"
+                  class="h-3.5 w-3.5"
                 />
               </button>
               <div
                 v-if="$slots['header-trailing']"
-                class="flex items-center gap-1.5"
+                class="flex items-center gap-1"
               >
                 <slot name="header-trailing" />
               </div>
               <button
-                class="dialog-btn flex items-center justify-center w-11 h-11 min-h-[44px] min-w-[44px] md:w-8 md:h-8 rounded-xl text-muted-foreground hover:text-foreground transition-all duration-200"
+                class="dialog-btn flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground transition-all duration-200"
                 @click="emit('close')"
               >
-                <X class="h-4 w-4" />
+                <X class="h-3.5 w-3.5" />
               </button>
             </div>
           </div>

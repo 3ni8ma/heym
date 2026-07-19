@@ -562,6 +562,7 @@ async def _fail_open_runs(db, card_id: uuid.UUID, error: str) -> None:
     for run in runs:
         run.status = "failed"
         run.error = error
+        run.active_execution_id = None
         run.finished_at = datetime.now(timezone.utc)
 
 
