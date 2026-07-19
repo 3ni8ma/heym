@@ -18,7 +18,6 @@ def _request(**overrides) -> OpenCodeRunRequest:
         task_prompt="fix the tests",
         branch_name="opencode/run",
         publish_mode="diff_only",
-        setup_command="",
         timeout_seconds=60.0,
         api_key="sk-secret",
         base_url="",

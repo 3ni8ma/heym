@@ -83,7 +83,6 @@ class CodexRunRequest:
     task_prompt: str
     branch_name: str
     publish_mode: str
-    setup_command: str
     timeout_seconds: float
     codex_access_token: str
     github_config: dict
@@ -300,8 +299,6 @@ class CodexRunnerService:
         self._authenticate(
             workspace, request.codex_auth, request.codex_access_token, request.timeout_seconds
         )
-        if request.setup_command.strip():
-            self._run_setup_command(workspace, request.setup_command, request.timeout_seconds)
         prompt = self._build_prompt(request.task_prompt)
         result = self._run_codex_exec(
             workspace=workspace,
@@ -340,7 +337,6 @@ class CodexRunnerService:
             task_prompt=request.answer_text,
             branch_name=request.branch_name,
             publish_mode=request.publish_mode,
-            setup_command="",
             timeout_seconds=request.timeout_seconds,
             codex_access_token=request.codex_access_token,
             github_config=request.github_config,
@@ -468,20 +464,6 @@ class CodexRunnerService:
             raise ValueError(
                 self._mask_sensitive(exc.stderr or exc.stdout, [access_token])
             ) from exc
-
-    def _run_setup_command(
-        self,
-        workspace: Path,
-        setup_command: str,
-        timeout_seconds: float,
-    ) -> None:
-        env = self._safe_env()
-        self._run_command(
-            ["/bin/sh", "-lc", setup_command],
-            cwd=workspace,
-            timeout_seconds=min(timeout_seconds, 600),
-            env=env,
-        )
 
     def _run_codex_exec(
         self,

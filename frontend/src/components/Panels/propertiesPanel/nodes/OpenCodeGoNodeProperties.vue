@@ -25,7 +25,6 @@ const {
   opencodeBaseBranchExpressionInputRef,
   opencodeTaskPromptExpressionInputRef,
   opencodeBranchNameExpressionInputRef,
-  opencodeSetupCommandExpressionInputRef,
   opencodeExpressionNavBindings,
   handleOpenCodeExpressionFieldNavigate,
   onOpenCodeRegisterExpressionFieldIndex,
@@ -233,25 +232,6 @@ onMounted(async () => {
       <p class="text-xs text-muted-foreground">
         {{ codexPublishModeDescriptions[selectedNode.data.publishMode || "diff_only"] }}
       </p>
-    </div>
-
-    <div class="space-y-2">
-      <Label>Setup Command</Label>
-      <ExpressionInput
-        ref="opencodeSetupCommandExpressionInputRef"
-        :model-value="selectedNode.data.setupCommand || ''"
-        placeholder="npm install && npm test"
-        :rows="2"
-        :nodes="workflowStore.nodes"
-        :node-results="workflowStore.nodeResults"
-        :edges="workflowStore.edges"
-        :current-node-id="selectedNode.id"
-        field-key="setupCommand"
-        v-bind="opencodeExpressionNavBindings('setupCommand')"
-        @navigate="handleOpenCodeExpressionFieldNavigate"
-        @register-field-index="onOpenCodeRegisterExpressionFieldIndex"
-        @update:model-value="updateNodeData('setupCommand', $event)"
-      />
     </div>
   </template>
 </template>

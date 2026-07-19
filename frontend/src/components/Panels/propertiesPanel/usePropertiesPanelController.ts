@@ -81,8 +81,7 @@ type CodexExpressionFieldKey =
   | "repositoryUrl"
   | "baseBranch"
   | "taskPrompt"
-  | "branchName"
-  | "setupCommand";
+  | "branchName";
 
 interface CodexExpressionField {
   key: CodexExpressionFieldKey;
@@ -540,13 +539,11 @@ export function usePropertiesPanelController() {
   const codexBaseBranchExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const codexTaskPromptExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const codexBranchNameExpressionInputRef = ref<ExpandableFieldRef | null>(null);
-  const codexSetupCommandExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const currentCodexExpressionFieldIndex = ref(0);
   const opencodeRepositoryUrlExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const opencodeBaseBranchExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const opencodeTaskPromptExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const opencodeBranchNameExpressionInputRef = ref<ExpandableFieldRef | null>(null);
-  const opencodeSetupCommandExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const currentOpenCodeExpressionFieldIndex = ref(0);
   const variableValueInputRef = ref<ExpandableFieldRef | null>(null);
   const throwErrorMessageInputRef = ref<ExpandableFieldRef | null>(null);
@@ -4077,7 +4074,6 @@ export function usePropertiesPanelController() {
       { key: "baseBranch", label: "Base branch" },
       { key: "taskPrompt", label: "Task prompt" },
       { key: "branchName", label: "Branch name" },
-      { key: "setupCommand", label: "Setup command" },
     ];
   });
 
@@ -4092,7 +4088,6 @@ export function usePropertiesPanelController() {
       { key: "baseBranch", label: "Base branch" },
       { key: "taskPrompt", label: "Task prompt" },
       { key: "branchName", label: "Branch name" },
-      { key: "setupCommand", label: "Setup command" },
     ];
   });
 
@@ -4557,8 +4552,6 @@ export function usePropertiesPanelController() {
         return codexTaskPromptExpressionInputRef.value;
       case "branchName":
         return codexBranchNameExpressionInputRef.value;
-      case "setupCommand":
-        return codexSetupCommandExpressionInputRef.value;
       default:
         return null;
     }
@@ -4598,7 +4591,6 @@ export function usePropertiesPanelController() {
     codexBaseBranchExpressionInputRef.value?.closeExpandDialog();
     codexTaskPromptExpressionInputRef.value?.closeExpandDialog();
     codexBranchNameExpressionInputRef.value?.closeExpandDialog();
-    codexSetupCommandExpressionInputRef.value?.closeExpandDialog();
   }
 
   function handleCodexExpressionFieldNavigate(direction: "prev" | "next"): void {
@@ -4659,8 +4651,6 @@ export function usePropertiesPanelController() {
         return opencodeTaskPromptExpressionInputRef.value;
       case "branchName":
         return opencodeBranchNameExpressionInputRef.value;
-      case "setupCommand":
-        return opencodeSetupCommandExpressionInputRef.value;
       default:
         return null;
     }
@@ -4700,7 +4690,6 @@ export function usePropertiesPanelController() {
     opencodeBaseBranchExpressionInputRef.value?.closeExpandDialog();
     opencodeTaskPromptExpressionInputRef.value?.closeExpandDialog();
     opencodeBranchNameExpressionInputRef.value?.closeExpandDialog();
-    opencodeSetupCommandExpressionInputRef.value?.closeExpandDialog();
   }
 
   function handleOpenCodeExpressionFieldNavigate(direction: "prev" | "next"): void {
@@ -8723,12 +8712,10 @@ export function usePropertiesPanelController() {
     codexBaseBranchExpressionInputRef,
     codexTaskPromptExpressionInputRef,
     codexBranchNameExpressionInputRef,
-    codexSetupCommandExpressionInputRef,
     opencodeRepositoryUrlExpressionInputRef,
     opencodeBaseBranchExpressionInputRef,
     opencodeTaskPromptExpressionInputRef,
     opencodeBranchNameExpressionInputRef,
-    opencodeSetupCommandExpressionInputRef,
     variableValueInputRef,
     throwErrorMessageInputRef,
     loadingModels,

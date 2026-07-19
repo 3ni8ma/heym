@@ -55,7 +55,6 @@ class OpenCodeRunRequest:
     task_prompt: str
     branch_name: str
     publish_mode: str
-    setup_command: str
     timeout_seconds: float
     api_key: str
     base_url: str
@@ -280,13 +279,6 @@ class OpenCodeRunnerService:
                 self._clone_branch(workspace, request, request.base_branch)
         else:
             self._clone_branch(workspace, request, request.base_branch)
-
-        if request.setup_command.strip():
-            self._run_command(
-                ["/bin/sh", "-lc", request.setup_command],
-                cwd=workspace,
-                timeout_seconds=min(request.timeout_seconds, 600),
-            )
 
         model = self._resolve_model(request.model)
         self._write_opencode_config(

@@ -50,9 +50,6 @@ def execute(ctx: NodeExecutionContext) -> object:
     publish_mode = str(node_data.get("publishMode") or "diff_only").strip()
     if publish_mode not in OPENCODE_PUBLISH_MODES:
         publish_mode = "diff_only"
-    setup_command = self.evaluate_nonempty_message_template(
-        str(node_data.get("setupCommand") or ""), inputs, node_id
-    ).strip()
     branch_name = _resolve_branch_name(self, node_data, inputs, node_id)
     model = self.evaluate_nonempty_message_template(
         str(node_data.get("opencodeModel") or ""), inputs, node_id
@@ -68,7 +65,6 @@ def execute(ctx: NodeExecutionContext) -> object:
             task_prompt=task_prompt,
             branch_name=branch_name,
             publish_mode=publish_mode,
-            setup_command=setup_command,
             timeout_seconds=timeout_seconds,
             api_key=str(opencode_config.get("api_key") or ""),
             base_url=str(opencode_config.get("base_url") or ""),

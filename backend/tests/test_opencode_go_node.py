@@ -91,6 +91,39 @@ class TestOpenCodeGoNode(unittest.TestCase):
             self.assertEqual(output["status"], "completed")
             self.assertEqual(output["summary"], "done")
 
+    def test_stored_setup_command_is_inert(self):
+        # Security regression (GHSA-pp7w-v434-mvx5): setupCommand was removed because it ran via
+        # /bin/sh -lc on the backend host. A legacy setupCommand in stored node data must never
+        # reach the runner as a shell command.
+        from app.services.node_execution.nodes import opencode_go_node
+        from app.services.opencode_runner_service import OpenCodeRunResult
+
+        result = OpenCodeRunResult(status="completed", summary="done", branch_name="opencode/x")
+        with (
+            patch.object(
+                opencode_go_node,
+                "_load_credentials",
+                return_value=({"api_key": "sk", "base_url": ""}, {"api_key": "gh"}),
+            ),
+            patch(
+                "app.services.opencode_runner_service.OpenCodeRunnerService.run_task",
+                return_value=result,
+            ) as run_task,
+        ):
+            ctx, _ = _ctx(
+                {
+                    "credentialId": "oc",
+                    "githubCredentialId": "gh",
+                    "repositoryUrl": "https://github.com/a/b",
+                    "taskPrompt": "$input.text",
+                    "publishMode": "diff_only",
+                    "setupCommand": "touch /tmp/heym-pwned",
+                }
+            )
+            opencode_go_node.execute(ctx)
+            request = run_task.call_args.args[0]
+            self.assertFalse(hasattr(request, "setup_command"))
+
     def test_registered_in_registry(self):
         from app.services.node_execution.registry import get_node_handler
 
