@@ -767,8 +767,8 @@ function bringToCanvas(): void {
     @escape="handleDialogEscape"
   >
     <div class="space-y-3 sm:space-y-4">
-      <div class="flex items-start justify-between gap-2 sm:gap-3">
-        <div class="flex min-w-0 flex-1 flex-col gap-1.5 sm:gap-2 sm:flex-row sm:items-center">
+      <div class="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+        <div class="flex min-w-0 flex-col gap-1.5 sm:flex-1 sm:flex-row sm:items-center sm:gap-2">
           <p class="text-sm text-muted-foreground shrink-0">
             {{ totalCount }} run(s)
           </p>
@@ -782,7 +782,7 @@ function bringToCanvas(): void {
             clear-aria-label="Clear tag filter"
           />
         </div>
-        <div class="flex items-center gap-1 sm:gap-2 flex-wrap justify-end">
+        <div class="flex items-center gap-2 flex-wrap justify-end">
           <AutoRefreshControl
             :active="open"
             :preset-options="[...HISTORY_AUTO_REFRESH_PRESETS]"
