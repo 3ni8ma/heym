@@ -90,3 +90,7 @@ vulnerabilities in Heym:
   code execution in the Playwright node, where the custom `playwrightCode` field
   let any authenticated user run arbitrary Python in the backend process
   (GHSA-mp23-7m6r-jfw4).
+- [@0neOfU4](https://github.com/0neOfU4) for reporting a server-side request
+  forgery (SSRF) in the HTTP workflow node, where a workflow author could point
+  the node at internal or cloud-metadata addresses that were guarded on the MCP
+  transports but not on the HTTP node (GHSA-8wj7-v2w6-wfcx).
