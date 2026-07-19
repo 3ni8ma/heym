@@ -248,6 +248,14 @@ async function removeActivity(activityId: string): Promise<void> {
   await reload();
 }
 
+const currentColumnName = computed<string>(() => {
+  if (!detail.value || !boardStore.activeBoard) return "";
+  const column = boardStore.activeBoard.columns.find(
+    (col) => col.id === detail.value!.card.column_id,
+  );
+  return column?.name ?? "";
+});
+
 const copiedRunId = ref<string | null>(null);
 const activeLiveRun = computed<CardRun | null>(() =>
   detail.value?.runs.find((run) => Boolean(run.active_execution_id)) ?? null,
@@ -307,6 +315,12 @@ async function openLiveRun(run: CardRun): Promise<void> {
           }"
         >
           {{ detail.card.run_status }}
+        </span>
+        <span
+          v-if="currentColumnName"
+          class="text-xs text-muted-foreground"
+        >
+          {{ currentColumnName }}
         </span>
         <button
           v-if="activeLiveRun"
