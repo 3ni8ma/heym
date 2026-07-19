@@ -63,9 +63,12 @@ _CODEX_LOCAL_ONLY_RULES = (
     "or any remote/network tool to modify the repository — Heym performs every git and GitHub "
     "operation after you finish. If network access is available, use it only for read-only "
     "downloads or dependency lookups needed to complete the local file edits. For UI/frontend "
-    "visual changes, save at least one PNG screenshot under a gitignored path such as "
-    "`frontend/.e2e-artifacts/`; Heym uploads those images onto the pull request after you finish "
-    "(do not commit screenshot binaries into source)."
+    "visual changes you MUST save at least one PNG screenshot under a gitignored path such as "
+    "`frontend/.e2e-artifacts/` (or an equivalent gitignored artifacts directory). If frontend "
+    "dependencies are missing, you MAY run a package install (for example `bun install`, "
+    "`npm install`, or `pnpm install`) and start a short-lived preview/dev server solely to "
+    "capture the screenshot, then stop the server. Heym uploads those images onto the pull "
+    "request after you finish (do not commit screenshot binaries into source)."
 )
 
 _PR_SCREENSHOT_RELEASE_TAG = "codex-pr-assets"
@@ -913,7 +916,8 @@ class CodexRunnerService:
             "`status: needs_input` with one concise question. Otherwise implement the task "
             "and return `status: completed` with a summary and validation notes. Always set "
             "`pull_request_title` to a concise, complete one-line change description "
-            "(imperative mood, ideally <=72 characters) suitable as a commit subject.\n\n"
+            "(imperative mood, ideally <=72 characters) suitable as a commit/PR subject. "
+            "Never use placeholder titles such as Done, Fixed, or Update.\n\n"
             f"Task:\n{task_prompt}"
         )
 

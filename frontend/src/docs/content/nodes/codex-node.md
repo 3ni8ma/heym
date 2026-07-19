@@ -80,7 +80,7 @@ OpenAI references:
 
 ## UI screenshots on pull requests
 
-For UI/frontend tasks, Codex should save PNG screenshots under a gitignored path such as `frontend/.e2e-artifacts/` (not in source). After Heym opens or updates the pull request, it uploads those images to a single shared GitHub **prerelease** (`codex-pr-assets`) as assets named `pr-<number>-…`, then embeds them in the PR description. 
+For UI/frontend tasks, Codex should save PNG screenshots under a gitignored path such as `frontend/.e2e-artifacts/` (not in source). If frontend dependencies are missing, Codex may run `bun install` (or npm/pnpm install) and start a short-lived preview/`bun run dev` solely to capture the UI. After Heym opens or updates the pull request, it uploads those images to a single shared GitHub **prerelease** (`codex-pr-assets`) as assets named `pr-<number>-…`, then embeds them in the PR description. Codex must also set a meaningful `pull_request_title` (never placeholders such as `Done.`). 
 
 ## Follow-up Questions
 

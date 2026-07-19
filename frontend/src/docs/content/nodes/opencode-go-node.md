@@ -76,7 +76,9 @@ OpenCode Go's model roster changes often, so the **Model** field is populated li
 
 ## UI screenshots on pull requests
 
-For UI/frontend tasks, OpenCode should save PNG screenshots under a gitignored path such as `frontend/.e2e-artifacts/` (not in source). After Heym opens or updates the pull request, it uploads those images to a single shared GitHub **prerelease** (`opencode-pr-assets`) as assets named `pr-<number>-…`, then embeds them in the PR description.
+For UI/frontend tasks, OpenCode should save PNG screenshots under a gitignored path such as `frontend/.e2e-artifacts/` (not in source). If frontend dependencies are missing, the runner prompt allows a targeted package install (for example `bun install`) plus a short-lived preview/`bun run dev` solely to capture the UI. After Heym opens or updates the pull request, it uploads those images to a single shared GitHub **prerelease** (`opencode-pr-assets`) as assets named `pr-<number>-…`, then embeds them in the PR description.
+
+OpenCode is also instructed to end with a `PR_TITLE: …` line so Heym can open the pull request with a meaningful subject instead of placeholders such as `Done.`
 
 ## As an agent tool
 
