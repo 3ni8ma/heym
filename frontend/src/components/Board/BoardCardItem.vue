@@ -12,6 +12,7 @@ import {
 } from "lucide-vue-next";
 
 import type { BoardCard } from "@/types/board";
+import { useBoardCardTouchDrag } from "@/composables/useBoardCardTouchDrag";
 import { useToast } from "@/composables/useToast";
 import { useBoardStore } from "@/stores/board";
 
@@ -30,8 +31,19 @@ const emit = defineEmits<{
 const editingTitle = ref(false);
 const editedTitle = ref(props.card.title);
 const titleInput = ref<HTMLTextAreaElement | null>(null);
+const cardElement = ref<HTMLElement | null>(null);
 const savingTitle = ref(false);
 let titleClickTimer: ReturnType<typeof setTimeout> | null = null;
+
+const {
+  handlers: touchDragHandlers,
+  isTouchDragging,
+  consumeTouchDragClick,
+} = useBoardCardTouchDrag({
+  cardId: () => props.card.id,
+  enabled: () => canAct.value && !editingTitle.value,
+  sourceElement: cardElement,
+});
 
 watch(
   () => props.card.title,
@@ -52,6 +64,7 @@ async function startTitleEdit(): Promise<void> {
 }
 
 function onTitleClick(): void {
+  if (consumeTouchDragClick()) return;
   if (titleClickTimer) clearTimeout(titleClickTimer);
   titleClickTimer = setTimeout(() => {
     titleClickTimer = null;
@@ -121,19 +134,37 @@ const attachmentCount = computed<number>(() => {
 });
 
 function onDragStart(event: DragEvent): void {
+  if (isTouchDragging.value) {
+    event.preventDefault();
+    return;
+  }
   event.dataTransfer?.setData("text/board-card", props.card.id);
   if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
+}
+
+function onCardClick(): void {
+  if (consumeTouchDragClick()) return;
+  emit("open", props.card.id);
 }
 </script>
 
 <template>
   <div
+    ref="cardElement"
     class="group min-w-0 cursor-pointer rounded-lg border p-2.5 text-sm shadow-sm transition-colors hover:border-primary/60 sm:p-3"
-    :class="statusClasses"
+    :class="[
+      statusClasses,
+      isTouchDragging ? 'select-none scale-[0.98] opacity-60 ring-2 ring-primary/70' : '',
+    ]"
     :draggable="canAct && !editingTitle"
+    :aria-grabbed="isTouchDragging"
     :data-testid="`board-card-${card.id}`"
     @dragstart="onDragStart"
-    @click="emit('open', card.id)"
+    @touchstart="touchDragHandlers.onTouchStart"
+    @touchmove="touchDragHandlers.onTouchMove"
+    @touchend="touchDragHandlers.onTouchEnd"
+    @touchcancel="touchDragHandlers.onTouchCancel"
+    @click="onCardClick"
   >
     <div class="flex items-start justify-between gap-2">
       <div class="min-w-0 flex-1">

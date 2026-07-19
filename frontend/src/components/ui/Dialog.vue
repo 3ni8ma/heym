@@ -2,6 +2,8 @@
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import { Maximize2, Minimize2, X } from "lucide-vue-next";
 
+import { useDialogBackHistory } from "@/composables/useDialogBackHistory";
+
 interface Props {
   open: boolean;
   title?: string;
@@ -9,6 +11,7 @@ interface Props {
   allowFullscreen?: boolean;
   defaultFullscreen?: boolean;
   closeOnEscape?: boolean;
+  closeOnBack?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -17,6 +20,7 @@ const props = withDefaults(defineProps<Props>(), {
   allowFullscreen: false,
   defaultFullscreen: false,
   closeOnEscape: true,
+  closeOnBack: false,
 });
 
 const isFullscreen = ref(props.defaultFullscreen);
@@ -44,6 +48,11 @@ const emit = defineEmits<{
 }>();
 
 const containerRef = ref<HTMLDivElement | null>(null);
+const { pushDialogHistoryEntry, removeDialogHistoryEntry } = useDialogBackHistory({
+  enabled: () => props.closeOnBack,
+  isOpen: () => props.open,
+  onBack: () => emit("close"),
+});
 
 function handleEscape(event: KeyboardEvent): void {
   if (event.key === "Escape") {
@@ -73,6 +82,7 @@ watch(
       document.body.style.overflow = "hidden";
       isFullscreen.value = props.defaultFullscreen;
       window.addEventListener("keydown", handleEscape, captureOptions);
+      pushDialogHistoryEntry();
       nextTick(() => {
         containerRef.value?.focus();
       });
@@ -80,6 +90,7 @@ watch(
       document.body.style.overflow = "";
       isFullscreen.value = props.defaultFullscreen;
       window.removeEventListener("keydown", handleEscape, captureOptions);
+      removeDialogHistoryEntry();
     }
   },
   { immediate: true },
@@ -87,6 +98,7 @@ watch(
 
 onUnmounted(() => {
   window.removeEventListener("keydown", handleEscape, captureOptions);
+  removeDialogHistoryEntry();
 });
 
 function toggleFullscreen(): void {
