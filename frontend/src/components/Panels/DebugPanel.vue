@@ -541,6 +541,34 @@ function startResize(e: MouseEvent): void {
   document.addEventListener("mouseup", onMouseUp);
 }
 
+let touchStartY = 0;
+let touchStartHeight = 0;
+
+function startResizeTouch(e: TouchEvent): void {
+  if (!e.touches || e.touches.length === 0) return;
+  isResizing.value = true;
+  touchStartY = e.touches[0].clientY;
+  touchStartHeight = panelHeight.value;
+}
+
+function onResizeTouch(e: TouchEvent): void {
+  if (!isResizing.value || !e.touches || e.touches.length === 0) return;
+  const delta = touchStartY - e.touches[0].clientY;
+  const newHeight = touchStartHeight + delta;
+  panelHeight.value = Math.min(maxHeight, Math.max(minHeight, newHeight));
+  isCollapsed.value = panelHeight.value <= collapsedHeight;
+}
+
+function onResizeTouchEnd(): void {
+  if (!isResizing.value) return;
+  isResizing.value = false;
+  if (panelHeight.value <= collapsedHeight + 20) {
+    panelHeight.value = collapsedHeight;
+    isCollapsed.value = true;
+  }
+  workflowStore.setDebugPanelHeight(panelHeight.value);
+}
+
 function toggleCollapse(): void {
   if (isCollapsed.value) {
     panelHeight.value = maxHeight;
@@ -1540,6 +1568,10 @@ onUnmounted(() => {
   unsubDismissOverlays = null;
   window.removeEventListener("keydown", handleDebugPanelWindowKeyDown, true);
   window.removeEventListener("keydown", handleDownloadDialogKeyDown, true);
+  if (isResizing.value) {
+    isResizing.value = false;
+    workflowStore.setDebugPanelHeight(panelHeight.value);
+  }
 });
 
 function toggleAiPanel(): void {
@@ -2517,9 +2549,12 @@ function renderContent(content: string): string {
     :style="{ height: `${panelHeight}px` }"
   >
     <div
-      class="h-3 min-h-[44px] cursor-ns-resize hover:bg-primary/20 transition-colors flex items-center justify-center group md:h-1.5"
+      class="debug-panel-resize-handle h-3 min-h-[44px] cursor-ns-resize hover:bg-primary/20 transition-colors flex items-center justify-center group md:h-1.5"
       :class="isResizing && 'bg-primary/30'"
       @mousedown="startResize"
+      @touchstart.prevent="startResizeTouch"
+      @touchmove.prevent="onResizeTouch"
+      @touchend.prevent="onResizeTouchEnd"
     >
       <GripHorizontal class="w-8 h-3 text-muted-foreground/50 group-hover:text-muted-foreground" />
     </div>
@@ -3667,6 +3702,10 @@ function renderContent(content: string): string {
 </template>
 
 <style scoped>
+.debug-panel-resize-handle {
+  touch-action: none;
+}
+
 .ai-panel {
   position: fixed;
   right: 24px;
