@@ -82,12 +82,16 @@ services:
       HEYM_CODEX_DOCKER_WORKSPACE_VOLUME: ${HEYM_CODEX_DOCKER_WORKSPACE_VOLUME:-heym-codex-workspaces}
       HEYM_CODEX_WORKSPACE_DIR: ${HEYM_CODEX_WORKSPACE_DIR:-/app/data/codex-workspaces}
       HEYM_CODEX_NETWORK_ACCESS: ${HEYM_CODEX_NETWORK_ACCESS:-true}
+      HEYM_CODEX_DOCKER_CPUS: ${HEYM_CODEX_DOCKER_CPUS:-2}
+      HEYM_CODEX_DOCKER_MEMORY: ${HEYM_CODEX_DOCKER_MEMORY:-4g}
       # OpenCode Go node: run the OpenCode CLI in a dedicated hardened sibling runner container
       # sharing the workspace named volume (mirrors the Codex setup).
       HEYM_OPENCODE_CLI_COMMAND: ${HEYM_OPENCODE_CLI_COMMAND:-/usr/local/bin/heym-opencode-docker}
       HEYM_OPENCODE_DOCKER_IMAGE: ${HEYM_OPENCODE_DOCKER_IMAGE:-heym-backend:local}
       HEYM_OPENCODE_DOCKER_WORKSPACE_VOLUME: ${HEYM_OPENCODE_DOCKER_WORKSPACE_VOLUME:-heym-opencode-workspaces}
       HEYM_OPENCODE_WORKSPACE_DIR: ${HEYM_OPENCODE_WORKSPACE_DIR:-/app/data/opencode-workspaces}
+      HEYM_OPENCODE_DOCKER_CPUS: ${HEYM_OPENCODE_DOCKER_CPUS:-2}
+      HEYM_OPENCODE_DOCKER_MEMORY: ${HEYM_OPENCODE_DOCKER_MEMORY:-4g}
       # Python tool sandbox: untrusted user tools run in a hardened, throwaway
       # sibling container (no network, no docker socket, read-only, non-root).
       # Empty image = auto-detect this backend image.
