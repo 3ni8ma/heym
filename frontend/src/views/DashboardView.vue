@@ -391,7 +391,13 @@ const isMac = computed((): boolean => {
 });
 
 const searchShortcutLabel = computed((): string => {
+  if (isMobile.value) return "";
   return isMac.value ? "⌘F" : "Ctrl+F";
+});
+
+const searchPlaceholder = computed((): string => {
+  const label = searchShortcutLabel.value;
+  return label ? `Search workflows (${label})` : "Search workflows";
 });
 
 function isFolderExpandedForDisplay(folderId: string): boolean {
@@ -1494,7 +1500,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                     type="text"
                     autocomplete="off"
                     class="h-11 min-h-[44px] md:h-9 w-full rounded-xl border border-border bg-background px-9 py-2 text-sm shadow-sm transition-all duration-200 placeholder:text-muted-foreground/60 hover:border-border/80 focus-visible:outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/15"
-                    :placeholder="`Search workflows (${searchShortcutLabel})`"
+                    :placeholder="searchPlaceholder"
                     @keydown.esc.prevent.stop="clearWorkflowSearch"
                   >
                   <button
