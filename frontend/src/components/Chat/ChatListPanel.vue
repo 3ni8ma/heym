@@ -6,6 +6,8 @@ import { SquarePen, ChevronLeft, Trash2, Check, X } from "lucide-vue-next";
 import { useChatStore } from "@/stores/chat";
 import ChatListItem from "@/components/Chat/ChatListItem.vue";
 
+const MOBILE_SIDEBAR_MEDIA_QUERY = "(max-width: 767px)";
+
 interface Props {
   activeConversationId?: string;
 }
@@ -35,6 +37,9 @@ async function createNew(): Promise<void> {
 
 function select(id: string): void {
   void chatStore.markConversationRead(id);
+  if (typeof window !== "undefined" && window.matchMedia(MOBILE_SIDEBAR_MEDIA_QUERY).matches) {
+    chatStore.closeSidebar();
+  }
   router.push(`/chats/${id}`);
 }
 

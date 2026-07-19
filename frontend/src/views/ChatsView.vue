@@ -159,6 +159,14 @@ onUnmounted(() => {
     <div class="h-screen flex flex-col bg-background overflow-hidden">
       <AppHeader :on-open-command-palette="() => { showCommandPalette = true; pushOverlayState(); }">
         <template #actions>
+          <button
+            v-if="!chatStore.isSidebarOpen"
+            class="p-2 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+            title="Open chat list"
+            @click="chatStore.toggleSidebar"
+          >
+            <ChevronRight class="w-4 h-4" />
+          </button>
           <Button
             variant="ghost"
             size="sm"
@@ -168,14 +176,6 @@ onUnmounted(() => {
             <History class="w-4 h-4" />
             <span class="hidden sm:inline">History</span>
           </Button>
-          <button
-            v-if="!chatStore.isSidebarOpen"
-            class="p-2 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-            title="Open chat list"
-            @click="chatStore.toggleSidebar"
-          >
-            <ChevronRight class="w-4 h-4" />
-          </button>
         </template>
       </AppHeader>
 
