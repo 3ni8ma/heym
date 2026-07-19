@@ -841,6 +841,7 @@ async def move_card(
 async def run_card_chain(
     board_id: uuid.UUID,
     card_id: uuid.UUID,
+    skip_auto_advance: bool = False,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> BoardCardResponse:
@@ -848,7 +849,13 @@ async def run_card_chain(
     card = await _get_board_card(db, board, card_id)
     column = await _get_board_column(db, board, card.column_id)
     enqueued = await board_run_service.enqueue_card_chain(
-        db, card=card, column=column, board=board, move=None, rerun=True
+        db,
+        card=card,
+        column=column,
+        board=board,
+        move=None,
+        rerun=True,
+        allow_advance=not skip_auto_advance,
     )
     if not enqueued:
         raise HTTPException(

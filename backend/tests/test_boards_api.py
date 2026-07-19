@@ -498,6 +498,50 @@ class TestMoveAndRun(unittest.IsolatedAsyncioTestCase):
                 )
         self.assertEqual(ctx.exception.status_code, 409)
 
+    async def test_follow_up_run_allows_auto_advance_by_default(self):
+        user, board, from_column, _, card = self._setup()
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _result_with(scalar=board),
+                _result_with(scalar=card),
+                _result_with(scalar=from_column),
+            ]
+        )
+
+        with patch.object(
+            boards_api.board_run_service, "enqueue_card_chain", AsyncMock(return_value=True)
+        ) as enqueue:
+            await boards_api.run_card_chain(
+                board_id=board.id, card_id=card.id, db=db, current_user=user
+            )
+
+        self.assertTrue(enqueue.await_args.kwargs["allow_advance"])
+
+    async def test_follow_up_run_can_skip_auto_advance(self):
+        user, board, from_column, _, card = self._setup()
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _result_with(scalar=board),
+                _result_with(scalar=card),
+                _result_with(scalar=from_column),
+            ]
+        )
+
+        with patch.object(
+            boards_api.board_run_service, "enqueue_card_chain", AsyncMock(return_value=True)
+        ) as enqueue:
+            await boards_api.run_card_chain(
+                board_id=board.id,
+                card_id=card.id,
+                skip_auto_advance=True,
+                db=db,
+                current_user=user,
+            )
+
+        self.assertFalse(enqueue.await_args.kwargs["allow_advance"])
+
 
 class TestBoardAccess(unittest.IsolatedAsyncioTestCase):
     """Boards reach their owner, the users they are shared with, and those users' teams."""

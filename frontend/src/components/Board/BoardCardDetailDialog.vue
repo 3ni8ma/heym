@@ -213,8 +213,12 @@ async function submitComment(): Promise<void> {
 }
 
 async function runFollowUp(): Promise<void> {
-  if (!detail.value) return;
-  await boardStore.runFollowUp(detail.value.card.id);
+  if (!detail.value || !boardStore.activeBoard) return;
+  const currentColumn = boardStore.activeBoard.columns.find(
+    (column) => column.id === detail.value?.card.column_id,
+  );
+  const shouldSkipAutoAdvance = currentColumn?.position === 1;
+  await boardStore.runFollowUp(detail.value.card.id, shouldSkipAutoAdvance);
   await reload();
 }
 

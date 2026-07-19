@@ -121,8 +121,8 @@ follow-up questions:
    the next column, which picks it up with the answer in context. The Planning chain
    is not run again.
 3. To improve the plan in place instead, press **Run follow-up round**. The same
-   chain runs again with all accumulated context, and the card flows on once it
-   succeeds.
+   chain runs again with all accumulated context, then the card waits in Planning
+   until you add a comment to release it.
 
 Cards in the first two columns never move on by themselves — they run their chain and
 wait there for you. From the third column on, a successful chain advances the card to
