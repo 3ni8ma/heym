@@ -69,7 +69,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         )
     else:
         # Use the nonempty variant: evaluate_message_template("") returns str(inputs), which for
-        # an unset optional field (e.g. setupCommand) would run garbage as a shell command.
+        # an unset optional field would substitute the whole inputs dict instead of an empty value.
         repository_url = self.evaluate_nonempty_message_template(
             str(node_data.get("repositoryUrl") or ""), inputs, node_id
         ).strip()
@@ -89,9 +89,6 @@ def execute(ctx: NodeExecutionContext) -> object:
         if not task_prompt:
             raise ValueError("Codex node requires a task prompt")
         resolved_task_prompt = task_prompt
-        setup_command = self.evaluate_nonempty_message_template(
-            str(node_data.get("setupCommand") or ""), inputs, node_id
-        ).strip()
         result = runner.run_task(
             CodexRunRequest(
                 repository_url=repository_url,
@@ -99,7 +96,6 @@ def execute(ctx: NodeExecutionContext) -> object:
                 task_prompt=task_prompt,
                 branch_name=resolved_branch_name,
                 publish_mode=publish_mode,
-                setup_command=setup_command,
                 timeout_seconds=timeout_seconds,
                 codex_access_token=str(codex_config.get("access_token") or ""),
                 github_config=github_config,

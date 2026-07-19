@@ -222,6 +222,8 @@ class TestCodexNodeHandler(unittest.TestCase):
                     "publishMode": "diff_only",
                     "codexModel": "gpt-5.6-sol",
                     "codexReasoningEffort": "high",
+                    # Stored node data may still carry a legacy setupCommand; it must be inert.
+                    "setupCommand": "touch /tmp/heym-pwned",
                 }
             )
         )
@@ -234,8 +236,10 @@ class TestCodexNodeHandler(unittest.TestCase):
         self.assertEqual(request.repository_url, "https://github.com/acme/app")
         self.assertEqual(request.model, "gpt-5.6-sol")
         self.assertEqual(request.reasoning_effort, "high")
-        # Regression: an unset setupCommand must stay empty, not become str(inputs).
-        self.assertEqual(request.setup_command, "")
+        # Security regression (GHSA-pp7w-v434-mvx5): the setupCommand field was removed because it
+        # was executed via /bin/sh -lc on the backend host. A legacy setupCommand in stored node
+        # data must never reach the runner as a shell command.
+        self.assertFalse(hasattr(request, "setup_command"))
 
     @patch("app.services.node_execution.nodes.codex_node._load_credentials")
     @patch("app.services.node_execution.nodes.codex_node.CodexRunnerService")

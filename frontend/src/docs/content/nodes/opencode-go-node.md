@@ -46,7 +46,6 @@ OpenCode Go's model roster changes often, so the **Model** field is populated li
 | Publish Mode | How changes are delivered (see table below) |
 | Branch Name | Working branch for PR/commit modes, default `opencode/$executionId` |
 | Timeout | Maximum OpenCode execution time in seconds |
-| Setup Command | Optional command to run before OpenCode |
 
 ## Publish Modes
 
@@ -101,8 +100,7 @@ The OpenCode Go node can be attached to an **AI Agent** node's tool handle so th
     "publishMode": "open_pr",
     "branchName": "opencode/$executionId",
     "opencodeModel": "opencode/kimi-k3",
-    "timeoutSeconds": 3600,
-    "setupCommand": "npm install && npm test"
+    "timeoutSeconds": 3600
   }
 }
 ```

@@ -21,7 +21,6 @@ def _request(publish_mode: str = "open_pr") -> CodexRunRequest:
         task_prompt="fix ui",
         branch_name="codex/run",
         publish_mode=publish_mode,
-        setup_command="",
         timeout_seconds=60.0,
         codex_access_token="tok",
         github_config={"api_key": "ghp"},

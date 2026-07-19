@@ -18,7 +18,6 @@ const {
   codexBaseBranchExpressionInputRef,
   codexTaskPromptExpressionInputRef,
   codexBranchNameExpressionInputRef,
-  codexSetupCommandExpressionInputRef,
   selectedNode,
   codexCredentialOptions,
   codexGithubCredentialOptions,
@@ -209,25 +208,6 @@ const {
       <p class="text-xs text-muted-foreground">
         {{ codexPublishModeDescriptions[selectedNode.data.publishMode || "diff_only"] }}
       </p>
-    </div>
-
-    <div class="space-y-2">
-      <Label>Setup Command</Label>
-      <ExpressionInput
-        ref="codexSetupCommandExpressionInputRef"
-        :model-value="selectedNode.data.setupCommand || ''"
-        placeholder="npm install && npm test"
-        :rows="2"
-        :nodes="workflowStore.nodes"
-        :node-results="workflowStore.nodeResults"
-        :edges="workflowStore.edges"
-        :current-node-id="selectedNode.id"
-        field-key="setupCommand"
-        v-bind="codexExpressionNavBindings('setupCommand')"
-        @navigate="handleCodexExpressionFieldNavigate"
-        @register-field-index="onCodexRegisterExpressionFieldIndex"
-        @update:model-value="updateNodeData('setupCommand', $event)"
-      />
     </div>
   </template>
 </template>

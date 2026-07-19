@@ -433,7 +433,6 @@ export interface NodeData {
     | "update_existing_pr"
     | "patch_artifact";
   branchName?: string;
-  setupCommand?: string;
   codexModel?: string;
   codexReasoningEffort?: CodexReasoningEffort;
   opencodeModel?: string;

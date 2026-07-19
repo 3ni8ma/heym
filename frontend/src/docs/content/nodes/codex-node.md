@@ -48,7 +48,6 @@ OpenAI references:
 | Publish Mode | How changes are delivered (see table below) |
 | Branch Name | Working branch for PR/commit modes, default `codex/$executionId` |
 | Timeout | Maximum Codex execution time in seconds |
-| Setup Command | Optional command to run before Codex, without Codex/OpenAI secrets in env |
 
 ## Publish Modes
 
@@ -108,8 +107,7 @@ The Codex node can be attached to an **AI Agent** node's tool handle so the agen
     "taskPrompt": "$input.text",
     "publishMode": "draft_pr",
     "branchName": "codex/$executionId",
-    "timeoutSeconds": 3600,
-    "setupCommand": "npm install && npm test"
+    "timeoutSeconds": 3600
   }
 }
 ```
