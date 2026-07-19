@@ -1672,8 +1672,16 @@ export const boardApi = {
     );
     return response.data;
   },
-  runCard: async (boardId: string, cardId: string): Promise<BoardCard> => {
-    const response = await api.post<BoardCard>(`/boards/${boardId}/cards/${cardId}/run`, {});
+  runCard: async (
+    boardId: string,
+    cardId: string,
+    skipAutoAdvance: boolean = false,
+  ): Promise<BoardCard> => {
+    const query = skipAutoAdvance ? "?skip_auto_advance=true" : "";
+    const response = await api.post<BoardCard>(
+      `/boards/${boardId}/cards/${cardId}/run${query}`,
+      {},
+    );
     return response.data;
   },
   addComment: async (

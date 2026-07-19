@@ -721,6 +721,59 @@ test("planning runs but waits there — it does not auto-advance", async ({ page
   }
 });
 
+test("planning follow-up run waits for a comment before advancing", async ({ page }) => {
+  const wf = await createSetOutputWorkflow(page);
+  try {
+    const { boardId, cardId, columns } = await createBoardWithCard(page, "revise my plan");
+    const planning = columns.find((column) => column.name === "Planning")!;
+    await page.request.patch(`/api/boards/${boardId}/columns/${planning.id}`, {
+      data: { workflow_ids: [wf.id] },
+    });
+    await page.request.post(`/api/boards/${boardId}/cards/${cardId}/move`, {
+      data: { to_column_id: planning.id },
+    });
+
+    const initial = await waitForCard(page, boardId, cardId);
+    expect(initial).toEqual({ column: "Planning", status: "success" });
+    const initialDetail = (await (
+      await page.request.get(`/api/boards/${boardId}/cards/${cardId}`)
+    ).json()) as { runs: Array<{ status: string }> };
+
+    await page.goto(`/?tab=board&board=${boardId}`);
+    await page.getByTestId(`board-card-${cardId}`).click();
+    const runRequestPromise = page.waitForRequest(
+      (request) =>
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === `/api/boards/${boardId}/cards/${cardId}/run`,
+    );
+    await page.getByTestId("card-run-followup").click();
+    const runRequest = await runRequestPromise;
+    expect(new URL(runRequest.url()).searchParams.get("skip_auto_advance")).toBe("true");
+
+    await expect
+      .poll(async () => {
+        const response = await page.request.get(`/api/boards/${boardId}/cards/${cardId}`);
+        const cardDetail = (await response.json()) as { runs: Array<{ status: string }> };
+        if (cardDetail.runs.length <= initialDetail.runs.length) return "waiting";
+        return cardDetail.runs[0]?.status ?? "missing";
+      })
+      .toBe("success");
+
+    await page.waitForTimeout(750);
+    const waiting = await waitForCard(page, boardId, cardId);
+    expect(waiting).toEqual({ column: "Planning", status: "success" });
+
+    await page.getByTestId("card-comment-input").fill("The plan is approved");
+    await page.getByTestId("card-comment-submit").click();
+    await expect
+      .poll(async () => (await waitForCard(page, boardId, cardId)).column)
+      .toBe("Done");
+  } finally {
+    await deleteAllBoards(page);
+    await deleteWorkflow(page, wf.id);
+  }
+});
+
 test("cascades to the last column once past the planning gate", async ({ page }) => {
   const wf = await createSetOutputWorkflow(page);
   try {

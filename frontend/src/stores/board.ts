@@ -165,9 +165,9 @@ export const useBoardStore = defineStore("board", () => {
     }
   }
 
-  async function runFollowUp(cardId: string): Promise<void> {
+  async function runFollowUp(cardId: string, skipAutoAdvance: boolean = false): Promise<void> {
     if (!activeBoard.value) return;
-    await boardApi.runCard(activeBoard.value.id, cardId);
+    await boardApi.runCard(activeBoard.value.id, cardId, skipAutoAdvance);
     await refreshActiveBoard();
   }
 

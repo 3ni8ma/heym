@@ -112,22 +112,25 @@ The chain passes a standard payload as the workflow's input. Read it with normal
 
 ## The planning loop (follow-up rounds)
 
-A common pattern is a **Planning** column whose workflow enriches the card and asks
-follow-up questions:
+A common pattern is to put a planning workflow on the **second column** (by default
+named Planning — the name does not matter; the slot does). That workflow enriches the
+card and asks follow-up questions:
 
-1. Move a card into Planning — the workflow writes an enriched plan and its
+1. Move a card into the second column — the workflow writes an enriched plan and its
    questions back to the card as an output.
 2. Answer in the card's comment thread. The answer releases the card: it moves on to
-   the next column, which picks it up with the answer in context. The Planning chain
-   is not run again.
+   the next column, which picks it up with the answer in context. The second column's
+   chain is not run again.
 3. To improve the plan in place instead, press **Run follow-up round**. The same
-   chain runs again with all accumulated context, and the card flows on once it
-   succeeds.
+   chain runs again with all accumulated context, then the card waits in that column
+   until you add a comment to release it.
 
-Cards in the first two columns never move on by themselves — they run their chain and
-wait there for you. From the third column on, a successful chain advances the card to
-the right on its own, all the way to the last column. A card can only have one active
-run at a time.
+The planning gate is positional, not name-based: the leftmost column and the column
+immediately to its right never move on by themselves — they run their chain and wait
+there for you (a comment releases the second column). From the third column on, a
+successful chain advances the card to the right on its own, all the way to the last
+column. Renaming or removing the default "Planning" label does not change which slot
+is the gate. A card can only have one active run at a time.
 
 ## Human-in-the-loop and Codex questions
 

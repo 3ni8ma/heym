@@ -486,6 +486,8 @@ class TestMoveAndRun(unittest.IsolatedAsyncioTestCase):
                 _result_with(scalar=board),
                 _result_with(scalar=card),
                 _result_with(scalar=from_column),
+                # Ordered column ids for the positional planning gate.
+                _result_with(scalars_list=[from_column.id]),
             ]
         )
 
@@ -497,6 +499,87 @@ class TestMoveAndRun(unittest.IsolatedAsyncioTestCase):
                     board_id=board.id, card_id=card.id, db=db, current_user=user
                 )
         self.assertEqual(ctx.exception.status_code, 409)
+
+    async def test_follow_up_run_allows_auto_advance_past_the_gate(self):
+        user, board, from_column, to_column, card = self._setup()
+        development = MagicMock()
+        development.id = uuid.uuid4()
+        development.board_id = board.id
+        development.name = "Development"
+        development.position = 2
+        card.column_id = development.id
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _result_with(scalar=board),
+                _result_with(scalar=card),
+                _result_with(scalar=development),
+                _result_with(scalars_list=[from_column.id, to_column.id, development.id]),
+            ]
+        )
+
+        with patch.object(
+            boards_api.board_run_service, "enqueue_card_chain", AsyncMock(return_value=True)
+        ) as enqueue:
+            await boards_api.run_card_chain(
+                board_id=board.id, card_id=card.id, db=db, current_user=user
+            )
+
+        self.assertTrue(enqueue.await_args.kwargs["allow_advance"])
+
+    async def test_follow_up_run_on_gate_column_never_auto_advances(self):
+        """Second column (sorted index 1) waits for a comment — even without skip flag."""
+        user, board, from_column, to_column, card = self._setup()
+        card.column_id = to_column.id
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _result_with(scalar=board),
+                _result_with(scalar=card),
+                _result_with(scalar=to_column),
+                _result_with(scalars_list=[from_column.id, to_column.id]),
+            ]
+        )
+
+        with patch.object(
+            boards_api.board_run_service, "enqueue_card_chain", AsyncMock(return_value=True)
+        ) as enqueue:
+            await boards_api.run_card_chain(
+                board_id=board.id, card_id=card.id, db=db, current_user=user
+            )
+
+        self.assertFalse(enqueue.await_args.kwargs["allow_advance"])
+
+    async def test_follow_up_run_can_skip_auto_advance(self):
+        user, board, from_column, to_column, card = self._setup()
+        development = MagicMock()
+        development.id = uuid.uuid4()
+        development.board_id = board.id
+        development.name = "Development"
+        development.position = 2
+        card.column_id = development.id
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _result_with(scalar=board),
+                _result_with(scalar=card),
+                _result_with(scalar=development),
+                _result_with(scalars_list=[from_column.id, to_column.id, development.id]),
+            ]
+        )
+
+        with patch.object(
+            boards_api.board_run_service, "enqueue_card_chain", AsyncMock(return_value=True)
+        ) as enqueue:
+            await boards_api.run_card_chain(
+                board_id=board.id,
+                card_id=card.id,
+                skip_auto_advance=True,
+                db=db,
+                current_user=user,
+            )
+
+        self.assertFalse(enqueue.await_args.kwargs["allow_advance"])
 
 
 class TestBoardAccess(unittest.IsolatedAsyncioTestCase):

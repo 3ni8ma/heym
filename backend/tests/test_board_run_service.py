@@ -217,15 +217,16 @@ class TestRunCardChain(unittest.IsolatedAsyncioTestCase):
             p.start()
         self.addCleanup(lambda: [p.stop() for p in patches])
 
-        await board_run_service._run_chain(
-            card_id=card.id,
-            board_id=board.id,
-            column_id=card.column_id,
-            links=links,
-            move={"from_column": "Backlog", "to_column": "Planning"},
-            rerun=False,
-            session_factory=factory,
-        )
+        with patch.object(board_run_service, "_auto_advance", AsyncMock()) as advance:
+            await board_run_service._run_chain(
+                card_id=card.id,
+                board_id=board.id,
+                column_id=card.column_id,
+                links=links,
+                move={"from_column": "Backlog", "to_column": "Planning"},
+                rerun=False,
+                session_factory=factory,
+            )
 
         self.assertEqual(calls, [links[0]["workflow_id"], links[1]["workflow_id"]])
         runs = [o for o in session.added if type(o).__name__ == "BoardCardRun"]
@@ -236,6 +237,35 @@ class TestRunCardChain(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(histories), 2)
         self.assertEqual(histories[0].trigger_source, "board")
         self.assertEqual(card.run_status, "success")
+        advance.assert_awaited_once()
+        self.assertFalse(advance.await_args.kwargs.get("ignore_gate", False))
+
+    async def test_follow_up_rerun_does_not_bypass_the_planning_gate(self):
+        """A Run in a gate column must wait for a comment — ignore_gate stays off."""
+        card, board, session, factory, links, context = _chain_env()
+
+        def fake_execute(**kwargs):
+            return _success_result({"text": "ok"})
+
+        patches = _runner_patches(context, fake_execute)
+        for p in patches:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in patches])
+
+        with patch.object(board_run_service, "_auto_advance", AsyncMock()) as advance:
+            await board_run_service._run_chain(
+                card_id=card.id,
+                board_id=board.id,
+                column_id=card.column_id,
+                links=links[:1],
+                move=None,
+                rerun=True,
+                allow_advance=True,
+                session_factory=factory,
+            )
+
+        advance.assert_awaited_once()
+        self.assertFalse(advance.await_args.kwargs.get("ignore_gate", False))
 
     async def test_failure_stops_chain_and_marks_card_red(self):
         card, board, session, factory, links, context = _chain_env()
