@@ -866,6 +866,45 @@ function shouldShowGenericResultOutput(rawOutput: unknown): boolean {
   );
 }
 
+const resultViewModes = ref<Record<string, "tree" | "plain">>({});
+
+function isValidJson(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "object") return true;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return false;
+    try {
+      JSON.parse(trimmed);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+function parseJsonValue(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (typeof value === "object") return value;
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  }
+  return value;
+}
+
+function getResultViewMode(displayKey: string, defaultMode: "tree" | "plain"): "tree" | "plain" {
+  return resultViewModes.value[displayKey] ?? defaultMode;
+}
+
+function setResultViewMode(displayKey: string, mode: "tree" | "plain"): void {
+  resultViewModes.value = { ...resultViewModes.value, [displayKey]: mode };
+}
+
 interface HITLResolvedPayload {
   decision: "accepted" | "edited" | "refused";
   summary?: string;
@@ -3161,23 +3200,61 @@ function renderContent(content: string): string {
                 v-if="shouldShowGenericResultOutput(result.rawOutput)"
                 class="text-muted-foreground text-xs mt-1 min-w-0 max-w-full"
               >
-                <div
-                  v-if="showMarkdownInExecutionLog && getMarkdownDisplayTextForResult(result) !== null"
-                  class="execution-markdown-output break-words font-sans min-w-0 max-w-full"
-                >
-                  <!-- eslint-disable vue/no-v-html -->
+                <template v-if="isValidJson(result.output)">
+                  <div class="flex items-center justify-end gap-1 mb-1">
+                    <Button
+                      :variant="getResultViewMode(result.displayKey, 'tree') === 'tree' ? 'secondary' : 'ghost'"
+                      size="sm"
+                      class="h-7 px-2 text-[11px] font-medium"
+                      @click="setResultViewMode(result.displayKey, 'tree')"
+                    >
+                      Tree
+                    </Button>
+                    <Button
+                      :variant="getResultViewMode(result.displayKey, 'tree') === 'plain' ? 'secondary' : 'ghost'"
+                      size="sm"
+                      class="h-7 px-2 text-[11px] font-medium"
+                      @click="setResultViewMode(result.displayKey, 'plain')"
+                    >
+                      Plain
+                    </Button>
+                  </div>
                   <div
-                    class="execution-markdown-output-inner min-w-0 max-w-full"
-                    v-html="renderExecutionMarkdown(getMarkdownDisplayTextForResult(result)!)"
-                  />
-                  <!-- eslint-enable vue/no-v-html -->
-                </div>
-                <div
-                  v-else
-                  class="break-all whitespace-pre-wrap"
-                >
-                  {{ getGenericResultOutputTextForResult(result) }}
-                </div>
+                    v-if="getResultViewMode(result.displayKey, 'tree') === 'tree'"
+                    class="text-xs font-mono"
+                  >
+                    <JsonTree
+                      :data="parseJsonValue(result.output)"
+                      :auto-expand-depth="1"
+                      :root-expanded="true"
+                    />
+                  </div>
+                  <div
+                    v-else
+                    class="break-all whitespace-pre-wrap"
+                  >
+                    {{ getGenericResultOutputTextForResult(result) }}
+                  </div>
+                </template>
+                <template v-else>
+                  <div
+                    v-if="showMarkdownInExecutionLog && getMarkdownDisplayTextForResult(result) !== null"
+                    class="execution-markdown-output break-words font-sans min-w-0 max-w-full"
+                  >
+                    <!-- eslint-disable vue/no-v-html -->
+                    <div
+                      class="execution-markdown-output-inner min-w-0 max-w-full"
+                      v-html="renderExecutionMarkdown(getMarkdownDisplayTextForResult(result)!)"
+                    />
+                    <!-- eslint-enable vue/no-v-html -->
+                  </div>
+                  <div
+                    v-else
+                    class="break-all whitespace-pre-wrap"
+                  >
+                    {{ getGenericResultOutputTextForResult(result) }}
+                  </div>
+                </template>
               </div>
             </template>
           </div>
