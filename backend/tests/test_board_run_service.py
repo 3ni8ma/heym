@@ -1,3 +1,4 @@
+import json
 import unittest
 import uuid
 from datetime import datetime, timezone
@@ -239,6 +240,38 @@ class TestRunCardChain(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(card.run_status, "success")
         advance.assert_awaited_once()
         self.assertFalse(advance.await_args.kwargs.get("ignore_gate", False))
+
+    async def test_execution_history_removes_null_bytes_from_all_json_fields(self) -> None:
+        card, board, session, factory, links, context = _chain_env()
+        card.title = "T\u0000itle"
+
+        def fake_execute(**_kwargs: object) -> SimpleNamespace:
+            result = _success_result({"nested": ["out\u0000put"]})
+            result.node_results = [{"output": {"text": "node\u0000result"}}]
+            return result
+
+        patches = _runner_patches(context, fake_execute)
+        for p in patches:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in patches])
+
+        with patch.object(board_run_service, "_auto_advance", AsyncMock()):
+            await board_run_service._run_chain(
+                card_id=card.id,
+                board_id=board.id,
+                column_id=card.column_id,
+                links=links[:1],
+                move=None,
+                rerun=True,
+                session_factory=factory,
+            )
+
+        history = next(o for o in session.added if type(o).__name__ == "ExecutionHistory")
+        self.assertEqual(history.inputs["card"]["title"], "Title")
+        self.assertEqual(history.outputs, {"nested": ["output"]})
+        self.assertEqual(history.node_results[0]["output"]["text"], "noderesult")
+        serialized = json.dumps([history.inputs, history.outputs, history.node_results])
+        self.assertNotIn(r"\u0000", serialized)
 
     async def test_follow_up_rerun_does_not_bypass_the_planning_gate(self):
         """A Run in a gate column must wait for a comment — ignore_gate stays off."""
