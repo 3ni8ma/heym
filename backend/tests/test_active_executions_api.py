@@ -350,6 +350,45 @@ class LiveExecutionSnapshotTests(unittest.IsolatedAsyncioTestCase):
         finally:
             clear_execution(execution_id)
 
+    async def test_stream_sends_heartbeat_while_active_node_is_idle(self) -> None:
+        workflow_id = uuid.uuid4()
+        execution_id = uuid.uuid4()
+        register_execution(workflow_id=workflow_id, execution_id=execution_id)
+
+        workflow = MagicMock()
+        workflow.id = workflow_id
+        workflow.nodes = []
+        user = MagicMock()
+        user.id = uuid.uuid4()
+        request = MagicMock()
+        request.is_disconnected = AsyncMock(return_value=False)
+
+        try:
+            with (
+                patch(
+                    "app.api.workflows.get_workflow_for_user",
+                    AsyncMock(return_value=workflow),
+                ),
+                patch("app.api.workflows.WORKFLOW_SSE_HEARTBEAT_SECONDS", 0),
+            ):
+                response = await stream_active_workflow_execution(
+                    workflow_id=workflow_id,
+                    execution_id=execution_id,
+                    request=request,
+                    current_user=user,
+                    db=AsyncMock(),
+                )
+
+                iterator = response.body_iterator
+                started = await anext(iterator)
+                heartbeat = await anext(iterator)
+                await iterator.aclose()
+
+            self.assertIn('"type": "execution_started"', started)
+            self.assertEqual(heartbeat, ": heartbeat\n\n")
+        finally:
+            clear_execution(execution_id)
+
 
 class SubWorkflowActiveTrackingTests(unittest.TestCase):
     """Sub-workflow executions must appear in the active list while running."""
