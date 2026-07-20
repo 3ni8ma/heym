@@ -634,7 +634,7 @@ onMounted(async () => {
           Inspect AI assistant and workflow LLM calls in one place.
         </p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 w-full md:w-auto">
         <Button
           variant="outline"
           size="sm"
@@ -655,6 +655,7 @@ onMounted(async () => {
         <Button
           variant="destructive"
           size="sm"
+          class="ml-auto md:ml-0"
           :loading="clearing"
           :disabled="traces.length === 0"
           @click="clearTraces"
@@ -841,50 +842,61 @@ onMounted(async () => {
     <Dialog
       :open="detailOpen"
       title="Trace Details"
+      title-class="text-lg sm:text-lg md:text-xl"
       size="3xl"
       allow-fullscreen
       default-fullscreen
+      hide-fullscreen-toggle-on-mobile
       @close="closeDetail"
     >
       <template #header-actions>
-        <div class="flex items-center gap-2 flex-wrap">
-          <div class="flex items-center gap-1">
-            <Button
-              variant="outline"
-              size="sm"
-              class="h-9 px-2 md:h-7 text-xs"
+        <div class="inline-flex items-center gap-2">
+          <div class="inline-flex items-center h-8 rounded-lg border border-border bg-muted/50 overflow-hidden">
+            <button
+              type="button"
+              class="flex items-center justify-center h-8 w-8 text-foreground hover:bg-accent disabled:pointer-events-none disabled:opacity-35 transition-colors"
               :disabled="!hasPreviousTrace || detailLoading"
+              aria-label="Previous trace"
               @click="goToPreviousTrace"
             >
-              <ChevronLeft class="w-3 h-3 md:w-4 md:h-4" />
-              <span class="hidden sm:inline">Prev</span>
-            </Button>
-            <span class="text-xs text-muted-foreground px-1 whitespace-nowrap">
+              <ChevronLeft class="w-4 h-4" />
+            </button>
+            <span class="h-8 min-w-[4.25rem] px-2 inline-flex items-center justify-center text-xs font-medium tabular-nums text-foreground border-x border-border bg-background/60">
               {{ tracePositionLabel }}
             </span>
-            <Button
-              variant="outline"
-              size="sm"
-              class="h-9 px-2 md:h-7 text-xs"
+            <button
+              type="button"
+              class="flex items-center justify-center h-8 w-8 text-foreground hover:bg-accent disabled:pointer-events-none disabled:opacity-35 transition-colors"
               :disabled="!hasNextTrace || detailLoading"
+              aria-label="Next trace"
               @click="goToNextTrace"
             >
-              <span class="hidden sm:inline">Next</span>
-              <ChevronRight class="w-3 h-3 md:w-4 md:h-4" />
-            </Button>
+              <ChevronRight class="w-4 h-4" />
+            </button>
           </div>
           <Button
             v-if="selectedTrace?.workflow_id"
             variant="outline"
             size="sm"
-            class="h-9 md:h-7 text-xs"
+            class="!h-8 !min-h-8 !px-2.5 text-xs shrink-0 hidden sm:inline-flex"
             @click="goToWorkflow"
           >
             <ExternalLink class="w-3 h-3 mr-1" />
-            <span class="hidden sm:inline">Go to Workflow</span>
-            <span class="sm:hidden">Workflow</span>
+            Go to Workflow
           </Button>
         </div>
+      </template>
+      <template #header-trailing>
+        <Button
+          v-if="selectedTrace?.workflow_id"
+          variant="outline"
+          size="sm"
+          class="!h-8 !min-h-8 !px-2.5 text-xs shrink-0 sm:hidden"
+          @click="goToWorkflow"
+        >
+          <ExternalLink class="w-3 h-3 mr-1" />
+          Workflow
+        </Button>
       </template>
       <div
         v-if="detailLoading"
