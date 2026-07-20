@@ -2809,9 +2809,29 @@ function renderContent(content: string): string {
                   #{{ result.occurrence }}
                 </span>
               </span>
-              <span class="text-xs text-muted-foreground shrink-0">
-                {{ result.status === 'skipped' ? 'skipped' : `${result.execution_time_ms.toFixed(2)}ms` }}
-              </span>
+              <div class="flex items-center gap-1 shrink-0">
+                <template v-if="isValidJson(result.output)">
+                  <Button
+                    :variant="getResultViewMode(result.displayKey, 'tree') === 'tree' ? 'secondary' : 'ghost'"
+                    size="sm"
+                    class="h-7 px-2 text-[11px] font-medium"
+                    @click="setResultViewMode(result.displayKey, 'tree')"
+                  >
+                    Tree
+                  </Button>
+                  <Button
+                    :variant="getResultViewMode(result.displayKey, 'tree') === 'plain' ? 'secondary' : 'ghost'"
+                    size="sm"
+                    class="h-7 px-2 text-[11px] font-medium"
+                    @click="setResultViewMode(result.displayKey, 'plain')"
+                  >
+                    Plain
+                  </Button>
+                </template>
+                <span class="text-xs text-muted-foreground">
+                  {{ result.status === 'skipped' ? 'skipped' : `${result.execution_time_ms.toFixed(2)}ms` }}
+                </span>
+              </div>
             </div>
             <div
               v-if="result.error"
@@ -3201,24 +3221,6 @@ function renderContent(content: string): string {
                 class="text-muted-foreground text-xs mt-1 min-w-0 max-w-full"
               >
                 <template v-if="isValidJson(result.output)">
-                  <div class="flex items-center justify-end gap-1 mb-1">
-                    <Button
-                      :variant="getResultViewMode(result.displayKey, 'tree') === 'tree' ? 'secondary' : 'ghost'"
-                      size="sm"
-                      class="h-7 px-2 text-[11px] font-medium"
-                      @click="setResultViewMode(result.displayKey, 'tree')"
-                    >
-                      Tree
-                    </Button>
-                    <Button
-                      :variant="getResultViewMode(result.displayKey, 'tree') === 'plain' ? 'secondary' : 'ghost'"
-                      size="sm"
-                      class="h-7 px-2 text-[11px] font-medium"
-                      @click="setResultViewMode(result.displayKey, 'plain')"
-                    >
-                      Plain
-                    </Button>
-                  </div>
                   <div
                     v-if="getResultViewMode(result.displayKey, 'tree') === 'tree'"
                     class="text-xs font-mono"
