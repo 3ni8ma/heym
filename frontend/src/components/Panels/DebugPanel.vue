@@ -870,13 +870,15 @@ const resultViewModes = ref<Record<string, "tree" | "plain">>({});
 
 function isValidJson(value: unknown): boolean {
   if (value === null || value === undefined) return false;
-  if (typeof value === "object") return true;
+  if (typeof value === "object") {
+    return true;
+  }
   if (typeof value === "string") {
     const trimmed = value.trim();
     if (!trimmed) return false;
     try {
-      JSON.parse(trimmed);
-      return true;
+      const parsed = JSON.parse(trimmed);
+      return parsed !== null && typeof parsed === "object";
     } catch {
       return false;
     }
@@ -2810,7 +2812,7 @@ function renderContent(content: string): string {
                 </span>
               </span>
               <div class="flex items-center gap-1 shrink-0">
-                <template v-if="isValidJson(result.output)">
+                <template v-if="!result.error && isValidJson(result.output)">
                   <Button
                     :variant="getResultViewMode(result.displayKey, 'tree') === 'tree' ? 'secondary' : 'ghost'"
                     size="sm"
