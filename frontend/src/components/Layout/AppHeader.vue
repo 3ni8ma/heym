@@ -113,14 +113,14 @@ async function handleLogout(): Promise<void> {
         <button
           v-if="authStore.user"
           type="button"
-          class="user-badge hidden md:flex items-center gap-2.5 text-sm mr-2 px-3 py-2 rounded-xl cursor-pointer hover:opacity-80 transition-opacity text-left"
+          class="user-badge flex items-center gap-2.5 text-sm mr-2 px-3 py-2 rounded-xl cursor-pointer hover:opacity-80 transition-opacity text-left"
           title="Settings"
           @click="settingsInitialTab = 'profile'; showSettingsDialog = true; pushOverlayState()"
         >
           <div class="flex items-center justify-center w-7 h-7 rounded-lg bg-primary/15 text-primary shrink-0">
             <Settings class="w-4 h-4" />
           </div>
-          <span class="font-medium text-foreground">{{ authStore.user.name }}</span>
+          <span class="font-medium text-foreground hidden md:inline">{{ authStore.user.name }}</span>
         </button>
 
         <slot name="actions" />
