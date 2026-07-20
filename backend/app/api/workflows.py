@@ -1097,6 +1097,8 @@ async def stream_active_workflow_execution(
         emitted_result_count = 0
         emitted_running_node_ids: set[str] = set()
         missing_ticks = 0
+        loop = asyncio.get_running_loop()
+        last_heartbeat_at = loop.time()
 
         yield (
             "data: "
@@ -1142,8 +1144,10 @@ async def stream_active_workflow_execution(
 
             if active_found:
                 missing_ticks = 0
+                emitted_event = False
                 for node_result in node_results[emitted_result_count:]:
                     yield f"data: {json.dumps({'type': 'node_complete', **node_result})}\n\n"
+                    emitted_event = True
                 emitted_result_count = max(emitted_result_count, len(node_results))
 
                 current_running_node_ids = set(running_node_ids)
@@ -1151,7 +1155,14 @@ async def stream_active_workflow_execution(
                     yield (
                         "data: " + json.dumps({"type": "node_start", "node_id": node_id}) + "\n\n"
                     )
+                    emitted_event = True
                 emitted_running_node_ids = current_running_node_ids
+                now = loop.time()
+                if emitted_event:
+                    last_heartbeat_at = now
+                elif now - last_heartbeat_at >= WORKFLOW_SSE_HEARTBEAT_SECONDS:
+                    last_heartbeat_at = now
+                    yield ": heartbeat\n\n"
                 await asyncio.sleep(0.25)
                 continue
 

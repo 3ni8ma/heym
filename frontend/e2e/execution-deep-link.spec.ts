@@ -272,7 +272,7 @@ test("opens one running execution live from both history dialogs", async ({ page
   }
 });
 
-test("keeps the dashboard responsive while a canvas workflow is running", async ({
+test("keeps a canvas run live after dashboard navigation and history re-entry", async ({
   page,
 }) => {
   const workflow = await createWorkflow(
@@ -285,7 +285,7 @@ test("keeps the dashboard responsive while a canvas workflow is running", async 
       }),
       workflowNode("responsive_wait_a", "wait", 340, 160, {
         label: "wait",
-        duration: 30_000,
+        duration: 10_000,
       }),
       workflowNode("responsive_set", "set", 600, 160, {
         label: "set",
@@ -293,7 +293,7 @@ test("keeps the dashboard responsive while a canvas workflow is running", async 
       }),
       workflowNode("responsive_wait_b", "wait", 860, 160, {
         label: "wait1",
-        duration: 10_000,
+        duration: 2_000,
       }),
       workflowNode("responsive_output", "jsonOutputMapper", 1_120, 160, {
         label: "jsonResponse",
@@ -343,6 +343,20 @@ test("keeps the dashboard responsive while a canvas workflow is running", async 
       timeout: 2_000,
     });
     expect(healthResponse.ok()).toBeTruthy();
+
+    await page.getByRole("button", { name: "History", exact: true }).click();
+    await page.getByTestId(`open-live-execution-${executionId}`).click();
+    await expectExecutionPath(page, workflow.id, executionId);
+    await expect(page.locator('[data-id="responsive_wait_a"] .node-base')).toHaveClass(
+      /animate-heartbeat/,
+    );
+    await expect(page.locator('[data-id="responsive_wait_b"] .node-base')).toHaveClass(
+      /animate-heartbeat/,
+      { timeout: 15_000 },
+    );
+    await expect(page.getByTestId("execution-highlights-panel")).toBeVisible({
+      timeout: 8_000,
+    });
   } finally {
     if (executionId) {
       await page.request.post(
