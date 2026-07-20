@@ -114,6 +114,44 @@ class TestPrPublishHelpers(unittest.TestCase):
             found = pr_publish.discover_pr_screenshots(workspace, lambda _cmd, _ws: "")
             self.assertEqual([p.resolve() for p in found], [shot.resolve()])
 
+    def test_discover_finds_case_insensitive_screenshot_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            shot = workspace / "ScreenShot-Mobile.png"
+            shot.write_bytes(b"\x89PNG\r\n\x1a\nfake")
+            found = pr_publish.discover_pr_screenshots(workspace, lambda _cmd, _ws: "")
+            self.assertEqual([p.resolve() for p in found], [shot.resolve()])
+
+    def test_discover_finds_common_screenshot_directories(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            shot = workspace / "e2e" / "screenshots" / "after.png"
+            shot.parent.mkdir(parents=True)
+            shot.write_bytes(b"\x89PNG\r\n\x1a\nfake")
+            found = pr_publish.discover_pr_screenshots(workspace, lambda _cmd, _ws: "")
+            self.assertEqual([p.resolve() for p in found], [shot.resolve()])
+
+    def test_discover_skips_tracked_screenshots(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            shot = workspace / "docs" / "screenshots" / "login.png"
+            shot.parent.mkdir(parents=True)
+            shot.write_bytes(b"tracked")
+            found = pr_publish.discover_pr_screenshots(
+                workspace, lambda _cmd, _ws: "docs/screenshots/login.png\n"
+            )
+            self.assertEqual(found, [])
+
+    def test_discover_respects_max_file_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            for index in range(7):
+                shot = workspace / "frontend" / ".e2e-artifacts" / f"ui-{index}.png"
+                shot.parent.mkdir(parents=True, exist_ok=True)
+                shot.write_bytes(b"\x89PNG\r\n\x1a\nfake")
+            found = pr_publish.discover_pr_screenshots(workspace, lambda _cmd, _ws: "")
+            self.assertEqual(len(found), pr_publish.PR_SCREENSHOT_MAX_FILES)
+
     def test_upload_and_inject_uses_gh(self):
         gh = MagicMock()
         gh.get_release_by_tag.side_effect = ValueError("Not Found")

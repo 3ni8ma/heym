@@ -8,12 +8,15 @@ seam (so their unit tests can mock the seam on the runner instance).
 
 from __future__ import annotations
 
+import logging
 import re
 from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import quote, urlparse, urlunparse
 
 from app.services.github_service import GitHubService
+
+logger = logging.getLogger(__name__)
 
 # --- PR screenshot constants (shared) ---
 PR_SCREENSHOT_SUFFIXES: frozenset[str] = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif"})
@@ -177,6 +180,7 @@ def discover_pr_screenshots(
 ) -> list[Path]:
     """Find local UI screenshots left on disk (gitignored / untracked only)."""
     root = workspace.resolve()
+    logger.debug("Discovering PR screenshots under %s", root)
     tracked = {
         line.strip().replace("\\", "/")
         for line in git_output(["git", "ls-files"], workspace).splitlines()
@@ -197,31 +201,53 @@ def discover_pr_screenshots(
         except ValueError:
             return
         if relative in tracked:
+            logger.debug("Skipping tracked screenshot: %s", relative)
             return
         try:
-            if path.stat().st_size > PR_SCREENSHOT_MAX_BYTES:
+            size = path.stat().st_size
+            if size > PR_SCREENSHOT_MAX_BYTES:
+                logger.debug("Skipping oversized screenshot: %s (%d bytes)", relative, size)
                 return
         except OSError:
             return
+        logger.debug("Found screenshot: %s", relative)
         seen.add(path)
         candidates.append(resolved)
 
     artifact_dirs = [
         root / "frontend" / ".e2e-artifacts",
         root / ".e2e-artifacts",
+        root / "screenshots",
+        root / "frontend" / "screenshots",
+        root / "e2e" / "screenshots",
+        root / "test" / "screenshots",
+        root / "tests" / "screenshots",
+        root / "artifacts",
+        root / "frontend" / "artifacts",
     ]
     for artifact_dir in artifact_dirs:
         if artifact_dir.is_dir():
+            logger.debug("Scanning screenshot directory: %s", artifact_dir)
             for path in artifact_dir.rglob("*"):
                 consider(path)
 
-    for path in root.glob("*screenshot*"):
-        consider(path)
-    for path in root.glob("*/*screenshot*"):
-        consider(path)
+    # Case-insensitive search for files and directories whose names contain "screenshot".
+    # Limit depth to avoid expensive full repository traversal.
+    for depth in range(1, 5):
+        pattern = "/".join(["*"] * depth)
+        for path in root.glob(pattern):
+            if "screenshot" in path.name.lower():
+                consider(path)
 
     candidates.sort(key=lambda item: item.as_posix())
-    return candidates[:PR_SCREENSHOT_MAX_FILES]
+    selected = candidates[:PR_SCREENSHOT_MAX_FILES]
+    logger.info(
+        "Discovered %d PR screenshot candidate(s) in %s (returning %d)",
+        len(candidates),
+        root,
+        len(selected),
+    )
+    return selected
 
 
 def ensure_pr_screenshot_release(
