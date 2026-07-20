@@ -2,11 +2,15 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from app.config import settings
 from app.services.coding_agent import pr_publish
-from app.services.opencode_runner_service import OpenCodeRunnerService, OpenCodeRunRequest
+from app.services.opencode_runner_service import (
+    OpenCodeRunnerService,
+    OpenCodeRunRequest,
+    OpenCodeRunResult,
+)
 
 _WS = Path("/tmp/heym-oc-ws/run1")
 
@@ -48,6 +52,21 @@ class TestOpenCodeRunCommand(unittest.TestCase):
         self.assertIn("PR_TITLE:", cmd[-1])
         self.assertNotIn("./check.sh", cmd[-1])
         self.assertNotIn("Do NOT install package managers", cmd[-1])
+
+    def test_run_command_emphasizes_mandatory_pr_title(self):
+        cmd = self.svc.build_run_command("opencode/kimi-k3", _request(), _WS)
+        prompt = cmd[-1]
+        self.assertIn("PR metadata is MANDATORY", prompt)
+        self.assertIn("good PR title is specific", prompt)
+        self.assertIn("Bad titles are generic", prompt)
+        self.assertIn("## Summary", prompt)
+
+    def test_run_command_includes_screenshot_instructions(self):
+        cmd = self.svc.build_run_command("opencode/kimi-k3", _request(), _WS)
+        prompt = cmd[-1]
+        self.assertIn("MUST save at least one PNG screenshot", prompt)
+        self.assertIn("frontend/.e2e-artifacts/", prompt)
+        self.assertIn("Do not commit screenshot binaries", prompt)
 
     def test_run_command_pins_workspace_dir(self):
         cmd = self.svc.build_run_command("opencode/kimi-k3", _request(), _WS)
@@ -138,6 +157,71 @@ class TestOpenCodeParser(unittest.TestCase):
         self.assertEqual(result.status, "completed")
         self.assertTrue(result.summary)
 
+    def test_parse_uses_task_prompt_for_fallback_summary(self):
+        result = self.svc.parse_events("", task_prompt="Fix the OpenCode fallback summary logic")
+        self.assertIn("OpenCode completed the requested task", result.summary)
+        self.assertIn("Fix the OpenCode fallback summary logic", result.summary)
+
+    def test_parse_fallback_summary_avoids_generic_message_when_prompt_present(self):
+        result = self.svc.parse_events("", task_prompt="Add case-insensitive screenshot discovery")
+        self.assertNotEqual(result.summary, "OpenCode completed without a final assistant message.")
+        self.assertIn("Add case-insensitive screenshot discovery", result.summary)
+
+    def test_parse_empty_task_prompt_falls_back_to_generic_message(self):
+        result = self.svc.parse_events("", task_prompt="")
+        self.assertEqual(result.summary, "OpenCode completed without a final assistant message.")
+
+
+class TestOpenCodePrMetadataNormalization(unittest.TestCase):
+    def setUp(self):
+        self.svc = OpenCodeRunnerService(workspace_root="/tmp/heym-oc-ws")
+
+    def test_ensure_meaningful_pr_title_prefers_agent_title(self):
+        result = OpenCodeRunResult(
+            summary="Did some work.",
+            pull_request_title="Fix OpenCode fallback summary logic",
+        )
+        title = self.svc._ensure_meaningful_pr_title(result, "some task")
+        self.assertEqual(title, "Fix OpenCode fallback summary logic")
+
+    def test_ensure_meaningful_pr_title_skips_placeholder(self):
+        result = OpenCodeRunResult(summary="Done.", pull_request_title="Done")
+        title = self.svc._ensure_meaningful_pr_title(result, "Fix OpenCode fallback summary logic")
+        self.assertEqual(title, "Fix OpenCode fallback summary logic")
+
+    def test_ensure_meaningful_pr_title_derives_from_summary(self):
+        result = OpenCodeRunResult(
+            summary="Implemented the mobile drawer fix.", pull_request_title=""
+        )
+        title = self.svc._ensure_meaningful_pr_title(result, "fix ui")
+        self.assertEqual(title, "Implemented the mobile drawer fix.")
+
+    def test_ensure_meaningful_pr_title_last_resort_fallback(self):
+        result = OpenCodeRunResult(summary="Done.", pull_request_title="")
+        title = self.svc._ensure_meaningful_pr_title(result, "")
+        self.assertEqual(title, "Apply OpenCode changes")
+
+    def test_ensure_pr_body_enhances_short_body_with_task(self):
+        result = OpenCodeRunResult(summary="Done.", pull_request_body="")
+        body = self.svc._ensure_pr_body(result, "Fix OpenCode fallback summary logic")
+        self.assertIn("## Task", body)
+        self.assertIn("Fix OpenCode fallback summary logic", body)
+
+    def test_ensure_pr_body_keeps_existing_long_body(self):
+        long_body = "This is a sufficiently long PR body with enough context to remain unchanged."
+        result = OpenCodeRunResult(
+            summary="Summary text.",
+            pull_request_body=long_body,
+        )
+        body = self.svc._ensure_pr_body(result, "task prompt")
+        self.assertEqual(body, long_body)
+
+    def test_normalize_pr_metadata_mutates_result(self):
+        result = OpenCodeRunResult(summary="Done.", pull_request_title="Update")
+        self.svc._normalize_pr_metadata(result, "Fix OpenCode fallback summary logic")
+        self.assertEqual(result.pull_request_title, "Fix OpenCode fallback summary logic")
+        self.assertIn("## Task", result.pull_request_body)
+
 
 class TestOpenCodeExecFailureFormatting(unittest.TestCase):
     def test_event_stream_is_not_dumped_as_error(self) -> None:
@@ -172,6 +256,42 @@ class TestOpenCodeExecFailureFormatting(unittest.TestCase):
     def test_plain_stderr_is_preserved(self) -> None:
         detail = OpenCodeRunnerService._format_exec_failure(1, "", "opencode: command failed")
         self.assertEqual(detail, "opencode: command failed")
+
+
+class TestOpenCodeCreatePr(unittest.TestCase):
+    def setUp(self):
+        self.runner = OpenCodeRunnerService(workspace_root="/tmp/heym-oc-ws")
+        self.workspace = Path("/tmp/ws")
+        self.request = _request(publish_mode="open_pr", branch_name="opencode/run")
+
+    def test_create_pr_enhances_weak_title_and_body(self):
+        result = OpenCodeRunResult(
+            status="completed",
+            summary="Done.",
+            pull_request_title="Update",
+            pull_request_body="",
+            changed_files=["a.vue"],
+        )
+        self.runner._normalize_pr_metadata(result, self.request.task_prompt)
+        gh = MagicMock()
+        gh.create_pull_request.return_value = {
+            "number": 1,
+            "html_url": "https://github.com/acme/app/pull/1",
+        }
+
+        with patch("app.services.opencode_runner_service.GitHubService", return_value=gh) as gh_cls:
+            url = self.runner._create_pr(
+                self.workspace, self.request, result, "opencode/run", draft=False
+            )
+
+        self.assertEqual(url, "https://github.com/acme/app/pull/1")
+        gh_cls.assert_called()
+        title = gh.create_pull_request.call_args.args[2]
+        body = gh.create_pull_request.call_args.kwargs["body"]
+        self.assertNotEqual(title, "Update")
+        self.assertIn("fix the tests", title.lower())
+        self.assertIn("## Task", body)
+        self.assertIn("fix the tests", body.lower())
 
 
 class TestOpenCodePushBranch(unittest.TestCase):

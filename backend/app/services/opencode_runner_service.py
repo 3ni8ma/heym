@@ -11,6 +11,7 @@ is never placed inside the OpenCode process/container.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -22,6 +23,8 @@ from app.config import settings
 from app.services.coding_agent import pr_publish
 from app.services.github_service import GitHubService
 from app.services.opencode_catalog import OPENCODE_DEFAULT_MODEL, OPENCODE_ZEN_BASE_URL
+
+logger = logging.getLogger(__name__)
 
 _REMOTE_PUBLISH_MODES: frozenset[str] = frozenset(
     {"draft_pr", "open_pr", "commit_push", "direct_commit", "update_existing_pr"}
@@ -39,9 +42,17 @@ _LOCAL_ONLY_RULES = (
     "and start a short-lived preview/dev server solely to capture the UI, then stop the server. "
     "Do not commit screenshot binaries into source; Heym uploads those images onto the pull "
     "request afterward. "
-    "End your final assistant message with a dedicated line "
+    "PR metadata is MANDATORY. End your final assistant message with a dedicated line "
     "`PR_TITLE: <imperative one-line change description, ideally <=72 chars>` — never use "
-    "placeholders such as Done, Fixed, or Update."
+    "placeholders such as Done, Fixed, Update, or Completed. "
+    "A good PR title is specific and action-oriented, e.g. "
+    "`PR_TITLE: Fix OpenCode fallback summary when no assistant message is returned` or "
+    "`PR_TITLE: Add case-insensitive screenshot discovery for OpenCode PRs`. "
+    "Bad titles are generic or incomplete, e.g. `PR_TITLE: Fix issue`, `PR_TITLE: Update code`, "
+    "`PR_TITLE: Done`, or `PR_TITLE: Apply changes`. "
+    "After the PR_TITLE line, provide a concise PR description that explains what changed and "
+    "why, using a `## Summary` section. If you saved screenshots, mention their file paths so "
+    "they can be attached automatically."
 )
 _MAX_ERROR_DETAIL_CHARS = 4000
 
@@ -151,7 +162,7 @@ class OpenCodeRunnerService:
         config_path.chmod(0o600)
 
     # --- output parsing ---
-    def parse_events(self, stdout: str) -> OpenCodeRunResult:
+    def parse_events(self, stdout: str, task_prompt: str = "") -> OpenCodeRunResult:
         events: list[dict] = []
         summary = ""
         for raw in (stdout or "").splitlines():
@@ -169,7 +180,7 @@ class OpenCodeRunnerService:
             if text:
                 summary = text
         if not summary:
-            summary = "OpenCode completed without a final assistant message."
+            summary = self._fallback_summary(task_prompt)
         pull_request_title, cleaned_summary = pr_publish.extract_pr_title_line(summary)
         return OpenCodeRunResult(
             status="completed",
@@ -177,6 +188,57 @@ class OpenCodeRunnerService:
             pull_request_title=pull_request_title,
             raw_events=events,
         )
+
+    @staticmethod
+    def _fallback_summary(task_prompt: str) -> str:
+        """Build a useful fallback summary from the task prompt when the agent is silent."""
+        prompt = str(task_prompt or "").strip()
+        if not prompt:
+            return "OpenCode completed without a final assistant message."
+        first_line = prompt.splitlines()[0].strip()
+        # Take a reasonable fragment so the summary is readable but not the whole prompt.
+        snippet = first_line[:200].strip()
+        if len(snippet) < 8:
+            return "OpenCode completed without a final assistant message."
+        return f"OpenCode completed the requested task: {snippet}"
+
+    def _normalize_pr_metadata(self, result: OpenCodeRunResult, task_prompt: str) -> None:
+        """Ensure PR title and body are meaningful and informative before publishing."""
+        result.pull_request_title = self._ensure_meaningful_pr_title(result, task_prompt)
+        result.pull_request_body = self._ensure_pr_body(result, task_prompt)
+
+    def _ensure_meaningful_pr_title(self, result: OpenCodeRunResult, task_prompt: str) -> str:
+        """Return a meaningful PR title, deriving one from context if the agent's title is weak."""
+        candidates = [
+            result.pull_request_title,
+            result.summary,
+        ]
+        for candidate in candidates:
+            title = pr_publish.normalize_title_candidate(candidate)
+            if pr_publish.is_meaningful_commit_title(title):
+                return title
+        prompt = str(task_prompt or "").strip()
+        if prompt:
+            first_line = prompt.splitlines()[0].strip()
+            if len(first_line) >= 8:
+                return pr_publish.normalize_title_candidate(first_line)
+        return "Apply OpenCode changes"
+
+    def _ensure_pr_body(self, result: OpenCodeRunResult, task_prompt: str) -> str:
+        """Return a PR body with adequate context; enhance a short or missing body."""
+        body = str(result.pull_request_body or "").strip()
+        summary = str(result.summary or "").strip()
+        prompt = str(task_prompt or "").strip()
+        if len(body) >= 60 and body != summary:
+            return body
+        parts: list[str] = []
+        if summary and summary != body:
+            parts.append(summary)
+        if prompt:
+            parts.append(f"## Task\n\n{prompt}")
+        if not parts:
+            return ""
+        return "\n\n".join(parts)
 
     @staticmethod
     def _event_assistant_text(event: dict) -> str:
@@ -285,7 +347,8 @@ class OpenCodeRunnerService:
             home, api_key=request.api_key, base_url=request.base_url, model=model
         )
         stdout = self._exec_opencode(workspace, home, request, model)
-        result = self.parse_events(stdout)
+        result = self.parse_events(stdout, task_prompt=request.task_prompt)
+        self._normalize_pr_metadata(result, request.task_prompt)
         result.workspace_path = str(workspace)
         result.branch_name = request.branch_name
         result.diff = self._git_output(["git", "diff", "--binary"], workspace)
@@ -570,10 +633,14 @@ class OpenCodeRunnerService:
         draft: bool,
     ) -> str | None:
         owner, repo = pr_publish.parse_github_owner_repo(request.repository_url)
-        title = pr_publish.commit_title(
-            result.pull_request_title, result.summary, fallback="Apply OpenCode changes"
-        )
-        pr_body = str(result.pull_request_body or "").strip() or result.summary or None
+        title = result.pull_request_title or "Apply OpenCode changes"
+        if not pr_publish.is_meaningful_commit_title(title):
+            logger.warning(
+                "OpenCode PR title is missing or low quality; creating PR with title: %s", title
+            )
+        pr_body = result.pull_request_body or None
+        if not pr_body:
+            logger.warning("OpenCode PR body is empty; creating PR without a description")
         gh = GitHubService(request.github_config)
         try:
             pr = gh.create_pull_request(
