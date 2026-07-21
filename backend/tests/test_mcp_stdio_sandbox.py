@@ -499,6 +499,100 @@ class SandboxImageResolutionTests(unittest.TestCase):
         self.assertEqual(result.argv[-1], "mcp/fetch")
 
 
+class ContainerRuntimeUsabilityTests(unittest.TestCase):
+    """The hardened container must still be able to run a real MCP server.
+
+    The first version of the sandbox was airtight and unusable: `npx` died with
+    `mkdir /nonexistent` because uid 65534's passwd home does not exist, and once
+    that was fixed the installed binary would not start because Docker silently
+    applies `noexec` to every --tmpfs. The existing tests all asserted argv
+    contents that looked correct, so none of them caught it. These pin the
+    runtime preconditions instead.
+    """
+
+    def setUp(self) -> None:
+        reset_docker_available_cache()
+        self.addCleanup(reset_docker_available_cache)
+        self._patches = [
+            patch.dict(
+                os.environ,
+                {
+                    "HEYM_MCP_STDIO_SANDBOX": "docker",
+                    "HEYM_MCP_STDIO_IMAGE": "heym-backend:local",
+                },
+            ),
+            patch("app.services.mcp_stdio_sandbox.docker_available", return_value=True),
+        ]
+        for p in self._patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def _tmpfs_spec(self, argv: list[str]) -> str:
+        return _flag_value(argv, "--tmpfs") or ""
+
+    def _envs(self, argv: list[str]) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for index, token in enumerate(argv):
+            if token == "--env" and index + 1 < len(argv) and "=" in argv[index + 1]:
+                key, _, value = argv[index + 1].partition("=")
+                out[key] = value
+        return out
+
+    def test_tmpfs_allows_exec(self) -> None:
+        """Docker adds noexec unless exec is named, which blocks npx-installed bins."""
+        spec = self._tmpfs_spec(build_sandboxed_command("npx", [], None).argv)
+        self.assertIn("exec", spec.split(":")[-1].split(","))
+        self.assertNotIn("noexec", spec)
+
+    def test_tmpfs_still_drops_suid(self) -> None:
+        spec = self._tmpfs_spec(build_sandboxed_command("npx", [], None).argv)
+        self.assertIn("nosuid", spec)
+
+    def test_home_points_at_a_writable_path(self) -> None:
+        """uid 65534's passwd home is /nonexistent, so npm cannot even start."""
+        envs = self._envs(build_sandboxed_command("npx", [], None).argv)
+        self.assertEqual(envs.get("HOME"), "/tmp")
+
+    def test_package_manager_caches_point_at_the_tmpfs(self) -> None:
+        envs = self._envs(build_sandboxed_command("npx", [], None).argv)
+        for key in ("NPM_CONFIG_CACHE", "XDG_CACHE_HOME", "UV_CACHE_DIR"):
+            with self.subTest(key=key):
+                self.assertTrue(
+                    (envs.get(key) or "").startswith("/tmp"),
+                    f"{key} must be writable, got {envs.get(key)!r}",
+                )
+
+    def test_rootfs_stays_read_only(self) -> None:
+        """Making /tmp usable must not have loosened the rootfs."""
+        argv = build_sandboxed_command("npx", [], None).argv
+        self.assertIn("--read-only", argv)
+
+    def test_hardening_is_unchanged_by_the_usability_fix(self) -> None:
+        argv = build_sandboxed_command("npx", [], None).argv
+        self.assertEqual(_flag_value(argv, "--cap-drop"), "ALL")
+        self.assertEqual(_flag_value(argv, "--security-opt"), "no-new-privileges")
+        self.assertEqual(_flag_value(argv, "--user"), "65534:65534")
+        self.assertNotIn("docker.sock", " ".join(argv))
+
+    def test_caller_env_can_override_our_defaults(self) -> None:
+        """Caller vars come after ours, so docker resolves them last."""
+        argv = build_sandboxed_command("npx", [], {"HOME": "/tmp/custom"}).argv
+        positions = [i for i, t in enumerate(argv) if t == "--env"]
+        values = [argv[i + 1] for i in positions]
+        self.assertLess(values.index("HOME=/tmp"), values.index("HOME=/tmp/custom"))
+
+    def test_docker_run_form_gets_the_same_runtime_env(self) -> None:
+        argv = build_sandboxed_command("docker", ["run", "mcp/fetch"], None).argv
+        envs = self._envs(argv)
+        self.assertEqual(envs.get("HOME"), "/tmp")
+        self.assertIn("exec", self._tmpfs_spec(argv).split(":")[-1].split(","))
+
+    def test_tmpfs_size_is_tunable(self) -> None:
+        with patch.dict(os.environ, {"HEYM_MCP_STDIO_TMPFS_SIZE": "1g"}):
+            spec = self._tmpfs_spec(build_sandboxed_command("npx", [], None).argv)
+        self.assertIn("size=1g", spec)
+
+
 class DockerRunRewriteTests(unittest.TestCase):
     """`docker run` keeps working, but we start the image instead of the child."""
 

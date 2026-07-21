@@ -128,6 +128,8 @@ A `docker run [flags] IMAGE [args]` command keeps working: Heym starts `IMAGE` i
 
 **No application storage is mounted by default either.** The sandbox sees no Heym files unless you name a volume or directory explicitly, and that mount is read-only unless you also opt into writes. The skill/Codex/OpenCode workspace volumes are never auto-mounted: they hold every tenant's workspaces, so exposing one to a single caller's MCP process would be a cross-tenant read. If a file-oriented MCP server (for example `@modelcontextprotocol/server-filesystem`) needs data, point `HEYM_MCP_STDIO_FILES_VOLUME` at a volume you scope yourself, optionally narrowing it with `HEYM_MCP_STDIO_FILES_SUBPATH`.
 
+Inside the container the root filesystem is read-only and `/tmp` is a throwaway tmpfs, so the sandbox sets `HOME` and the npm/uv cache directories to paths under `/tmp` and mounts that tmpfs with `exec`. Without those, `npx` and `uvx` servers cannot run at all: the sandbox user's passwd home is `/nonexistent`, and Docker applies `noexec` to every `--tmpfs` that does not name `exec` explicitly. Values you set on the connection are applied after these defaults, so you can override them.
+
 Only the env vars set on the connection reach the server. The backend's own environment (`SECRET_KEY`, `ENCRYPTION_KEY`, `DATABASE_URL`, provider API keys) is never forwarded; the MCP SDK supplies a safe default `PATH`/`HOME`/`SHELL`/`TERM`/`USER`/`LOGNAME` set on top.
 
 > **Operator-only escape hatches.** `HEYM_MCP_STDIO_SANDBOX=subprocess` and `HEYM_MCP_STDIO_FILES_HOST_DIR` are never settable by a workflow author, only by whoever runs the deployment. Both can remove the isolation this section describes, so treat them as trusted single-user / single-tenant options and leave them unset on anything multi-user.
@@ -141,6 +143,7 @@ Only the env vars set on the connection reach the server. The backend's own envi
 | `HEYM_MCP_STDIO_FILES_SUBPATH` | Mount only this subpath of the volume, so a shared volume can be scoped per tenant or per purpose. | — |
 | `HEYM_MCP_STDIO_FILES_HOST_DIR` | Absolute host path to expose instead of a volume. No fallback to `FILE_STORAGE_DIR`. ⚠️ This bind-mounts a backend host path into the sandbox, so a wide path (or one holding several tenants' data) weakens the boundary: scope it deliberately, and prefer a volume with `HEYM_MCP_STDIO_FILES_SUBPATH` on shared deployments. | — |
 | `HEYM_MCP_STDIO_FILES_WRITABLE` | Mount the file mount read-write. Read-only otherwise. | `false` |
+| `HEYM_MCP_STDIO_TMPFS_SIZE` | Size of the writable `/tmp` tmpfs, which holds the npm/uv caches and anything the server installs at startup. Raise it for large packages. | `512m` |
 | `HEYM_MCP_STDIO_MEMORY` | Memory limit for MCP stdio containers. | `512m` |
 | `HEYM_MCP_STDIO_CPUS` | CPU limit for MCP stdio containers. | `2` |
 | `HEYM_MCP_STDIO_PIDS` | PID limit for MCP stdio containers. | `256` |
