@@ -348,7 +348,6 @@ def _sandbox_user() -> str:
         return _DEFAULT_SANDBOX_USER
     # Re-render from the parsed integers so what was validated is what Docker gets.
     return f"{uid}:{gid}"
-    return value
 
 
 def _hardening_flags(name: str, network: str = "bridge") -> list[str]:
@@ -357,6 +356,23 @@ def _hardening_flags(name: str, network: str = "bridge") -> list[str]:
     ``-i`` is mandatory: the MCP protocol is a bidirectional stream over the
     child's stdin/stdout. No Docker socket is mounted, which is the difference
     between this and a host-side ``docker run``.
+
+    The root filesystem is read-only, so the tmpfs at ``/tmp`` is the only place
+    the server can write. Three details make that usable for ``npx`` / ``uvx``
+    servers, all of which were missing at first and broke them outright:
+
+    * ``exec`` on the tmpfs. Docker applies ``noexec`` to every ``--tmpfs`` unless
+      it is named explicitly, so a package manager could install a server and
+      then fail to run its binary. This does not weaken the boundary in practice:
+      the caller already chooses the entrypoint, so running code inside the
+      container is the premise, not the escalation. The boundary is the missing
+      socket, the dropped capabilities and the non-root user.
+    * ``HOME``. The container runs as uid 65534, whose passwd entry points at
+      ``/nonexistent``, so npm's first action is ``mkdir /nonexistent`` and it
+      dies with ENOENT before it ever reaches the registry.
+    * cache directories. npm and uv both want to write under ``HOME`` or
+      ``XDG_CACHE_HOME``; pointing them at the tmpfs keeps them off the
+      read-only rootfs.
     """
     return [
         "--rm",
@@ -367,7 +383,19 @@ def _hardening_flags(name: str, network: str = "bridge") -> list[str]:
         network,
         "--read-only",
         "--tmpfs",
-        "/tmp:rw,nosuid,size=256m",
+        f"/tmp:rw,exec,nosuid,size={_tunable('HEYM_MCP_STDIO_TMPFS_SIZE', '512m')}",
+        "--env",
+        "HOME=/tmp",
+        "--env",
+        "NPM_CONFIG_CACHE=/tmp/.npm",
+        "--env",
+        "NPM_CONFIG_UPDATE_NOTIFIER=false",
+        "--env",
+        "XDG_CACHE_HOME=/tmp/.cache",
+        "--env",
+        "XDG_DATA_HOME=/tmp/.local/share",
+        "--env",
+        "UV_CACHE_DIR=/tmp/.uv",
         "--user",
         _sandbox_user(),
         "--cap-drop",
