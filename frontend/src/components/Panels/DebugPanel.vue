@@ -2812,7 +2812,7 @@ function renderContent(content: string): string {
                 </span>
               </span>
               <div class="flex items-center gap-1 shrink-0">
-                <template v-if="!result.error && isValidJson(result.output)">
+                <template v-if="!result.error && result.status !== 'running' && isValidJson(result.output)">
                   <Button
                     :variant="getResultViewMode(result.displayKey, 'tree') === 'tree' ? 'secondary' : 'ghost'"
                     size="sm"
