@@ -81,6 +81,12 @@ OpenAI references:
 
 For UI/frontend tasks, Codex should save PNG screenshots under a gitignored path such as `frontend/.e2e-artifacts/` (not in source). If frontend dependencies are missing, Codex may run `bun install` (or npm/pnpm install) and start a short-lived preview/`bun run dev` solely to capture the UI. After Heym opens or updates the pull request, it uploads those images to a single shared GitHub **prerelease** (`codex-pr-assets`) as assets named `pr-<number>-…`, then embeds them in the PR description. Codex must also set a meaningful `pull_request_title` (never placeholders such as `Done.`). 
 
+## What gets published to GitHub
+
+Your **Task Prompt** is private input, not PR content. Only two things are published: a `## Change Summary` describing what the code change does, and a `## Screenshots` section when screenshots were captured. The PR title is derived from the change summary alone.
+
+The runner prompt states this policy, and Heym also enforces it after the run: before anything is committed or opened as a pull request, it strips prompt-echo sections (`## Task`, `## Prompt`, `## Instructions`, `## Original Request`, …) and any paragraph copied verbatim from the task prompt out of the summary, the PR body, and the commit message.
+
 ## Follow-up Questions
 
 If Codex needs missing requirements or a product decision, it returns `needs_input`. Heym pauses the execution and exposes a `question` output handle. Connect that handle to a notification branch, for example Slack or Send Email, to send the reviewer the public follow-up link.

@@ -70,6 +70,37 @@ class TestPublishModeConstants(unittest.TestCase):
         self.assertIn("Do NOT run git", prompt)
         self.assertIn("use port 1234", prompt)
 
+    def test_build_prompt_states_pull_request_content_policy(self) -> None:
+        prompt = CodexRunnerService._build_prompt("translate the readme")
+        self.assertIn("the task prompt is PRIVATE", prompt)
+        self.assertIn("## Change Summary", prompt)
+        self.assertIn("## Screenshots", prompt)
+
+    def test_resume_prompt_states_pull_request_content_policy(self) -> None:
+        self.assertIn(
+            pr_publish.PR_CONTENT_POLICY, CodexRunnerService._build_resume_prompt("use port 1234")
+        )
+
+
+class TestCodexPublishedTextRedaction(unittest.TestCase):
+    def test_finalize_strips_task_prompt_echo_from_published_fields(self) -> None:
+        prompt = "Add a retry to the webhook trigger and do not touch the scheduler."
+        result = CodexRunResult(
+            status="completed",
+            summary=f"Added the retry loop.\n\n{prompt}",
+            validation="Ran the backend suite.",
+            pull_request_title="Add webhook trigger retry",
+            pull_request_body=f"## Change Summary\n\nAdded the retry loop.\n\n## Task\n\n{prompt}",
+        )
+
+        CodexRunnerService._redact_publishable_text(result, prompt)
+
+        self.assertEqual(result.summary, "Added the retry loop.")
+        self.assertEqual(result.validation, "Ran the backend suite.")
+        self.assertNotIn("## Task", result.pull_request_body)
+        self.assertNotIn("do not touch the scheduler", result.pull_request_body)
+        self.assertIn("Added the retry loop.", result.pull_request_body)
+
 
 class TestCommitMessage(unittest.TestCase):
     def test_commit_title_keeps_full_single_sentence(self) -> None:

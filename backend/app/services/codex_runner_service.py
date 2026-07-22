@@ -578,6 +578,7 @@ class CodexRunnerService:
         result.branch_name = request.branch_name
         result.diff = self._git_output(["git", "diff", "--binary"], workspace)
         result.changed_files = self._changed_files(workspace)
+        self._redact_publishable_text(result, request.task_prompt)
         if result.status == "completed" and request.publish_mode in _CODEX_REMOTE_PUBLISH_MODES:
             self._publish(workspace, request, result)
         return result
@@ -899,7 +900,10 @@ class CodexRunnerService:
             "and return `status: completed` with a summary and validation notes. Always set "
             "`pull_request_title` to a concise, complete one-line change description "
             "(imperative mood, ideally <=72 characters) suitable as a commit/PR subject. "
-            "Never use placeholder titles such as Done, Fixed, or Update.\n\n"
+            "Never use placeholder titles such as Done, Fixed, or Update. Set "
+            "`pull_request_body` to a `## Change Summary` section (plus `## Screenshots` when "
+            "you captured any).\n"
+            f"{pr_publish.PR_CONTENT_POLICY}\n\n"
             f"Task:\n{task_prompt}"
         )
 
@@ -908,8 +912,22 @@ class CodexRunnerService:
         return (
             "The user answered your previous follow-up question. Continue the same task.\n"
             f"{_CODEX_LOCAL_ONLY_RULES}\n"
-            "Return `needs_input` only if one more user decision is truly essential.\n\n"
+            "Return `needs_input` only if one more user decision is truly essential.\n"
+            f"{pr_publish.PR_CONTENT_POLICY}\n\n"
             f"Answer:\n{answer_text}"
+        )
+
+    @staticmethod
+    def _redact_publishable_text(result: CodexRunResult, task_prompt: str) -> None:
+        """Strip task-prompt echoes from every field that can reach GitHub.
+
+        Enforcement backstop for ``pr_publish.PR_CONTENT_POLICY``: the summary feeds the commit
+        body, and both it and ``pull_request_body`` feed the PR description.
+        """
+        result.summary = pr_publish.redact_task_prompt(result.summary, task_prompt)
+        result.validation = pr_publish.redact_task_prompt(result.validation, task_prompt)
+        result.pull_request_body = pr_publish.redact_task_prompt(
+            result.pull_request_body, task_prompt
         )
 
     @staticmethod

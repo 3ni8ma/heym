@@ -53,13 +53,18 @@ class TestOpenCodeRunCommand(unittest.TestCase):
         self.assertNotIn("./check.sh", cmd[-1])
         self.assertNotIn("Do NOT install package managers", cmd[-1])
 
+    def test_run_command_states_pull_request_content_policy(self):
+        prompt = self.svc.build_run_command("opencode/kimi-k3", _request(), _WS)[-1]
+        self.assertIn(pr_publish.PR_CONTENT_POLICY, prompt)
+        self.assertIn("## Change Summary", prompt)
+
     def test_run_command_emphasizes_mandatory_pr_title(self):
         cmd = self.svc.build_run_command("opencode/kimi-k3", _request(), _WS)
         prompt = cmd[-1]
         self.assertIn("PR metadata is MANDATORY", prompt)
         self.assertIn("good PR title is specific", prompt)
         self.assertIn("Bad titles are generic", prompt)
-        self.assertIn("## Summary", prompt)
+        self.assertIn("## Change Summary", prompt)
 
     def test_run_command_includes_screenshot_instructions(self):
         cmd = self.svc.build_run_command("opencode/kimi-k3", _request(), _WS)
@@ -157,18 +162,8 @@ class TestOpenCodeParser(unittest.TestCase):
         self.assertEqual(result.status, "completed")
         self.assertTrue(result.summary)
 
-    def test_parse_uses_task_prompt_for_fallback_summary(self):
-        result = self.svc.parse_events("", task_prompt="Fix the OpenCode fallback summary logic")
-        self.assertIn("OpenCode completed the requested task", result.summary)
-        self.assertIn("Fix the OpenCode fallback summary logic", result.summary)
-
-    def test_parse_fallback_summary_avoids_generic_message_when_prompt_present(self):
-        result = self.svc.parse_events("", task_prompt="Add case-insensitive screenshot discovery")
-        self.assertNotEqual(result.summary, "OpenCode completed without a final assistant message.")
-        self.assertIn("Add case-insensitive screenshot discovery", result.summary)
-
-    def test_parse_empty_task_prompt_falls_back_to_generic_message(self):
-        result = self.svc.parse_events("", task_prompt="")
+    def test_parse_fallback_summary_never_echoes_the_task_prompt(self):
+        result = self.svc.parse_events("")
         self.assertEqual(result.summary, "OpenCode completed without a final assistant message.")
 
 
@@ -181,46 +176,65 @@ class TestOpenCodePrMetadataNormalization(unittest.TestCase):
             summary="Did some work.",
             pull_request_title="Fix OpenCode fallback summary logic",
         )
-        title = self.svc._ensure_meaningful_pr_title(result, "some task")
-        self.assertEqual(title, "Fix OpenCode fallback summary logic")
-
-    def test_ensure_meaningful_pr_title_skips_placeholder(self):
-        result = OpenCodeRunResult(summary="Done.", pull_request_title="Done")
-        title = self.svc._ensure_meaningful_pr_title(result, "Fix OpenCode fallback summary logic")
+        title = self.svc._ensure_meaningful_pr_title(result)
         self.assertEqual(title, "Fix OpenCode fallback summary logic")
 
     def test_ensure_meaningful_pr_title_derives_from_summary(self):
         result = OpenCodeRunResult(
             summary="Implemented the mobile drawer fix.", pull_request_title=""
         )
-        title = self.svc._ensure_meaningful_pr_title(result, "fix ui")
+        title = self.svc._ensure_meaningful_pr_title(result)
         self.assertEqual(title, "Implemented the mobile drawer fix.")
 
     def test_ensure_meaningful_pr_title_last_resort_fallback(self):
         result = OpenCodeRunResult(summary="Done.", pull_request_title="")
-        title = self.svc._ensure_meaningful_pr_title(result, "")
+        title = self.svc._ensure_meaningful_pr_title(result)
         self.assertEqual(title, "Apply OpenCode changes")
 
-    def test_ensure_pr_body_enhances_short_body_with_task(self):
-        result = OpenCodeRunResult(summary="Done.", pull_request_body="")
-        body = self.svc._ensure_pr_body(result, "Fix OpenCode fallback summary logic")
-        self.assertIn("## Task", body)
-        self.assertIn("Fix OpenCode fallback summary logic", body)
-
-    def test_ensure_pr_body_keeps_existing_long_body(self):
-        long_body = "This is a sufficiently long PR body with enough context to remain unchanged."
+    def test_ensure_meaningful_pr_title_skips_missing_message_sentinel(self):
         result = OpenCodeRunResult(
-            summary="Summary text.",
-            pull_request_body=long_body,
+            summary="OpenCode completed without a final assistant message.",
+            pull_request_title="",
         )
-        body = self.svc._ensure_pr_body(result, "task prompt")
-        self.assertEqual(body, long_body)
+        self.assertEqual(self.svc._ensure_meaningful_pr_title(result), "Apply OpenCode changes")
 
-    def test_normalize_pr_metadata_mutates_result(self):
+    def test_ensure_pr_body_wraps_summary_in_change_summary_section(self):
+        result = OpenCodeRunResult(summary="Reordered the mobile header actions.")
+        body = self.svc._ensure_pr_body(result)
+        self.assertEqual(body, "## Change Summary\n\nReordered the mobile header actions.")
+
+    def test_ensure_pr_body_keeps_existing_body(self):
+        long_body = "This is a sufficiently long PR body with enough context to remain unchanged."
+        result = OpenCodeRunResult(summary="Summary text.", pull_request_body=long_body)
+        self.assertEqual(self.svc._ensure_pr_body(result), long_body)
+
+    def test_normalize_pr_metadata_never_publishes_the_task_prompt(self):
         result = OpenCodeRunResult(summary="Done.", pull_request_title="Update")
         self.svc._normalize_pr_metadata(result, "Fix OpenCode fallback summary logic")
-        self.assertEqual(result.pull_request_title, "Fix OpenCode fallback summary logic")
-        self.assertIn("## Task", result.pull_request_body)
+        self.assertEqual(result.pull_request_title, "Apply OpenCode changes")
+        self.assertNotIn("## Task", result.pull_request_body)
+        self.assertNotIn("Fix OpenCode fallback summary logic", result.pull_request_body)
+
+    def test_normalize_pr_metadata_strips_task_section_from_agent_body(self):
+        prompt = "Move the chat list toggle before History on mobile, then run the e2e suite."
+        result = OpenCodeRunResult(
+            summary="Reordered the mobile chat header actions.",
+            pull_request_title="Reorder mobile chat header actions",
+            pull_request_body=(
+                "## Change Summary\n\nReordered the mobile chat header actions.\n\n"
+                f"## Task\n\n{prompt}\n"
+            ),
+        )
+        self.svc._normalize_pr_metadata(result, prompt)
+        self.assertNotIn("## Task", result.pull_request_body)
+        self.assertNotIn("run the e2e suite", result.pull_request_body)
+        self.assertIn("Reordered the mobile chat header actions.", result.pull_request_body)
+
+    def test_normalize_pr_metadata_strips_prompt_echo_from_summary(self):
+        prompt = "Move the chat list toggle before History on mobile, then run the e2e suite."
+        result = OpenCodeRunResult(summary=f"{prompt}\n\nReordered the header actions.")
+        self.svc._normalize_pr_metadata(result, prompt)
+        self.assertEqual(result.summary, "Reordered the header actions.")
 
 
 class TestOpenCodeExecFailureFormatting(unittest.TestCase):
@@ -264,15 +278,20 @@ class TestOpenCodeCreatePr(unittest.TestCase):
         self.workspace = Path("/tmp/ws")
         self.request = _request(publish_mode="open_pr", branch_name="opencode/run")
 
-    def test_create_pr_enhances_weak_title_and_body(self):
+    def test_create_pr_publishes_change_summary_without_the_task_prompt(self):
+        request = _request(
+            publish_mode="open_pr",
+            branch_name="opencode/run",
+            task_prompt="Fix the flaky mobile execution-highlight e2e spec before Friday.",
+        )
         result = OpenCodeRunResult(
             status="completed",
-            summary="Done.",
+            summary="Ran the highlights spec through the keyboard shortcut instead of the menu.",
             pull_request_title="Update",
             pull_request_body="",
             changed_files=["a.vue"],
         )
-        self.runner._normalize_pr_metadata(result, self.request.task_prompt)
+        self.runner._normalize_pr_metadata(result, request.task_prompt)
         gh = MagicMock()
         gh.create_pull_request.return_value = {
             "number": 1,
@@ -281,7 +300,7 @@ class TestOpenCodeCreatePr(unittest.TestCase):
 
         with patch("app.services.opencode_runner_service.GitHubService", return_value=gh) as gh_cls:
             url = self.runner._create_pr(
-                self.workspace, self.request, result, "opencode/run", draft=False
+                self.workspace, request, result, "opencode/run", draft=False
             )
 
         self.assertEqual(url, "https://github.com/acme/app/pull/1")
@@ -289,9 +308,10 @@ class TestOpenCodeCreatePr(unittest.TestCase):
         title = gh.create_pull_request.call_args.args[2]
         body = gh.create_pull_request.call_args.kwargs["body"]
         self.assertNotEqual(title, "Update")
-        self.assertIn("fix the tests", title.lower())
-        self.assertIn("## Task", body)
-        self.assertIn("fix the tests", body.lower())
+        self.assertIn("keyboard shortcut", title.lower())
+        self.assertIn("## Change Summary", body)
+        self.assertNotIn("## Task", body)
+        self.assertNotIn("before friday", body.lower())
 
 
 class TestOpenCodePushBranch(unittest.TestCase):
