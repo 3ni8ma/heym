@@ -50,9 +50,11 @@ _LOCAL_ONLY_RULES = (
     "`PR_TITLE: Add case-insensitive screenshot discovery for OpenCode PRs`. "
     "Bad titles are generic or incomplete, e.g. `PR_TITLE: Fix issue`, `PR_TITLE: Update code`, "
     "`PR_TITLE: Done`, or `PR_TITLE: Apply changes`. "
-    "After the PR_TITLE line, provide a concise PR description that explains what changed and "
-    "why, using a `## Change Summary` section. If you saved screenshots, mention their file paths "
-    "so they can be attached automatically. "
+    "Your final assistant message MUST also contain a `## Change Summary` section describing "
+    "what changed and why — Heym publishes that section and nothing else, so a message that only "
+    "narrates your process (for example `Both pass. Let me do a final review:`) leaves the pull "
+    "request with no description. If you saved screenshots, mention their file paths so they can "
+    "be attached automatically. "
     f"{pr_publish.PR_CONTENT_POLICY}"
 )
 _MAX_ERROR_DETAIL_CHARS = 4000
@@ -85,6 +87,9 @@ class OpenCodeRunResult:
     status: str = "completed"
     summary: str = ""
     validation: str = ""
+    # ``summary`` narrowed to what may be published to GitHub — see ``_publishable_summary``.
+    # Deliberately absent from ``to_output()``: it exists for the commit/PR seam, not the UI.
+    publish_summary: str = ""
     pull_request_title: str = ""
     pull_request_body: str = ""
     diff: str = ""
@@ -167,8 +172,16 @@ class OpenCodeRunnerService:
 
     # --- output parsing ---
     def parse_events(self, stdout: str) -> OpenCodeRunResult:
+        """Collect the run's events, preferring the agent's declared change summary.
+
+        OpenCode streams an assistant message per step, so the *last* one is often mid-run
+        narration rather than the final report. Scanning every message for the agreed
+        ``## Change Summary`` / ``PR_TITLE:`` markers keeps commentary out of the pull request.
+        """
         events: list[dict] = []
-        summary = ""
+        last_message = ""
+        change_summary = ""
+        pull_request_title = ""
         for raw in (stdout or "").splitlines():
             line = raw.strip()
             if not line:
@@ -181,14 +194,18 @@ class OpenCodeRunnerService:
                 continue
             events.append(event)
             text = self._event_assistant_text(event)
-            if text:
-                summary = text
-        if not summary:
-            summary = _NO_FINAL_MESSAGE_SUMMARY
-        pull_request_title, cleaned_summary = pr_publish.extract_pr_title_line(summary)
+            if not text:
+                continue
+            title, cleaned = pr_publish.extract_pr_title_line(text)
+            if title:
+                pull_request_title = title
+            section = pr_publish.extract_change_summary_section(cleaned)
+            if section:
+                change_summary = section
+            last_message = cleaned
         return OpenCodeRunResult(
             status="completed",
-            summary=cleaned_summary,
+            summary=change_summary or last_message or _NO_FINAL_MESSAGE_SUMMARY,
             pull_request_title=pull_request_title,
             raw_events=events,
         )
@@ -203,18 +220,17 @@ class OpenCodeRunnerService:
         result.pull_request_body = pr_publish.redact_task_prompt(
             result.pull_request_body, task_prompt
         )
+        result.publish_summary = self._publishable_summary(result)
         result.pull_request_title = self._ensure_meaningful_pr_title(result)
         result.pull_request_body = self._ensure_pr_body(result)
 
+    @staticmethod
+    def _publishable_summary(result: OpenCodeRunResult) -> str:
+        return pr_publish.publishable_summary(result.summary, placeholder=_NO_FINAL_MESSAGE_SUMMARY)
+
     def _ensure_meaningful_pr_title(self, result: OpenCodeRunResult) -> str:
         """Return a meaningful PR title, derived only from what the agent said it changed."""
-        candidates = [
-            result.pull_request_title,
-            result.summary,
-        ]
-        for candidate in candidates:
-            if str(candidate or "").strip() == _NO_FINAL_MESSAGE_SUMMARY:
-                continue
+        for candidate in (result.pull_request_title, result.publish_summary):
             title = pr_publish.normalize_title_candidate(candidate)
             if pr_publish.is_meaningful_commit_title(title):
                 return title
@@ -225,9 +241,9 @@ class OpenCodeRunnerService:
         body = str(result.pull_request_body or "").strip()
         if body:
             return body
-        summary = str(result.summary or "").strip()
+        summary = result.publish_summary
         if not summary:
-            return ""
+            return pr_publish.changed_files_body(result.changed_files, agent="OpenCode")
         if summary.lstrip().startswith("#"):
             return summary
         return f"## Change Summary\n\n{summary}"
@@ -340,11 +356,13 @@ class OpenCodeRunnerService:
         )
         stdout = self._exec_opencode(workspace, home, request, model)
         result = self.parse_events(stdout)
-        self._normalize_pr_metadata(result, request.task_prompt)
         result.workspace_path = str(workspace)
         result.branch_name = request.branch_name
         result.diff = self._git_output(["git", "diff", "--binary"], workspace)
         result.changed_files = self._changed_files(workspace)
+        # After ``changed_files``: the PR body falls back to the file list when the agent
+        # never produced a publishable change summary.
+        self._normalize_pr_metadata(result, request.task_prompt)
         if result.status == "completed" and request.publish_mode in _REMOTE_PUBLISH_MODES:
             self._publish(workspace, request, result)
         return result
@@ -548,7 +566,7 @@ class OpenCodeRunnerService:
             self._run_command(["git", "checkout", "-B", branch], cwd=workspace)
         self._run_command(["git", "add", "-A"], cwd=workspace)
         title = pr_publish.commit_title(
-            result.pull_request_title, result.summary, fallback="Apply OpenCode changes"
+            result.pull_request_title, result.publish_summary, fallback="Apply OpenCode changes"
         )
         commit_cmd = [
             "git",
@@ -559,7 +577,7 @@ class OpenCodeRunnerService:
             "-m",
             title,
         ]
-        body = pr_publish.commit_body(result.summary, result.validation)
+        body = pr_publish.commit_body(result.publish_summary, result.validation)
         if body and body != title:
             commit_cmd.extend(["-m", body])
         self._run_command(commit_cmd, cwd=workspace)
@@ -660,11 +678,7 @@ class OpenCodeRunnerService:
             owner, repo = pr_publish.parse_github_owner_repo(request.repository_url)
             gh = GitHubService(request.github_config)
             try:
-                base_body = (
-                    str(result.pull_request_body or "").strip()
-                    or str(result.summary or "").strip()
-                    or ""
-                )
+                base_body = str(result.pull_request_body or "").strip() or result.publish_summary
                 updated_body = pr_publish.upload_and_inject_screenshots(
                     gh,
                     screenshots=screenshots,

@@ -216,3 +216,94 @@ class TestTaskPromptRedaction(unittest.TestCase):
 
     def test_empty_input_is_safe(self):
         self.assertEqual(pr_publish.redact_task_prompt("", self.PROMPT), "")
+
+
+class TestAgentNarrationDetection(unittest.TestCase):
+    NARRATION = (
+        "Both pass. Let me do a final review of the complete changes:",
+        "Let me do a final review of the complete changes:",
+        "Now let me verify the store wiring.",
+        "I'll run the e2e suite next.",
+        "Perfect! Now I will check the remaining callers.",
+        "All tests pass, moving on.",
+        "It works. Next, I check the docs.",
+        "Good, the swap is correct.",
+        "Perfect! The build is clean.",
+        "First, check dependencies and start a preview server:",
+        "Applying the remaining changes now:",
+    )
+    # Real titles from merged agent pull requests — the guard must leave every one of them alone.
+    DESCRIPTIONS = (
+        "Hide Execution Highlights panel by default on mobile",
+        "Auto-scroll console to selected node's most recent execution log",
+        "Swap Traces and Templates tab positions in dashboard nav bar",
+        "Hide JSON tree/plain toggle buttons in console output when node is running",
+        "Update trace detail json tree view",
+        "Add a stale-save override dialog for concurrent workflow edits",
+        "Fix OpenCode fallback summary when no assistant message is returned",
+        "Let the workflow store detect a newer server revision before saving",
+        "Passing the loaded revision through to the save call",
+        # "Good" only opens narration when it is an interjection ("Good, …").
+        "Good defaults for the retry policy",
+    )
+
+    def test_narration_is_detected(self):
+        for text in self.NARRATION:
+            with self.subTest(text=text):
+                self.assertTrue(pr_publish.is_agent_narration(text))
+
+    def test_change_descriptions_are_not_narration(self):
+        for text in self.DESCRIPTIONS:
+            with self.subTest(text=text):
+                self.assertFalse(pr_publish.is_agent_narration(text))
+
+    def test_narration_is_rejected_as_a_commit_title(self):
+        # Regression: PR #397 shipped with this exact string as its title.
+        self.assertFalse(
+            pr_publish.is_meaningful_commit_title(
+                "Both pass. Let me do a final review of the complete changes:"
+            )
+        )
+
+    def test_every_sentence_of_a_narrated_summary_is_rejected(self):
+        # Regression: PR #389 shipped with this exact string as its title and commit subject.
+        # `commit_title` walks sentence by sentence, so each one has to be caught.
+        summary = (
+            "Good, the swap is correct. Now let me take a screenshot. "
+            "First, check dependencies and start a preview server:"
+        )
+        self.assertEqual(pr_publish.commit_title("", summary, fallback="Fallback"), "Fallback")
+
+    def test_commit_title_falls_back_when_the_summary_only_narrates(self):
+        title = pr_publish.commit_title(
+            "", "Both pass. Let me do a final review of the complete changes:", fallback="Fallback"
+        )
+        self.assertEqual(title, "Fallback")
+
+
+class TestChangeSummaryExtraction(unittest.TestCase):
+    def test_extracts_section_and_drops_surrounding_narration(self):
+        text = (
+            "Let me do a final review of the complete changes:\n\n"
+            "## Change Summary\n\n"
+            "Added a stale-save override dialog.\n\n"
+            "## Screenshots\n\n"
+            "![ui](frontend/.e2e-artifacts/ui.png)\n"
+        )
+        self.assertEqual(
+            pr_publish.extract_change_summary_section(text), "Added a stale-save override dialog."
+        )
+
+    def test_keeps_nested_subsections(self):
+        text = "## Change Summary\n\nTop level.\n\n### Store\n\nStore detail.\n\n## Task\n\nsecret"
+        section = pr_publish.extract_change_summary_section(text)
+        self.assertIn("### Store", section)
+        self.assertIn("Store detail.", section)
+        self.assertNotIn("secret", section)
+
+    def test_last_section_wins(self):
+        text = "## Change Summary\n\nFirst draft.\n\n# Redo\n\n## Change Summary\n\nFinal wording."
+        self.assertEqual(pr_publish.extract_change_summary_section(text), "Final wording.")
+
+    def test_absent_section_returns_empty(self):
+        self.assertEqual(pr_publish.extract_change_summary_section("Just prose."), "")

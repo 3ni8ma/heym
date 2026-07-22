@@ -118,6 +118,10 @@ class CodexRunResult:
     summary: str = ""
     question: str = ""
     validation: str = ""
+    # ``summary`` narrowed to what may be published to GitHub (see
+    # ``pr_publish.publishable_summary``). Deliberately absent from ``to_output()``: it exists
+    # for the commit/PR seam, not the node output.
+    publish_summary: str = ""
     pull_request_title: str = ""
     pull_request_body: str = ""
     diff: str = ""
@@ -578,7 +582,7 @@ class CodexRunnerService:
         result.branch_name = request.branch_name
         result.diff = self._git_output(["git", "diff", "--binary"], workspace)
         result.changed_files = self._changed_files(workspace)
-        self._redact_publishable_text(result, request.task_prompt)
+        self._prepare_publishable_text(result, request.task_prompt)
         if result.status == "completed" and request.publish_mode in _CODEX_REMOTE_PUBLISH_MODES:
             self._publish(workspace, request, result)
         return result
@@ -710,7 +714,12 @@ class CodexRunnerService:
         draft: bool,
     ) -> str | None:
         owner, repo = self._parse_github_owner_repo(request.repository_url)
-        pr_body = str(result.pull_request_body or "").strip() or result.summary or None
+        pr_body = (
+            str(result.pull_request_body or "").strip()
+            or result.publish_summary
+            or pr_publish.changed_files_body(result.changed_files, agent="Codex")
+            or None
+        )
         gh = GitHubService(request.github_config)
         try:
             pr = gh.create_pull_request(
@@ -761,11 +770,7 @@ class CodexRunnerService:
             owner, repo = self._parse_github_owner_repo(request.repository_url)
             gh = GitHubService(request.github_config)
             try:
-                base_body = (
-                    str(result.pull_request_body or "").strip()
-                    or str(result.summary or "").strip()
-                    or ""
-                )
+                base_body = str(result.pull_request_body or "").strip() or result.publish_summary
                 updated_body = pr_publish.upload_and_inject_screenshots(
                     gh,
                     screenshots=screenshots,
@@ -918,27 +923,30 @@ class CodexRunnerService:
         )
 
     @staticmethod
-    def _redact_publishable_text(result: CodexRunResult, task_prompt: str) -> None:
-        """Strip task-prompt echoes from every field that can reach GitHub.
+    def _prepare_publishable_text(result: CodexRunResult, task_prompt: str) -> None:
+        """Narrow every field that can reach GitHub down to publishable content.
 
-        Enforcement backstop for ``pr_publish.PR_CONTENT_POLICY``: the summary feeds the commit
-        body, and both it and ``pull_request_body`` feed the PR description.
+        Enforcement backstop for ``pr_publish.PR_CONTENT_POLICY``, shared with the OpenCode
+        runner: strip task-prompt echoes, then drop a summary that only narrates the agent's own
+        process. The summary feeds the commit body, and both it and ``pull_request_body`` feed
+        the PR description.
         """
         result.summary = pr_publish.redact_task_prompt(result.summary, task_prompt)
         result.validation = pr_publish.redact_task_prompt(result.validation, task_prompt)
         result.pull_request_body = pr_publish.redact_task_prompt(
             result.pull_request_body, task_prompt
         )
+        result.publish_summary = pr_publish.publishable_summary(result.summary)
 
     @staticmethod
     def _commit_title(result: CodexRunResult) -> str:
         return pr_publish.commit_title(
-            result.pull_request_title, result.summary, fallback="Apply Codex changes"
+            result.pull_request_title, result.publish_summary, fallback="Apply Codex changes"
         )
 
     @staticmethod
     def _commit_body(result: CodexRunResult) -> str:
-        return pr_publish.commit_body(result.summary, result.validation)
+        return pr_publish.commit_body(result.publish_summary, result.validation)
 
     @staticmethod
     def _clone_url_with_token(repository_url: str, github_config: dict) -> str:

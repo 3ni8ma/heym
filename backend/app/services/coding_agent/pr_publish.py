@@ -119,6 +119,26 @@ _MEANINGLESS_TITLE_RE = re.compile(
 )
 _PR_TITLE_LINE_RE = re.compile(r"(?im)^\s*PR_TITLE:\s*(.+?)\s*$")
 
+# Running commentary an agent emits *between* steps ("Both pass. Let me do a final review:").
+# It reads like prose but describes the agent's own process, not the change, so publishing it
+# leaks reasoning. Matched as a prefix, since narration announces itself in the opening clause.
+_INTERJECTIONS = r"ok(?:ay)?|perfect|great|excellent|good|alright|nice|awesome|cool|now"
+_NARRATION_PREFIX_RE = re.compile(
+    rf"^(?:(?:{_INTERJECTIONS})[,!.]?\s+)*"
+    r"(?:"
+    r"let(?:'|’)?s\b|let me\b|"
+    r"i(?:'|’)?(?:ll|m|ve)\b|i (?:will|am|have|need|should|can)\b|"
+    r"next[,:]?\s+i\b|first[,:]\s|"
+    r"(?:both|all|everything|they|it|the|tests?|checks?|specs?)\s+"
+    r"(?:(?:tests?|checks?|specs?|suites?|builds?)\s+)?(?:now\s+)?"
+    r"(?:pass(?:es|ed)?|look|looks|works?|worked|is correct|are correct|is right)\b"
+    r")",
+    re.IGNORECASE,
+)
+# "Good, …" / "Perfect! …" — an interjection about the agent's own progress, not a change.
+_INTERJECTION_OPENER_RE = re.compile(rf"^(?:{_INTERJECTIONS})\s*[,!.]", re.IGNORECASE)
+_CHANGE_SUMMARY_HEADING = "change summary"
+
 
 def normalize_title_candidate(text: str) -> str:
     """Collapse whitespace and strip a leading ``PR_TITLE:`` label if present."""
@@ -127,12 +147,54 @@ def normalize_title_candidate(text: str) -> str:
     return cleaned.strip("\"'`")
 
 
+def is_agent_narration(text: str) -> bool:
+    """True when the text is the agent narrating its own process rather than the change.
+
+    Three signals, all observed on real agent pull requests: a step announcement
+    ("Let me…", "I'll…"), an interjection about its own progress ("Good, …"), and a trailing
+    colon, which introduces the next step and never ends a change description.
+    """
+    collapsed = _collapse(text)
+    if not collapsed:
+        return False
+    if collapsed.endswith(":"):
+        return True
+    if _INTERJECTION_OPENER_RE.match(collapsed) is not None:
+        return True
+    return _NARRATION_PREFIX_RE.match(collapsed) is not None
+
+
 def is_meaningful_commit_title(title: str) -> bool:
-    """Return False for empty/short/placeholder titles such as ``Done.``."""
+    """Return False for empty/short/placeholder/narration titles such as ``Done.``."""
     normalized = normalize_title_candidate(title)
     if len(normalized) < 8:
         return False
-    return _MEANINGLESS_TITLE_RE.match(normalized) is None
+    if _MEANINGLESS_TITLE_RE.match(normalized) is not None:
+        return False
+    return not is_agent_narration(normalized)
+
+
+def extract_change_summary_section(text: str) -> str:
+    """Return the body of the last ``## Change Summary`` section, or ``""`` when absent.
+
+    The runner prompts ask agents to put the publishable description under this heading, so
+    honouring it keeps step-by-step narration around it out of the pull request.
+    """
+    kept: list[str] = []
+    section_level = 0
+    for line in str(text or "").splitlines():
+        match = _HEADING_RE.match(line)
+        if match is not None:
+            level = len(match.group(1))
+            if _normalize_heading(match.group(2)) == _CHANGE_SUMMARY_HEADING:
+                section_level = level
+                kept = []
+                continue
+            if section_level and level <= section_level:
+                section_level = 0
+        if section_level:
+            kept.append(line)
+    return "\n".join(kept).strip()
 
 
 def extract_pr_title_line(summary: str) -> tuple[str, str]:
@@ -220,6 +282,35 @@ def strip_prompt_echo_blocks(body: str, task_prompt: str) -> str:
         if block.strip():
             kept.append(block.strip())
     return "\n\n".join(kept).strip()
+
+
+def publishable_summary(summary: str, *, placeholder: str = "") -> str:
+    """The agent's description of the change, or ``""`` when it only narrated its own process.
+
+    Runners keep the raw ``summary`` on the node output so a run stays debuggable in Heym; this
+    narrower value is the only one allowed into a commit message or pull request.
+    """
+    text = str(summary or "").strip()
+    if not text or (placeholder and text == placeholder):
+        return ""
+    return "" if is_agent_narration(text) else text
+
+
+def changed_files_body(changed_files: list[str], *, agent: str, limit: int = 20) -> str:
+    """Last-resort PR body: the diff's own file list, which is always safe to publish."""
+    if not changed_files:
+        return ""
+    shown = changed_files[:limit]
+    lines = [f"- `{path}`" for path in shown]
+    remaining = len(changed_files) - len(shown)
+    if remaining > 0:
+        lines.append(f"- …and {remaining} more file(s)")
+    listing = "\n".join(lines)
+    return (
+        "## Change Summary\n\n"
+        f"{agent} did not return a change summary. Files changed in this pull request:\n\n"
+        f"{listing}"
+    )
 
 
 def redact_task_prompt(body: str, task_prompt: str) -> str:

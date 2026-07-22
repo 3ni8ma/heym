@@ -85,6 +85,8 @@ Your **Task Prompt** is private input, not PR content. Only two things are publi
 
 The runner prompt states this policy, and Heym also enforces it after the run: before anything is committed or opened as a pull request, it strips prompt-echo sections (`## Task`, `## Prompt`, `## Instructions`, `## Original Request`, …) and any paragraph copied verbatim from the task prompt out of the summary, the PR body, and the commit message.
 
+Heym reads the `## Change Summary` section out of the agent's messages rather than taking whatever it said last, because OpenCode emits a message per step and the final one is often mid-run commentary. Step narration (`Both pass. Let me do a final review:`) is also rejected as a PR title or commit subject. If the run produces no usable change summary, the pull request falls back to listing the changed files instead of publishing commentary.
+
 ## As an agent tool
 
 The OpenCode Go node can be attached to an **AI Agent** node's tool handle so the agent can delegate coding tasks. Configure the credential, GitHub credential, and repository on the node, then mark **Task Prompt** (and optionally **Repository URL**) with the agent-provided toggle so the agent supplies them at call time.

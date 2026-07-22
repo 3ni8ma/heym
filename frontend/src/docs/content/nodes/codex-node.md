@@ -85,7 +85,7 @@ For UI/frontend tasks, Codex should save PNG screenshots under a gitignored path
 
 Your **Task Prompt** is private input, not PR content. Only two things are published: a `## Change Summary` describing what the code change does, and a `## Screenshots` section when screenshots were captured. The PR title is derived from the change summary alone.
 
-The runner prompt states this policy, and Heym also enforces it after the run: before anything is committed or opened as a pull request, it strips prompt-echo sections (`## Task`, `## Prompt`, `## Instructions`, `## Original Request`, …) and any paragraph copied verbatim from the task prompt out of the summary, the PR body, and the commit message.
+The runner prompt states this policy, and Heym also enforces it after the run: before anything is committed or opened as a pull request, it strips prompt-echo sections (`## Task`, `## Prompt`, `## Instructions`, `## Original Request`, …) and any paragraph copied verbatim from the task prompt out of the summary, the PR body, and the commit message. Step narration such as `Both pass. Let me do a final review:` is also rejected as a PR title or commit subject.
 
 ## Follow-up Questions
 

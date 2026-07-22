@@ -48,6 +48,17 @@ Open a workflow in the editor and click **Share** to invite users by email or sh
 - **Edit** – Change workflow name and description from the card menu
 - **Delete** – Workflows are [scheduled for deletion](../reference/workflow-organization.md); they move to a trash area before permanent removal
 
+## Concurrent Edits
+
+Saving sends the revision your edits are based on, and the server rejects the write if the workflow changed in the meantime — for example because a teammate saved it, or you left the same workflow open in a second tab. Heym then shows a **Stale Workflow Detected** dialog with two choices:
+
+- **Cancel** – Keeps your unsaved changes in the editor so you can reload in another tab and reconcile them
+- **Override** – Saves anyway, replacing the other person's version
+
+**Running** a workflow saves it first, so it goes through the same check. If the workflow changed underneath you, the run pauses on the dialog rather than overwriting silently: **Override and Run** saves your version and starts the run, **Cancel Run** abandons both and leaves your edits untouched.
+
+The check is part of the save request itself, so it costs no extra round trip and there is no window in which a save could slip past it. Your own changes from elsewhere in the app — a rename, a settings change, a properties-panel toggle — never count as a conflict.
+
 ## Command Palette
 
 Press **Ctrl+K** (or **Cmd+K**) to open the command palette. You can:
