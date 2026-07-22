@@ -79,6 +79,12 @@ For UI/frontend tasks, OpenCode should save PNG screenshots under a gitignored p
 
 OpenCode is also instructed to end with a `PR_TITLE: …` line so Heym can open the pull request with a meaningful subject instead of placeholders such as `Done.`
 
+## What gets published to GitHub
+
+Your **Task Prompt** is private input, not PR content. Only two things are published: a `## Change Summary` describing what the code change does, and a `## Screenshots` section when screenshots were captured. The PR title is derived from the change summary alone.
+
+The runner prompt states this policy, and Heym also enforces it after the run: before anything is committed or opened as a pull request, it strips prompt-echo sections (`## Task`, `## Prompt`, `## Instructions`, `## Original Request`, …) and any paragraph copied verbatim from the task prompt out of the summary, the PR body, and the commit message.
+
 ## As an agent tool
 
 The OpenCode Go node can be attached to an **AI Agent** node's tool handle so the agent can delegate coding tasks. Configure the credential, GitHub credential, and repository on the node, then mark **Task Prompt** (and optionally **Repository URL**) with the agent-provided toggle so the agent supplies them at call time.

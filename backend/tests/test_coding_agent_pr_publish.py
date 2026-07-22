@@ -174,3 +174,45 @@ class TestPrPublishHelpers(unittest.TestCase):
         )
         gh.get_release_by_tag.assert_called_once_with("acme", "app", "opencode-pr-assets")
         self.assertIn("![pr-1-ui.png](http://x/pr-1-ui.png)", body)
+
+
+class TestTaskPromptRedaction(unittest.TestCase):
+    PROMPT = "Rework the mobile chat header so History sits last, then run the e2e suite."
+
+    def test_removes_task_section(self):
+        body = f"## Change Summary\n\nMoved History last.\n\n## Task\n\n{self.PROMPT}\n"
+        self.assertEqual(
+            pr_publish.redact_task_prompt(body, self.PROMPT),
+            "## Change Summary\n\nMoved History last.",
+        )
+
+    def test_section_removal_is_case_and_label_tolerant(self):
+        for heading in ("### Original Request", "## Instructions:", "## **User Prompt**"):
+            body = f"## Change Summary\n\nMoved History last.\n\n{heading}\n\nsecret guidance\n"
+            with self.subTest(heading=heading):
+                self.assertNotIn("secret guidance", pr_publish.redact_task_prompt(body, ""))
+
+    def test_prompt_section_removal_stops_at_next_same_level_heading(self):
+        body = (
+            "## Task\n\nprivate guidance here\n\n"
+            "### Details\n\nmore private guidance\n\n"
+            "## Screenshots\n\n![ui](http://x/ui.png)\n"
+        )
+        cleaned = pr_publish.redact_task_prompt(body, "")
+        self.assertNotIn("private guidance", cleaned)
+        self.assertIn("![ui](http://x/ui.png)", cleaned)
+
+    def test_removes_verbatim_prompt_paragraph_without_a_heading(self):
+        body = f"{self.PROMPT}\n\nMoved History last."
+        self.assertEqual(pr_publish.redact_task_prompt(body, self.PROMPT), "Moved History last.")
+
+    def test_keeps_wording_that_merely_overlaps_the_prompt(self):
+        body = "## Change Summary\n\nMoved History last in the mobile chat header."
+        self.assertEqual(pr_publish.redact_task_prompt(body, self.PROMPT), body)
+
+    def test_short_prompts_do_not_trigger_paragraph_removal(self):
+        body = "Fix the tests"
+        self.assertEqual(pr_publish.redact_task_prompt(body, "Fix the tests"), body)
+
+    def test_empty_input_is_safe(self):
+        self.assertEqual(pr_publish.redact_task_prompt("", self.PROMPT), "")

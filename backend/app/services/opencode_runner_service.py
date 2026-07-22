@@ -51,10 +51,14 @@ _LOCAL_ONLY_RULES = (
     "Bad titles are generic or incomplete, e.g. `PR_TITLE: Fix issue`, `PR_TITLE: Update code`, "
     "`PR_TITLE: Done`, or `PR_TITLE: Apply changes`. "
     "After the PR_TITLE line, provide a concise PR description that explains what changed and "
-    "why, using a `## Summary` section. If you saved screenshots, mention their file paths so "
-    "they can be attached automatically."
+    "why, using a `## Change Summary` section. If you saved screenshots, mention their file paths "
+    "so they can be attached automatically. "
+    f"{pr_publish.PR_CONTENT_POLICY}"
 )
 _MAX_ERROR_DETAIL_CHARS = 4000
+# Used when OpenCode produces no final assistant message. It never describes the change, so it
+# must not become a PR/commit subject — and it deliberately does not restate the task prompt.
+_NO_FINAL_MESSAGE_SUMMARY = "OpenCode completed without a final assistant message."
 
 
 @dataclass(frozen=True)
@@ -162,7 +166,7 @@ class OpenCodeRunnerService:
         config_path.chmod(0o600)
 
     # --- output parsing ---
-    def parse_events(self, stdout: str, task_prompt: str = "") -> OpenCodeRunResult:
+    def parse_events(self, stdout: str) -> OpenCodeRunResult:
         events: list[dict] = []
         summary = ""
         for raw in (stdout or "").splitlines():
@@ -180,7 +184,7 @@ class OpenCodeRunnerService:
             if text:
                 summary = text
         if not summary:
-            summary = self._fallback_summary(task_prompt)
+            summary = _NO_FINAL_MESSAGE_SUMMARY
         pull_request_title, cleaned_summary = pr_publish.extract_pr_title_line(summary)
         return OpenCodeRunResult(
             status="completed",
@@ -189,56 +193,44 @@ class OpenCodeRunnerService:
             raw_events=events,
         )
 
-    @staticmethod
-    def _fallback_summary(task_prompt: str) -> str:
-        """Build a useful fallback summary from the task prompt when the agent is silent."""
-        prompt = str(task_prompt or "").strip()
-        if not prompt:
-            return "OpenCode completed without a final assistant message."
-        first_line = prompt.splitlines()[0].strip()
-        # Take a reasonable fragment so the summary is readable but not the whole prompt.
-        snippet = first_line[:200].strip()
-        if len(snippet) < 8:
-            return "OpenCode completed without a final assistant message."
-        return f"OpenCode completed the requested task: {snippet}"
-
     def _normalize_pr_metadata(self, result: OpenCodeRunResult, task_prompt: str) -> None:
-        """Ensure PR title and body are meaningful and informative before publishing."""
-        result.pull_request_title = self._ensure_meaningful_pr_title(result, task_prompt)
-        result.pull_request_body = self._ensure_pr_body(result, task_prompt)
+        """Shape the PR title/body for publishing, keeping the task prompt out of both.
 
-    def _ensure_meaningful_pr_title(self, result: OpenCodeRunResult, task_prompt: str) -> str:
-        """Return a meaningful PR title, deriving one from context if the agent's title is weak."""
+        ``task_prompt`` is used only to *remove* echoes of itself — never as a source of
+        published text (see ``pr_publish.PR_CONTENT_POLICY``).
+        """
+        result.summary = pr_publish.redact_task_prompt(result.summary, task_prompt)
+        result.pull_request_body = pr_publish.redact_task_prompt(
+            result.pull_request_body, task_prompt
+        )
+        result.pull_request_title = self._ensure_meaningful_pr_title(result)
+        result.pull_request_body = self._ensure_pr_body(result)
+
+    def _ensure_meaningful_pr_title(self, result: OpenCodeRunResult) -> str:
+        """Return a meaningful PR title, derived only from what the agent said it changed."""
         candidates = [
             result.pull_request_title,
             result.summary,
         ]
         for candidate in candidates:
+            if str(candidate or "").strip() == _NO_FINAL_MESSAGE_SUMMARY:
+                continue
             title = pr_publish.normalize_title_candidate(candidate)
             if pr_publish.is_meaningful_commit_title(title):
                 return title
-        prompt = str(task_prompt or "").strip()
-        if prompt:
-            first_line = prompt.splitlines()[0].strip()
-            if len(first_line) >= 8:
-                return pr_publish.normalize_title_candidate(first_line)
         return "Apply OpenCode changes"
 
-    def _ensure_pr_body(self, result: OpenCodeRunResult, task_prompt: str) -> str:
-        """Return a PR body with adequate context; enhance a short or missing body."""
+    def _ensure_pr_body(self, result: OpenCodeRunResult) -> str:
+        """Return a PR body built only from the agent's description of the change."""
         body = str(result.pull_request_body or "").strip()
-        summary = str(result.summary or "").strip()
-        prompt = str(task_prompt or "").strip()
-        if len(body) >= 60 and body != summary:
+        if body:
             return body
-        parts: list[str] = []
-        if summary and summary != body:
-            parts.append(summary)
-        if prompt:
-            parts.append(f"## Task\n\n{prompt}")
-        if not parts:
+        summary = str(result.summary or "").strip()
+        if not summary:
             return ""
-        return "\n\n".join(parts)
+        if summary.lstrip().startswith("#"):
+            return summary
+        return f"## Change Summary\n\n{summary}"
 
     @staticmethod
     def _event_assistant_text(event: dict) -> str:
@@ -347,7 +339,7 @@ class OpenCodeRunnerService:
             home, api_key=request.api_key, base_url=request.base_url, model=model
         )
         stdout = self._exec_opencode(workspace, home, request, model)
-        result = self.parse_events(stdout, task_prompt=request.task_prompt)
+        result = self.parse_events(stdout)
         self._normalize_pr_metadata(result, request.task_prompt)
         result.workspace_path = str(workspace)
         result.branch_name = request.branch_name
