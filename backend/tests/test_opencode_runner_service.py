@@ -183,6 +183,7 @@ class TestOpenCodePrMetadataNormalization(unittest.TestCase):
         result = OpenCodeRunResult(
             summary="Implemented the mobile drawer fix.", pull_request_title=""
         )
+        result.publish_summary = self.svc._publishable_summary(result)
         title = self.svc._ensure_meaningful_pr_title(result)
         self.assertEqual(title, "Implemented the mobile drawer fix.")
 
@@ -200,6 +201,7 @@ class TestOpenCodePrMetadataNormalization(unittest.TestCase):
 
     def test_ensure_pr_body_wraps_summary_in_change_summary_section(self):
         result = OpenCodeRunResult(summary="Reordered the mobile header actions.")
+        result.publish_summary = self.svc._publishable_summary(result)
         body = self.svc._ensure_pr_body(result)
         self.assertEqual(body, "## Change Summary\n\nReordered the mobile header actions.")
 
@@ -344,3 +346,58 @@ class TestOpenCodePushBranch(unittest.TestCase):
             ],
         )
         self.assertEqual(commands[2], ["git", "push", "-u", "origin", "opencode/run"])
+
+
+class TestOpenCodeNarrationIsNotPublished(unittest.TestCase):
+    """Regression for PR #397: mid-run narration became the PR title and description."""
+
+    def setUp(self):
+        self.svc = OpenCodeRunnerService(workspace_root="/tmp/heym-oc-ws")
+
+    @staticmethod
+    def _stream(*texts: str) -> str:
+        return "\n".join(json.dumps({"role": "assistant", "text": text}) for text in texts)
+
+    def test_change_summary_section_wins_over_later_narration(self):
+        stdout = self._stream(
+            "Reading the workflow store.",
+            "## Change Summary\n\nAdd a stale-save override dialog.\n\nPR_TITLE: Add stale-save"
+            " override dialog",
+            "Both pass. Let me do a final review of the complete changes:",
+        )
+        result = self.svc.parse_events(stdout)
+        self.assertEqual(result.summary, "Add a stale-save override dialog.")
+        self.assertEqual(result.pull_request_title, "Add stale-save override dialog")
+
+    def test_narration_only_run_falls_back_to_the_changed_file_list(self):
+        stdout = self._stream("Both pass. Let me do a final review of the complete changes:")
+        result = self.svc.parse_events(stdout)
+        result.changed_files = ["frontend/src/stores/workflow.ts", "frontend/src/views/Editor.vue"]
+
+        self.svc._normalize_pr_metadata(result, "add an override dialog for stale saves")
+
+        self.assertEqual(result.pull_request_title, "Apply OpenCode changes")
+        self.assertNotIn("Let me do a final review", result.pull_request_body)
+        self.assertIn("`frontend/src/stores/workflow.ts`", result.pull_request_body)
+        # The raw message stays on the node output so the run is still debuggable in Heym.
+        self.assertIn("Let me do a final review", result.summary)
+        self.assertEqual(result.publish_summary, "")
+
+    def test_narration_never_reaches_the_commit_message(self):
+        result = OpenCodeRunResult(
+            summary="Both pass. Let me do a final review of the complete changes:",
+            changed_files=["a.ts"],
+        )
+        self.svc._normalize_pr_metadata(result, "")
+        self.svc._run_command = MagicMock()  # type: ignore[method-assign]
+
+        self.svc._commit_changes(Path("/tmp/ws"), "opencode/run", result, new_branch=True)
+
+        commit_cmd = self.svc._run_command.call_args_list[-1].args[0]
+        self.assertIn("Apply OpenCode changes", commit_cmd)
+        self.assertNotIn("Both pass. Let me do a final review of the complete changes:", commit_cmd)
+
+    def test_changed_file_list_is_capped(self):
+        result = OpenCodeRunResult(summary="", changed_files=[f"file{i}.ts" for i in range(25)])
+        self.svc._normalize_pr_metadata(result, "")
+        self.assertIn("…and 5 more file(s)", result.pull_request_body)
