@@ -12,12 +12,16 @@ interface ActiveExecutionFixture {
   node_results: [];
 }
 
-function makeActiveExecution(index: number): ActiveExecutionFixture {
+function makeActiveExecution(
+  index: number,
+  workflowIndex = index,
+): ActiveExecutionFixture {
   const suffix = String(index).padStart(12, "0");
+  const workflowSuffix = String(workflowIndex).padStart(12, "0");
   return {
     execution_id: `10000000-0000-4000-8000-${suffix}`,
-    workflow_id: `20000000-0000-4000-8000-${suffix}`,
-    workflow_name: `Running workflow ${index}`,
+    workflow_id: `20000000-0000-4000-8000-${workflowSuffix}`,
+    workflow_name: `Running workflow ${workflowIndex}`,
     started_at: new Date(Date.UTC(2026, 0, 1, 12, index)).toISOString(),
     inputs: {},
     running_node_ids: [`node-${index}`],
@@ -34,7 +38,7 @@ test("polls, scrolls active workflows, and opens a live workflow", async ({ page
   await page.clock.install();
 
   const allActiveExecutions = Array.from({ length: 5 }, (_, index) =>
-    makeActiveExecution(index + 1),
+    makeActiveExecution(index + 1, index < 3 ? 1 : index + 1),
   );
   let activeExecutions = allActiveExecutions.slice(0, 2);
   let requestCount = 0;
@@ -48,6 +52,12 @@ test("polls, scrolls active workflows, and opens a live workflow", async ({ page
   const badge = page.getByTestId("active-workflows-badge");
   await expect(badge).toHaveText("2");
   await expect(badge).toHaveAttribute("aria-expanded", "false");
+  expect(
+    await badge.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      return Math.abs(bounds.width - bounds.height) < 0.5;
+    }),
+  ).toBe(true);
 
   activeExecutions = allActiveExecutions;
   await page.clock.fastForward(10_000);
@@ -65,10 +75,10 @@ test("polls, scrolls active workflows, and opens a live workflow", async ({ page
   ).toBe(true);
 
   await page
-    .getByRole("menuitem", { name: "Open Running workflow 2 live view" })
+    .getByRole("menuitem", { name: "Open Running workflow 4 live view" })
     .click();
   await expect(page).toHaveURL(
-    "/workflows/20000000-0000-4000-8000-000000000002/10000000-0000-4000-8000-000000000002",
+    "/workflows/20000000-0000-4000-8000-000000000004/10000000-0000-4000-8000-000000000004",
   );
 });
 
@@ -81,7 +91,7 @@ test("keeps the zero state non-interactive and hides the badge on mobile", async
   await page.goto("/");
 
   const counter = page.getByTestId("active-workflows-counter");
-  await expect(page.getByTestId("active-workflows-badge-empty")).toHaveText("0");
+  await expect(counter).toHaveCSS("height", "0px");
   await expect(counter.getByRole("button")).toHaveCount(0);
 
   await page.setViewportSize({ width: 390, height: 844 });

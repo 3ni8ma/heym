@@ -74,7 +74,7 @@ function formatStartedAt(value: string): string {
       </div>
 
       <div
-        class="active-workflows-scroll max-h-[232px] overflow-y-auto overscroll-contain p-1"
+        class="active-workflows-scroll overflow-y-auto overscroll-contain p-1"
         data-testid="active-workflows-scroll-area"
       >
         <DropdownMenuItem
@@ -123,6 +123,7 @@ function formatStartedAt(value: string): string {
 }
 
 .active-workflows-scroll {
+  max-block-size: 14.5rem;
   scrollbar-color: hsl(var(--muted-foreground) / 0.35) transparent;
   scrollbar-width: thin;
 }

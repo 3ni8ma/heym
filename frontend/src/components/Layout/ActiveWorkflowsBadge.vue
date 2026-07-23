@@ -24,17 +24,7 @@ let requestInFlight = false;
 let requestGeneration = 0;
 let isUnmounted = false;
 
-const activeWorkflows = computed<ActiveExecutionItem[]>(() => {
-  const workflowsById = new Map<string, ActiveExecutionItem>();
-  for (const execution of executions.value) {
-    if (!workflowsById.has(execution.workflow_id)) {
-      workflowsById.set(execution.workflow_id, execution);
-    }
-  }
-  return Array.from(workflowsById.values());
-});
-
-const activeWorkflowCount = computed((): number => activeWorkflows.value.length);
+const activeWorkflowCount = computed((): number => executions.value.length);
 const badgeTitle = computed((): string => {
   if (refreshFailed.value) {
     return activeWorkflowCount.value > 0
@@ -160,24 +150,14 @@ onUnmounted(() => {
       <CircleAlert class="h-4 w-4" />
     </span>
 
-    <span
-      v-else-if="activeWorkflowCount === 0"
-      class="flex h-9 w-9 cursor-default items-center justify-center rounded-full border border-border/70 bg-muted/45 text-xs font-semibold tabular-nums text-muted-foreground"
-      :title="badgeTitle"
-      aria-label="No active workflows"
-      data-testid="active-workflows-badge-empty"
-    >
-      0
-    </span>
-
     <DropdownMenuRoot
-      v-else
+      v-else-if="activeWorkflowCount > 0"
       v-model:open="isOpen"
     >
       <DropdownMenuTrigger as-child>
         <button
           type="button"
-          class="group relative flex h-9 w-9 items-center justify-center rounded-full border border-emerald-500/35 bg-emerald-500/12 text-xs font-bold tabular-nums text-emerald-700 shadow-sm shadow-emerald-500/10 outline-none transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-500/55 hover:bg-emerald-500/18 hover:shadow-md focus-visible:ring-2 focus-visible:ring-emerald-500/45 focus-visible:ring-offset-2 focus-visible:ring-offset-background dark:text-emerald-300"
+          class="active-workflows-badge group relative flex items-center justify-center border border-emerald-500/35 bg-emerald-500/12 text-xs font-bold tabular-nums text-emerald-700 shadow-sm shadow-emerald-500/10 outline-none transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-500/55 hover:bg-emerald-500/18 hover:shadow-md focus-visible:ring-2 focus-visible:ring-emerald-500/45 focus-visible:ring-offset-2 focus-visible:ring-offset-background dark:text-emerald-300"
           :aria-label="`${activeWorkflowCount} active workflows. Open live workflow list`"
           :title="badgeTitle"
           data-testid="active-workflows-badge"
@@ -191,10 +171,20 @@ onUnmounted(() => {
       </DropdownMenuTrigger>
 
       <ActiveWorkflowsDropdown
-        :workflows="activeWorkflows"
+        :workflows="executions"
         :refresh-failed="refreshFailed"
         @select="openLiveWorkflow"
       />
     </DropdownMenuRoot>
   </div>
 </template>
+
+<style scoped>
+.active-workflows-badge {
+  aspect-ratio: 1 / 1;
+  block-size: 2.25rem;
+  flex: 0 0 2.25rem;
+  inline-size: 2.25rem;
+  border-radius: 50%;
+}
+</style>
