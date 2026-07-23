@@ -13,6 +13,14 @@ The **Workflows** tab is the default dashboard view. It shows your workflow list
 - Use **Ctrl+click** (or **Cmd+click**) to open in a new tab
 - Pin frequently used workflows in the [Quick Drawer](../reference/quick-drawer.md) so you can run them quickly from the Workflows tab and other internal pages
 
+## Active Workflows
+
+On desktop, the circular badge in the top toolbar shows how many workflows are currently
+running and refreshes automatically every 10 seconds. Click a non-zero badge to open the active
+workflow list, which shows up to four rows before scrolling. Select a workflow name to attach the
+editor to that run's live view. The zero badge is informational and cannot be opened, and the
+badge is hidden on mobile screens.
+
 ## Search
 
 Use the workflow search field beside **New Folder**, or press **Ctrl+F** (or **Cmd+F**), to filter workflows by title or description. Matching workflows inside folders are shown with their folder branches expanded. Press **Escape** to clear the search.
