@@ -157,8 +157,8 @@ class TestPrPublishHelpers(unittest.TestCase):
         gh.get_release_by_tag.side_effect = ValueError("Not Found")
         gh.create_release.return_value = {"id": 9, "upload_url": None, "assets": []}
         gh.upload_release_asset.return_value = {
-            "browser_download_url": "http://x/pr-1-ui.png",
-            "name": "pr-1-ui.png",
+            "browser_download_url": "http://x/opencode-run-ui.png",
+            "name": "opencode-run-ui.png",
         }
         body = pr_publish.upload_and_inject_screenshots(
             gh,
@@ -166,14 +166,16 @@ class TestPrPublishHelpers(unittest.TestCase):
             owner="acme",
             repo="app",
             base_branch="main",
-            pr_number=1,
+            asset_slug="opencode/run",
             base_body="Body",
             release_tag="opencode-pr-assets",
             release_name="OpenCode PR screenshots",
             release_body="bucket",
         )
         gh.get_release_by_tag.assert_called_once_with("acme", "app", "opencode-pr-assets")
-        self.assertIn("![pr-1-ui.png](http://x/pr-1-ui.png)", body)
+        # Asset name is keyed on the (sanitized) branch, not the PR number.
+        self.assertIn("![opencode-run-ui.png](http://x/opencode-run-ui.png)", body)
+        self.assertEqual(gh.upload_release_asset.call_args.kwargs["name"], "opencode-run-ui.png")
 
 
 class TestTaskPromptRedaction(unittest.TestCase):
@@ -307,3 +309,163 @@ class TestChangeSummaryExtraction(unittest.TestCase):
 
     def test_absent_section_returns_empty(self):
         self.assertEqual(pr_publish.extract_change_summary_section("Just prose."), "")
+
+
+def _pr(head: str, base: str = "main", login: str = "heym-coder", updated_at: str = "") -> dict:
+    return {
+        "head": {"ref": head},
+        "base": {"ref": base},
+        "user": {"login": login},
+        "updated_at": updated_at,
+        "html_url": f"https://github.com/acme/app/pull/{head}",
+    }
+
+
+class TestResolveUpdateExistingPrBranch(unittest.TestCase):
+    """update_existing_pr must find the agent's real open PR, not trust the configured branch."""
+
+    def _gh(self, pulls: list[dict], login: str = "heym-coder") -> MagicMock:
+        gh = MagicMock()
+        gh.list_pull_requests.return_value = pulls
+        gh.get_authenticated_user.return_value = {"login": login}
+        return gh
+
+    def test_exact_head_match_wins(self):
+        gh = self._gh([_pr("feature-a"), _pr("configured")])
+        branch = pr_publish.resolve_update_existing_pr_branch(
+            gh, "acme", "app", base_branch="main", configured_branch="configured"
+        )
+        self.assertEqual(branch, "configured")
+
+    def test_adopts_authors_open_pr_when_branch_does_not_match(self):
+        # The real board bug: the configured branch was LLM-generated and never matched PR #401.
+        gh = self._gh([_pr("feat/running-workflow-count-badge")])
+        branch = pr_publish.resolve_update_existing_pr_branch(
+            gh, "acme", "app", base_branch="main", configured_branch="reuse-branch-from-pr-401"
+        )
+        self.assertEqual(branch, "feat/running-workflow-count-badge")
+
+    def test_picks_most_recently_updated_of_the_authors_prs(self):
+        gh = self._gh(
+            [
+                _pr("older", updated_at="2026-07-20T10:00:00Z"),
+                _pr("newest", updated_at="2026-07-22T10:00:00Z"),
+            ]
+        )
+        branch = pr_publish.resolve_update_existing_pr_branch(
+            gh, "acme", "app", base_branch="main", configured_branch="unmatched"
+        )
+        self.assertEqual(branch, "newest")
+
+    def test_ignores_other_authors_and_other_base_branches(self):
+        gh = self._gh(
+            [
+                _pr("human-pr", login="someone-else"),
+                _pr("wrong-base", base="develop"),
+            ]
+        )
+        branch = pr_publish.resolve_update_existing_pr_branch(
+            gh, "acme", "app", base_branch="main", configured_branch="unmatched"
+        )
+        self.assertEqual(branch, "unmatched")
+
+    def test_without_author_only_adopts_a_single_open_pr(self):
+        gh = self._gh([_pr("only-one")])
+        gh.get_authenticated_user.side_effect = ValueError("token cannot read /user")
+        branch = pr_publish.resolve_update_existing_pr_branch(
+            gh, "acme", "app", base_branch="main", configured_branch="unmatched"
+        )
+        self.assertEqual(branch, "only-one")
+
+    def test_without_author_does_not_adopt_when_ambiguous(self):
+        gh = self._gh([_pr("one"), _pr("two")])
+        gh.get_authenticated_user.side_effect = ValueError("token cannot read /user")
+        branch = pr_publish.resolve_update_existing_pr_branch(
+            gh, "acme", "app", base_branch="main", configured_branch="unmatched"
+        )
+        self.assertEqual(branch, "unmatched")
+
+    def test_github_error_falls_back_to_configured_branch(self):
+        gh = MagicMock()
+        gh.list_pull_requests.side_effect = ValueError("boom")
+        branch = pr_publish.resolve_update_existing_pr_branch(
+            gh, "acme", "app", base_branch="main", configured_branch="configured"
+        )
+        self.assertEqual(branch, "configured")
+
+
+class TestFinishingPassHelpers(unittest.TestCase):
+    def test_changed_files_touch_ui_detects_vue_and_frontend_scripts(self):
+        self.assertTrue(pr_publish.changed_files_touch_ui(["frontend/src/views/DashboardView.vue"]))
+        self.assertTrue(pr_publish.changed_files_touch_ui(["frontend/src/views/Editor.ts"]))
+        self.assertTrue(pr_publish.changed_files_touch_ui(["app/styles/theme.css"]))
+
+    def test_changed_files_touch_ui_ignores_backend_only(self):
+        self.assertFalse(
+            pr_publish.changed_files_touch_ui(
+                ["backend/app/api/workflows.py", "backend/tests/test_x.py"]
+            )
+        )
+
+    def test_needs_finishing_pass_when_no_publishable_summary(self):
+        self.assertTrue(
+            pr_publish.needs_finishing_pass(
+                will_publish=True,
+                changed_files=["a.py"],
+                publish_summary="",
+                ui_change=False,
+                has_screenshots=False,
+            )
+        )
+
+    def test_needs_finishing_pass_when_ui_change_lacks_screenshot(self):
+        self.assertTrue(
+            pr_publish.needs_finishing_pass(
+                will_publish=True,
+                changed_files=["frontend/src/App.vue"],
+                publish_summary="Add a badge.",
+                ui_change=True,
+                has_screenshots=False,
+            )
+        )
+
+    def test_no_finishing_pass_when_summary_and_screenshot_present(self):
+        self.assertFalse(
+            pr_publish.needs_finishing_pass(
+                will_publish=True,
+                changed_files=["frontend/src/App.vue"],
+                publish_summary="Add a badge.",
+                ui_change=True,
+                has_screenshots=True,
+            )
+        )
+
+    def test_no_finishing_pass_without_changes_or_publish(self):
+        self.assertFalse(
+            pr_publish.needs_finishing_pass(
+                will_publish=False,
+                changed_files=["a.py"],
+                publish_summary="",
+                ui_change=False,
+                has_screenshots=False,
+            )
+        )
+        self.assertFalse(
+            pr_publish.needs_finishing_pass(
+                will_publish=True,
+                changed_files=[],
+                publish_summary="",
+                ui_change=False,
+                has_screenshots=False,
+            )
+        )
+
+    def test_note_missing_ui_screenshot_appends_section(self):
+        body = pr_publish.note_missing_ui_screenshot("## Change Summary\n\nAdd a badge.")
+        self.assertIn("## Screenshots", body)
+        self.assertIn("did not", body)
+        self.assertIn("capture a screenshot", body)
+
+    def test_note_missing_ui_screenshot_is_noop_when_screenshots_present(self):
+        body = "## Change Summary\n\nx\n\n## Screenshots\n\n![shot](http://x/y.png)"
+        self.assertEqual(pr_publish.note_missing_ui_screenshot(body).strip(), body.strip())

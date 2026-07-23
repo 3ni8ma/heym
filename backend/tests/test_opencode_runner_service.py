@@ -73,6 +73,16 @@ class TestOpenCodeRunCommand(unittest.TestCase):
         self.assertIn("frontend/.e2e-artifacts/", prompt)
         self.assertIn("Do not commit screenshot binaries", prompt)
 
+    def test_run_command_forbids_ending_on_screenshot_announcement(self):
+        # Regression for the observed "…Now let me take a screenshot" early stop.
+        prompt = self.svc.build_run_command("opencode/kimi-k3", _request(), _WS)[-1]
+        self.assertIn("Capture screenshots BEFORE you write your final message", prompt)
+        self.assertIn("Now let me take a screenshot", prompt)
+
+    def test_build_run_command_prompt_override(self):
+        cmd = self.svc.build_run_command("opencode/kimi-k3", _request(), _WS, prompt="FINISH NOW")
+        self.assertEqual(cmd[-1], "FINISH NOW")
+
     def test_run_command_pins_workspace_dir(self):
         cmd = self.svc.build_run_command("opencode/kimi-k3", _request(), _WS)
         self.assertEqual(cmd[cmd.index("--dir") + 1], str(_WS))
@@ -294,6 +304,9 @@ class TestOpenCodeCreatePr(unittest.TestCase):
             changed_files=["a.vue"],
         )
         self.runner._normalize_pr_metadata(result, request.task_prompt)
+        self.runner._screenshot_body = MagicMock(  # type: ignore[method-assign]
+            side_effect=lambda _ws, _req, res, _head: res.pull_request_body
+        )
         gh = MagicMock()
         gh.create_pull_request.return_value = {
             "number": 1,
@@ -401,3 +414,117 @@ class TestOpenCodeNarrationIsNotPublished(unittest.TestCase):
         result = OpenCodeRunResult(summary="", changed_files=[f"file{i}.ts" for i in range(25)])
         self.svc._normalize_pr_metadata(result, "")
         self.assertIn("…and 5 more file(s)", result.pull_request_body)
+
+
+class TestOpenCodeResolveExistingPrBranch(unittest.TestCase):
+    def setUp(self):
+        self.svc = OpenCodeRunnerService(workspace_root="/tmp/heym-oc-ws")
+
+    def test_resolves_existing_pr_branch(self):
+        request = _request(publish_mode="open_or_update_pr", branch_name="reuse-branch-from-pr-401")
+        gh = MagicMock()
+        with (
+            patch("app.services.opencode_runner_service.GitHubService", return_value=gh),
+            patch.object(
+                pr_publish,
+                "resolve_update_existing_pr_branch",
+                return_value="feat/running-workflow-count-badge",
+            ),
+        ):
+            branch = self.svc._resolve_existing_pr_branch(request)
+        self.assertEqual(branch, "feat/running-workflow-count-badge")
+        gh.close.assert_called_once()
+
+
+class TestOpenCodeFinishIncompleteRun(unittest.TestCase):
+    def setUp(self):
+        self.svc = OpenCodeRunnerService(workspace_root="/tmp/heym-oc-ws")
+        self.svc._git_output = MagicMock(return_value="")  # type: ignore[method-assign]
+        self.ws = Path("/tmp/ws")
+        self.home = Path("/tmp/ws.oc-home")
+
+    @staticmethod
+    def _stream(*texts: str) -> str:
+        return "\n".join(json.dumps({"role": "assistant", "text": text}) for text in texts)
+
+    def test_reruns_and_updates_when_ui_change_has_no_screenshot(self):
+        # Real PR #402 case: agent stopped right before capturing a screenshot of a UI change.
+        result = OpenCodeRunResult(
+            status="completed",
+            summary="All checks pass - 2406 tests, 0 failures. Now let me take a screenshot.",
+            changed_files=["frontend/src/views/DashboardView.vue"],
+        )
+        self.svc._normalize_pr_metadata(result, "")
+        self.svc._changed_files = MagicMock(  # type: ignore[method-assign]
+            return_value=["frontend/src/views/DashboardView.vue"]
+        )
+        finishing_stdout = self._stream(
+            "## Change Summary\n\nAdd a live running-workflow count badge.\n\n"
+            "PR_TITLE: Add running-workflow count badge"
+        )
+        self.svc._exec_opencode = MagicMock(return_value=finishing_stdout)  # type: ignore[method-assign]
+
+        with patch.object(pr_publish, "discover_pr_screenshots", return_value=[]):
+            self.svc._finish_incomplete_run(
+                self.ws, self.home, _request(), "opencode/kimi-k3", result
+            )
+
+        self.svc._exec_opencode.assert_called_once()
+        override = self.svc._exec_opencode.call_args.kwargs["prompt_override"]
+        self.assertIn(pr_publish.FINISHING_PASS_PREAMBLE, override)
+        self.assertEqual(result.pull_request_title, "Add running-workflow count badge")
+        # A UI change with no screenshot after the pass gets a visible note.
+        self.assertIn("## Screenshots", result.pull_request_body)
+
+    def test_no_rerun_when_summary_and_screenshot_present(self):
+        result = OpenCodeRunResult(
+            status="completed",
+            summary="Add a badge.",
+            changed_files=["frontend/src/views/DashboardView.vue"],
+        )
+        self.svc._normalize_pr_metadata(result, "")
+        self.svc._exec_opencode = MagicMock()  # type: ignore[method-assign]
+
+        with patch.object(
+            pr_publish,
+            "discover_pr_screenshots",
+            return_value=[Path("/tmp/ws/frontend/.e2e-artifacts/shot.png")],
+        ):
+            self.svc._finish_incomplete_run(
+                self.ws, self.home, _request(), "opencode/kimi-k3", result
+            )
+
+        self.svc._exec_opencode.assert_not_called()
+
+
+class TestOpenCodeOpenOrUpdatePublish(unittest.TestCase):
+    def setUp(self):
+        self.svc = OpenCodeRunnerService(workspace_root="/tmp/heym-oc-ws")
+        self.svc._commit_changes = MagicMock()  # type: ignore[method-assign]
+        self.svc._push_branch = MagicMock()  # type: ignore[method-assign]
+        self.svc._current_branch = MagicMock(return_value="opencode/run")  # type: ignore[method-assign]
+        self.svc._create_pr = MagicMock()  # type: ignore[method-assign]
+        self.svc._update_pr_body_with_screenshots = MagicMock()  # type: ignore[method-assign]
+        self.ws = Path("/tmp/ws")
+
+    def test_open_or_update_updates_existing_pr(self):
+        self.svc._open_pr_url_for_head = MagicMock(  # type: ignore[method-assign]
+            return_value="https://github.com/acme/app/pull/42"
+        )
+        result = OpenCodeRunResult(status="completed", summary="done", changed_files=["a.vue"])
+
+        self.svc._publish(self.ws, _request(publish_mode="open_or_update_pr"), result)
+
+        self.svc._update_pr_body_with_screenshots.assert_called_once()
+        self.svc._create_pr.assert_not_called()
+        self.assertEqual(result.pull_request_url, "https://github.com/acme/app/pull/42")
+
+    def test_open_or_update_opens_new_pr_when_none_exists(self):
+        self.svc._open_pr_url_for_head = MagicMock(return_value=None)  # type: ignore[method-assign]
+        self.svc._create_pr = MagicMock(return_value="https://github.com/acme/app/pull/99")  # type: ignore[method-assign]
+        result = OpenCodeRunResult(status="completed", summary="done", changed_files=["a.vue"])
+
+        self.svc._publish(self.ws, _request(publish_mode="open_or_update_pr"), result)
+
+        self.svc._create_pr.assert_called_once()
+        self.assertEqual(result.pull_request_url, "https://github.com/acme/app/pull/99")
