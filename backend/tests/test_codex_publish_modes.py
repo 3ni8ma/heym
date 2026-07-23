@@ -47,6 +47,7 @@ class TestPublishModeConstants(unittest.TestCase):
                 "commit_push",
                 "direct_commit",
                 "update_existing_pr",
+                "open_or_update_pr",
                 "patch_artifact",
             },
         )
@@ -80,6 +81,95 @@ class TestPublishModeConstants(unittest.TestCase):
         self.assertIn(
             pr_publish.PR_CONTENT_POLICY, CodexRunnerService._build_resume_prompt("use port 1234")
         )
+
+    def test_build_prompt_forbids_ending_on_a_screenshot_announcement(self) -> None:
+        # Regression for the observed "…Now let me take a screenshot" early stop.
+        prompt = CodexRunnerService._build_prompt("add a badge")
+        self.assertIn("BEFORE you return your final result", prompt)
+        self.assertIn("Now let me take a screenshot", prompt)
+
+    def test_finishing_prompt_states_the_finishing_preamble(self) -> None:
+        prompt = CodexRunnerService._build_finishing_prompt()
+        self.assertIn(pr_publish.FINISHING_PASS_PREAMBLE, prompt)
+        self.assertIn("Do NOT run git", prompt)
+        self.assertIn("## Change Summary", prompt)
+
+
+class TestCodexResolveUpdateExistingPr(unittest.TestCase):
+    def setUp(self) -> None:
+        self.runner = CodexRunnerService()
+
+    def test_non_update_mode_is_unchanged(self) -> None:
+        request = _request("open_pr")
+        self.assertIs(self.runner._resolve_update_existing_pr_request(request), request)
+
+    def test_update_mode_swaps_in_the_existing_pr_branch(self) -> None:
+        request = _request("update_existing_pr")
+        gh = MagicMock()
+        with (
+            patch("app.services.codex_runner_service.GitHubService", return_value=gh),
+            patch.object(
+                pr_publish, "resolve_update_existing_pr_branch", return_value="feat/real-branch"
+            ),
+        ):
+            resolved = self.runner._resolve_update_existing_pr_request(request)
+        self.assertEqual(resolved.branch_name, "feat/real-branch")
+        self.assertEqual(request.branch_name, "codex/run")  # original request untouched
+        gh.close.assert_called_once()
+
+
+class TestCodexFinishIncompleteRun(unittest.TestCase):
+    def setUp(self) -> None:
+        self.runner = CodexRunnerService()
+        self.runner._git_output = MagicMock(return_value="")  # type: ignore[method-assign]
+        self.ws = Path("/tmp/ws")
+
+    def test_reruns_and_updates_summary_when_agent_stopped_mid_task(self) -> None:
+        # Real PR #401 case: the agent stopped right before the screenshot ("Backend code is
+        # clean. Let me now take a screenshot."). A UI change with no screenshot triggers the
+        # finishing pass even though the summary is not empty.
+        result = CodexRunResult(
+            status="completed",
+            summary="Backend code is clean. Let me now take a screenshot.",
+            changed_files=["frontend/src/views/DashboardView.vue"],
+        )
+        CodexRunnerService._prepare_publishable_text(result, "")
+
+        finished = CodexRunResult(
+            status="completed",
+            summary="Add a live running-workflow count badge to the toolbar.",
+            pull_request_title="Add running-workflow count badge",
+            pull_request_body="## Change Summary\n\nAdd a live badge.",
+        )
+        self.runner._run_codex_exec = MagicMock(return_value=finished)  # type: ignore[method-assign]
+        self.runner._discover_pr_screenshots = MagicMock(return_value=[])  # type: ignore[method-assign]
+        self.runner._changed_files = MagicMock(  # type: ignore[method-assign]
+            return_value=["frontend/src/views/DashboardView.vue"]
+        )
+
+        self.runner._finish_incomplete_run(self.ws, _request("open_pr"), result)
+
+        self.runner._run_codex_exec.assert_called_once()
+        self.assertEqual(result.summary, "Add a live running-workflow count badge to the toolbar.")
+        self.assertEqual(result.pull_request_title, "Add running-workflow count badge")
+        # A UI change with no screenshot after the pass gets a visible note.
+        self.assertIn("## Screenshots", result.pull_request_body)
+
+    def test_no_rerun_when_summary_and_screenshot_present(self) -> None:
+        result = CodexRunResult(
+            status="completed",
+            summary="Add a live badge.",
+            changed_files=["frontend/src/views/DashboardView.vue"],
+        )
+        CodexRunnerService._prepare_publishable_text(result, "")
+        self.runner._run_codex_exec = MagicMock()  # type: ignore[method-assign]
+        self.runner._discover_pr_screenshots = MagicMock(  # type: ignore[method-assign]
+            return_value=[Path("/tmp/ws/frontend/.e2e-artifacts/shot.png")]
+        )
+
+        self.runner._finish_incomplete_run(self.ws, _request("open_pr"), result)
+
+        self.runner._run_codex_exec.assert_not_called()
 
 
 class TestCodexPublishedTextRedaction(unittest.TestCase):
@@ -315,7 +405,7 @@ class TestCodexNarrationIsNotPublished(unittest.TestCase):
         gh = MagicMock()
         gh.create_pull_request.return_value = {"number": 7, "html_url": "https://x/pull/7"}
         runner = CodexRunnerService(workspace_root="/tmp/heym-codex-ws")
-        runner._attach_pr_screenshots = MagicMock()  # type: ignore[method-assign]
+        runner._discover_pr_screenshots = MagicMock(return_value=[])  # type: ignore[method-assign]
 
         with patch("app.services.codex_runner_service.GitHubService", return_value=gh):
             runner._create_pr(

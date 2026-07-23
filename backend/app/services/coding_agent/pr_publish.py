@@ -341,12 +341,167 @@ def pr_number_from_url(url: str) -> int | None:
     return int(match.group(1))
 
 
-def release_asset_name(path: Path, pr_number: int, index: int) -> str:
+def resolve_update_existing_pr_branch(
+    gh: GitHubService,
+    owner: str,
+    repo: str,
+    *,
+    base_branch: str,
+    configured_branch: str,
+) -> str:
+    """Head branch to reuse for ``update_existing_pr`` so a re-run updates the agent's existing
+    open pull request instead of opening a new one.
+
+    ``update_existing_pr`` used to trust ``configured_branch`` to already equal an open PR's head.
+    In agentic/board flows the branch name is generated per run (e.g. by an LLM planner), so it
+    never matches and every "update the open PR" run opened a *new* PR. This resolves the real
+    target:
+
+    * an open PR whose head already equals ``configured_branch`` wins (explicit targeting);
+    * otherwise the token account's most-recently-updated open PR into ``base_branch`` is adopted;
+    * otherwise ``configured_branch`` is returned unchanged (a fresh PR is created downstream).
+
+    Best-effort: any GitHub error falls back to ``configured_branch`` (never raises).
+    """
+    try:
+        pulls = gh.list_pull_requests(owner, repo, state="open", per_page=100)
+    except Exception:  # noqa: BLE001 - discovery is best-effort; fall back to the configured branch
+        return configured_branch
+
+    to_base = [pr for pr in pulls if _pr_base_ref(pr) == base_branch]
+    for pull in to_base:
+        if _pr_head_ref(pull) == configured_branch:
+            return configured_branch
+
+    author = _authenticated_login(gh)
+    if author:
+        candidates = [pull for pull in to_base if _pr_author_login(pull) == author]
+    else:
+        # Without a known author, only adopt when there is exactly one open PR into the base,
+        # so a re-run never hijacks an unrelated contributor's pull request.
+        candidates = to_base if len(to_base) == 1 else []
+    if not candidates:
+        return configured_branch
+    target = max(candidates, key=lambda pull: str(pull.get("updated_at") or ""))
+    return _pr_head_ref(target) or configured_branch
+
+
+def _pr_head_ref(pull: dict) -> str:
+    return str((pull.get("head") or {}).get("ref") or "")
+
+
+def _pr_base_ref(pull: dict) -> str:
+    return str((pull.get("base") or {}).get("ref") or "")
+
+
+def _pr_author_login(pull: dict) -> str:
+    return str((pull.get("user") or {}).get("login") or "")
+
+
+def _authenticated_login(gh: GitHubService) -> str:
+    try:
+        user = gh.get_authenticated_user()
+    except Exception:  # noqa: BLE001 - some tokens can't read /user; fall back to count-based scope
+        return ""
+    return str((user or {}).get("login") or "").strip()
+
+
+# --- finishing pass / screenshot completeness (shared) ---
+# A coding agent sometimes ends its turn mid-task (e.g. "…Now let me take a screenshot"), so the
+# run finalizes before the screenshot is captured and with only narration for a summary. When that
+# happens the runner does ONE more pass with this preamble, in the same workspace, to finish.
+FINISHING_PASS_PREAMBLE = (
+    "You ended your previous turn before finishing. The repository already contains your "
+    "in-progress changes on disk — do NOT redo or re-plan that work, and make no further code "
+    "changes except what is strictly required to capture a screenshot. Complete any step you "
+    "announced but did not perform: for a UI/frontend change, capture at least one PNG screenshot "
+    "of the result under a gitignored path such as `frontend/.e2e-artifacts/` (Heym attaches it to "
+    "the pull request; do not commit the image). Then return your final report describing what "
+    "changed. Never end by announcing a further step (for example 'Now let me take a screenshot')."
+)
+
+# Frontend/visual files a reviewer would expect a screenshot for.
+_UI_VISUAL_SUFFIXES: frozenset[str] = frozenset(
+    {".vue", ".tsx", ".jsx", ".svelte", ".css", ".scss", ".sass", ".less", ".html"}
+)
+_UI_SCRIPT_SUFFIXES: frozenset[str] = frozenset({".ts", ".js"})
+_UI_PATH_HINTS: tuple[str, ...] = (
+    "frontend/",
+    "/components/",
+    "/views/",
+    "/pages/",
+    "src/components/",
+    "src/views/",
+)
+_MISSING_SCREENSHOT_NOTE = (
+    "> ⚠️ This pull request changes UI/frontend files, but the coding agent did not "
+    "capture a screenshot. Add one manually if a visual review is needed."
+)
+
+
+def changed_files_touch_ui(changed_files: list[str]) -> bool:
+    """True when the diff touches frontend/visual files a reviewer would expect a screenshot for."""
+    for raw in changed_files or []:
+        path = str(raw or "").strip().replace("\\", "/").lower()
+        name = path.rsplit("/", 1)[-1]
+        suffix = path[path.rfind(".") :] if "." in name else ""
+        if suffix in _UI_VISUAL_SUFFIXES:
+            return True
+        if suffix in _UI_SCRIPT_SUFFIXES and any(hint in path for hint in _UI_PATH_HINTS):
+            return True
+    return False
+
+
+def needs_finishing_pass(
+    *,
+    will_publish: bool,
+    changed_files: list[str],
+    publish_summary: str,
+    ui_change: bool,
+    has_screenshots: bool,
+) -> bool:
+    """Whether to run one more agent pass before publishing.
+
+    Trigger when there is work to publish but the agent left no publishable summary (it stopped
+    mid-report), or a UI change shipped without a screenshot (it stopped before capturing one).
+    """
+    if not will_publish or not changed_files:
+        return False
+    if not str(publish_summary or "").strip():
+        return True
+    return bool(ui_change) and not bool(has_screenshots)
+
+
+def note_missing_ui_screenshot(body: str) -> str:
+    """Append a visible ``## Screenshots`` note when a UI change shipped without a screenshot.
+
+    No-op when the body already has a Screenshots section (screenshots were attached).
+    """
+    text = (body or "").strip()
+    if re.search(r"(?im)^\s*##\s+screenshots?\b", text):
+        return text + ("\n" if text else "")
+    section = f"## Screenshots\n\n{_MISSING_SCREENSHOT_NOTE}"
+    return (f"{text}\n\n{section}" if text else section) + "\n"
+
+
+def sanitize_asset_slug(head: str) -> str:
+    """Sanitize a branch/head ref into a stable release-asset prefix.
+
+    Keyed on the branch (not the PR number) so screenshots can be uploaded and embedded *before*
+    the pull request exists — the PR then opens already containing them — and so re-runs on the
+    same branch replace the same-named asset instead of piling up duplicates.
+    """
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", str(head or "")).strip("-._")
+    return slug or "pr"
+
+
+def release_asset_name(path: Path, slug: str, index: int) -> str:
     stem = re.sub(r"[^A-Za-z0-9._-]+", "-", path.stem).strip("-._") or "screenshot"
     suffix = path.suffix.lower() if path.suffix.lower() in PR_SCREENSHOT_SUFFIXES else ".png"
+    clean_slug = sanitize_asset_slug(slug)
     if index == 0:
-        return f"pr-{pr_number}-{stem}{suffix}"
-    return f"pr-{pr_number}-{stem}-{index}{suffix}"
+        return f"{clean_slug}-{stem}{suffix}"
+    return f"{clean_slug}-{stem}-{index}{suffix}"
 
 
 def inject_screenshot_markdown(body: str, images: list[tuple[str, str]]) -> str:
@@ -468,7 +623,7 @@ def upload_and_inject_screenshots(
     owner: str,
     repo: str,
     base_branch: str,
-    pr_number: int,
+    asset_slug: str,
     base_body: str,
     release_tag: str,
     release_name: str,
@@ -495,7 +650,7 @@ def upload_and_inject_screenshots(
     }
     uploaded: list[tuple[str, str]] = []
     for index, shot in enumerate(screenshots):
-        asset_name = release_asset_name(shot, pr_number, index)
+        asset_name = release_asset_name(shot, asset_slug, index)
         existing_id = existing_assets.get(asset_name)
         if existing_id is not None:
             gh.delete_release_asset(owner, repo, existing_id)
