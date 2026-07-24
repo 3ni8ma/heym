@@ -29,6 +29,34 @@ function makeActiveExecution(
   };
 }
 
+function makeWorkflowFixture(id: string, name: string): Record<string, unknown> {
+  const timestamp = new Date(Date.UTC(2026, 0, 1, 12, 0)).toISOString();
+  return {
+    id,
+    name,
+    description: null,
+    nodes: [],
+    edges: [],
+    auth_type: "jwt",
+    auth_header_key: null,
+    auth_header_value: null,
+    webhook_body_mode: "legacy",
+    allow_anonymous: false,
+    owner_id: "00000000-0000-4000-8000-000000000000",
+    cache_ttl_seconds: null,
+    rate_limit_requests: null,
+    rate_limit_window_seconds: null,
+    sse_enabled: false,
+    sse_node_config: {},
+    auto_recover_runs: false,
+    error_workflow_id: null,
+    minutes_saved_per_run: null,
+    workflow_timeout_seconds: null,
+    created_at: timestamp,
+    updated_at: timestamp,
+  };
+}
+
 test.beforeEach(async ({ page }) => {
   await prepareAuthenticatedPage(page);
 });
@@ -45,6 +73,15 @@ test("polls, scrolls active workflows, and opens a live workflow", async ({ page
   await page.route("**/api/workflows/executions/active", async (route) => {
     requestCount += 1;
     await route.fulfill({ json: activeExecutions });
+  });
+
+  // Opening a live workflow navigates to the editor, which loads the workflow and redirects
+  // back to the dashboard if that GET fails. The active-execution fixtures use synthetic ids
+  // that do not exist in the backend, so stub the workflow load to keep the editor mounted.
+  const liveWorkflowId = "20000000-0000-4000-8000-000000000004";
+  const liveExecutionId = "10000000-0000-4000-8000-000000000004";
+  await page.route(`**/api/workflows/${liveWorkflowId}`, async (route) => {
+    await route.fulfill({ json: makeWorkflowFixture(liveWorkflowId, "Running workflow 4") });
   });
 
   await page.goto("/");
@@ -77,9 +114,7 @@ test("polls, scrolls active workflows, and opens a live workflow", async ({ page
   await page
     .getByRole("menuitem", { name: "Open Running workflow 4 live view" })
     .click();
-  await expect(page).toHaveURL(
-    "/workflows/20000000-0000-4000-8000-000000000004/10000000-0000-4000-8000-000000000004",
-  );
+  await expect(page).toHaveURL(`/workflows/${liveWorkflowId}/${liveExecutionId}`);
 });
 
 test("keeps the zero state non-interactive and hides the badge on mobile", async ({ page }) => {
