@@ -1,3 +1,5 @@
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2Fheymrun%2Fheym.svg)](https://mcptoplist.com/server/glama%2Fheymrun%2Fheym)
+
 <div align="center">
 
 <br/>
