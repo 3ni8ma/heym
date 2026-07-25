@@ -338,7 +338,7 @@ docker run \
 Open the editor in your browser at port `4017` in either setup.
 See [ENVIRONMENT-VARIABLES.md](ENVIRONMENT-VARIABLES.md) for the full list of configuration variables and their defaults.
 For direct `docker run` setups, the `data/files` mount keeps Drive uploads, skill-generated files, and team-shared Drive files available across container restarts. The `heym-codex-workspaces` volume is the shared workspace that Python skills (and the Codex node) run in as a hardened sibling container; keep it mounted or skill execution fails closed. Per-run sandbox isolation needs Docker Engine 25.0+.
-The Docker socket mount supports Docker-based MCP stdio tools and grants broad host control. Docker log access remains disabled unless you also set `DOCKER_LOGS_ENABLED=true` and `DOCKER_LOGS_ALLOWED_EMAILS=admin@example.com` for trusted users. Create the trusted admin account before enabling Docker logs, or keep `ALLOW_REGISTER=false`, so an unverified self-registration cannot claim an allow-listed email.
+The Docker socket mount lets Heym start hardened sibling containers and grants broad host control. Every MCP `stdio` server needs it, since the caller-supplied command always runs in a throwaway container rather than on the backend host; without a Docker daemon, stdio fails closed. Docker log access remains disabled unless you also set `DOCKER_LOGS_ENABLED=true` and `DOCKER_LOGS_ALLOWED_EMAILS=admin@example.com` for trusted users. Create the trusted admin account before enabling Docker logs, or keep `ALLOW_REGISTER=false`, so an unverified self-registration cannot claim an allow-listed email.
 
 ## Deploy & Call Workflows
 
