@@ -1,5 +1,3 @@
-[![MCP Toplist](https://mcptoplist.com/badge/glama%2Fheymrun%2Fheym.svg)](https://mcptoplist.com/server/glama%2Fheymrun%2Fheym)
-
 <div align="center">
 
 <br/>
@@ -39,6 +37,7 @@
 [![Bun](https://img.shields.io/badge/Bun-runtime-14151A?style=flat-square&logo=bun&logoColor=white)](https://bun.sh)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docker.com)
 [![Security](https://img.shields.io/badge/Security-policy-2A6F97?style=flat-square)](SECURITY.md)
+[![MCP Toplist](https://mcptoplist.com/badge/glama%2Fheymrun%2Fheym.svg)](https://mcptoplist.com/server/glama%2Fheymrun%2Fheym)
 
 <br/>
 
@@ -57,6 +56,18 @@ Heym is an **AI-native automation platform** built from the ground up around LLM
 Unlike platforms that started as classic trigger-action automation and layered AI on later, in Heym **AI is the execution model**.
 
 Explore the product site at **[heym.run](https://heym.run)**.
+
+## 🎬 Product Tour
+
+One e-commerce sales campaign, followed end to end: workflow generation with the AI Assistant, human review, board execution, structured data, dashboards, traces, RAG, MCP, analytics, and team collaboration.
+
+<div align="center">
+
+<a href="https://www.youtube.com/watch?v=CWUy2zynCqc">
+  <img src="https://img.youtube.com/vi/CWUy2zynCqc/maxresdefault.jpg" width="100%" alt="Watch the Heym product tour on YouTube"/>
+</a>
+
+</div>
 
 ## Build, Observe, Call
 
