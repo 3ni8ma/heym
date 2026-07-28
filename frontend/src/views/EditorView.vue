@@ -517,9 +517,13 @@ function isTypingTarget(target: EventTarget | null): boolean {
 async function handleKeyDown(event: KeyboardEvent): Promise<void> {
   const isMeta = event.metaKey || event.ctrlKey;
 
-  // Run Workflow: Ctrl+Enter — works even when an input/textarea is focused
+  // Run Workflow: Ctrl+Enter — works even when an input/textarea is focused.
+  // Expression evaluate dialog owns this shortcut while open (apply + close).
   if (isMeta && event.key === "Enter") {
     if (showCommandPalette.value) {
+      return;
+    }
+    if (document.querySelector("[data-expression-evaluate-dialog]")) {
       return;
     }
     event.preventDefault();

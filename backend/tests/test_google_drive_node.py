@@ -302,7 +302,7 @@ class TestBlankOptionalFields(GoogleDriveNodeTestBase):
         self.assertEqual(kwargs["new_parent_id"], "")
         self.assertIsNone(kwargs["content"])
 
-    def test_blank_max_results_falls_back_to_default(self) -> None:
+    def test_blank_max_results_fetches_all(self) -> None:
         from app.services.node_execution.nodes import google_drive_node
 
         self.service.list_folder_files.return_value = {"status": "success"}
@@ -315,7 +315,22 @@ class TestBlankOptionalFields(GoogleDriveNodeTestBase):
                 }
             )
         )
-        self.assertEqual(self.service.list_folder_files.call_args.kwargs["max_results"], 100)
+        self.assertIsNone(self.service.list_folder_files.call_args.kwargs["max_results"])
+
+    def test_zero_max_results_fetches_all(self) -> None:
+        from app.services.node_execution.nodes import google_drive_node
+
+        self.service.list_folder_files.return_value = {"status": "success"}
+        google_drive_node.execute(
+            _ctx(
+                {
+                    "credentialId": "cred-1",
+                    "gdOperation": "listFolderFiles",
+                    "gdMaxResults": "0",
+                }
+            )
+        )
+        self.assertIsNone(self.service.list_folder_files.call_args.kwargs["max_results"])
 
     def test_expressions_still_resolve(self) -> None:
         """The blank-field guard must not stop real templates from being evaluated."""

@@ -4376,7 +4376,7 @@ Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `l
   - `gdOperation`: Operation type - "listFolderFiles" | "downloadFile" | "syncToHeymDrive" | "updateFile" | "removeFile" | "removeFolder"
   - `gdFolderId`: Folder ID or full Drive folder URL (listFolderFiles, removeFolder). Empty means the Drive root. Supports expressions.
   - `gdFileId`: File ID or full Drive/Docs URL (downloadFile, syncToHeymDrive, updateFile, removeFile). Supports expressions.
-  - `gdMaxResults`: for `listFolderFiles` — maximum files to return, default 100. Supports expressions.
+  - `gdMaxResults`: for `listFolderFiles` — maximum files to return, default 100. Empty or `0` pages through the entire folder. Supports expressions.
   - `gdQuery`: for `listFolderFiles` — optional extra Drive query ANDed with the parent filter, e.g. `mimeType='application/pdf'`. Supports expressions.
   - `gdIncludeTrashed`: boolean, optional for `listFolderFiles` — when true, trashed files are included. Default false.
   - `gdExportFormat`: for `downloadFile` and `syncToHeymDrive` — optional `"pdf"` | `"docx"` | `"xlsx"` | `"pptx"` | `"csv"` | `"txt"`. Empty means automatic. Ignored for non-Google-native files.

@@ -85,7 +85,7 @@ These shortcuts are active while the Evaluate dialog is open.
 
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl + Enter` / `Cmd + Enter` | Run the evaluator |
+| `Ctrl + Enter` / `Cmd + Enter` | Apply expression and close the dialog |
 | `Ctrl + Z` / `Cmd + Z` | Undo changes in the expression editor |
 | `Ctrl + Shift + Z` / `Cmd + Shift + Z` | Redo changes in the expression editor |
 | `Ctrl + Y` / `Cmd + Y` | Redo changes in the expression editor (alternate) |
