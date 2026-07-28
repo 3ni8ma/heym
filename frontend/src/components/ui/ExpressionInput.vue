@@ -206,6 +206,12 @@ const lastRunNodeId = ref<string | null>(null);
 const finalResultCopied = ref(false);
 const forceOutputScrollTopOnNextUpdate = ref(false);
 const AUTO_EVALUATE_THROTTLE_MS = 250;
+const COMPLETION_PREVIEW_DEBOUNCE_MS = 180;
+/** Matches the backend batch cap so one keystroke never fans out into an unbounded request. */
+const COMPLETION_PREVIEW_MAX_CANDIDATES = 40;
+/** Candidate expression -> example answer; empty string means "evaluated, no answer to show". */
+const completionPreviews = ref<Map<string, string>>(new Map());
+const dialogSuggestionCursorPos = ref(0);
 /** True while openExpandDialog is applying dialogValue/showExpandDialog so batched watchers do not also schedule auto-eval. */
 const openingExpandDialog = ref(false);
 const hintWorkflowRunLoading = ref(false);
@@ -213,6 +219,8 @@ const suppressNextLoopSelectionAutoEvaluate = ref(false);
 const lastAutoEvaluateStartedAtMs = ref<number | null>(null);
 /** Cleared when opening the inline dropdown so a stale blur timeout cannot hide it (e.g. after Run hint). */
 let inlineBlurHideTimer: ReturnType<typeof setTimeout> | null = null;
+let completionPreviewTimer: ReturnType<typeof setTimeout> | null = null;
+let completionPreviewRequestId = 0;
 let pendingOutputBottomStickTimer: ReturnType<typeof setTimeout> | null = null;
 let autoEvaluateTimer: ReturnType<typeof setTimeout> | null = null;
 let pendingAutoEvaluateShouldResetOutputPathPicker = false;
@@ -793,7 +801,7 @@ const showNavigation = computed((): boolean => props.navigationEnabled && props.
 const canNavigatePrev = computed((): boolean => props.navigationIndex > 0);
 const canNavigateNext = computed((): boolean => props.navigationIndex < props.navigationTotal - 1);
 
-const { getSuggestions, applyCompletion } = useExpressionCompletion({
+const { getSuggestions, applyCompletion, parseExpressionContext } = useExpressionCompletion({
   get nodes() {
     return props.nodes;
   },
@@ -873,8 +881,17 @@ watch(dialogValue, (): void => {
   scheduleExpressionEvaluation({ resetOutputPathPicker: true });
 });
 
+// Previews are answers against the current run data, so a new run or loop item invalidates them.
+watch([availableNodeResults, selectedLoopIterationIndex], (): void => {
+  resetCompletionPreviews();
+  if (showExpandDialog.value && showDialogDropdown.value) {
+    scheduleCompletionPreviews();
+  }
+});
+
 watch(showExpandDialog, (isOpen): void => {
   if (!isOpen) {
+    resetCompletionPreviews();
     clearAutoEvaluateTimer();
     pendingAutoEvaluateShouldResetOutputPathPicker = false;
     queuedEvaluateAfterCurrentRun = false;
@@ -1282,6 +1299,127 @@ function updateSuggestions(): void {
   }
 }
 
+/**
+ * Zero-argument calls and bare properties evaluate on their own, so they can be previewed.
+ * Argument-taking ones (map/filter/replace/...) only mean something once the user fills them in.
+ */
+function isPreviewableCompletion(suggestion: CompletionSuggestion): boolean {
+  if (suggestion.type === "hint") {
+    return false;
+  }
+  if (!suggestion.insertText.includes("(")) {
+    return true;
+  }
+  return /^[A-Za-z_][A-Za-z0-9_]*\(\)$/.test(suggestion.insertText);
+}
+
+/** The full `$…` expression this suggestion would produce, used as the preview cache key. */
+function completionPreviewExpression(suggestion: CompletionSuggestion): string | null {
+  const { newText, newCursorPos } = applyCompletion(
+    dialogValue.value,
+    dialogSuggestionCursorPos.value,
+    suggestion,
+  );
+  const match = findDollarExpressions(newText).find(
+    (expression) => newCursorPos >= expression.start && newCursorPos <= expression.end,
+  );
+  return match ? match.expr : null;
+}
+
+/** Candidate expression per dropdown row (null when that row cannot be previewed). */
+const dialogSuggestionPreviewExpressions = computed((): (string | null)[] => {
+  if (!showDialogDropdown.value || dialogSuggestions.value.length === 0) {
+    return [];
+  }
+
+  const context = parseExpressionContext(dialogValue.value, dialogSuggestionCursorPos.value);
+  // Only method/property chains on an existing `$…` reference resolve to a standalone value.
+  if (!context || context.triggerKind !== "property" || context.isInsideFilterExpr) {
+    return [];
+  }
+
+  return dialogSuggestions.value.map((suggestion) =>
+    isPreviewableCompletion(suggestion) ? completionPreviewExpression(suggestion) : null,
+  );
+});
+
+function dialogSuggestionPreview(index: number): string {
+  const expression = dialogSuggestionPreviewExpressions.value[index];
+  if (!expression) {
+    return "";
+  }
+  return completionPreviews.value.get(expression) ?? "";
+}
+
+function clearCompletionPreviewTimer(): void {
+  if (completionPreviewTimer !== null) {
+    clearTimeout(completionPreviewTimer);
+    completionPreviewTimer = null;
+  }
+}
+
+function resetCompletionPreviews(): void {
+  clearCompletionPreviewTimer();
+  completionPreviewRequestId += 1;
+  completionPreviews.value = new Map();
+}
+
+function scheduleCompletionPreviews(): void {
+  clearCompletionPreviewTimer();
+  completionPreviewTimer = setTimeout((): void => {
+    completionPreviewTimer = null;
+    void fetchCompletionPreviews();
+  }, COMPLETION_PREVIEW_DEBOUNCE_MS);
+}
+
+async function fetchCompletionPreviews(): Promise<void> {
+  const workflowId = workflowStore.currentWorkflow?.id;
+  const currentNodeId = props.currentNodeId;
+  if (!workflowId || !currentNodeId || !showExpandDialog.value || !showDialogDropdown.value) {
+    return;
+  }
+
+  const pending = [
+    ...new Set(
+      dialogSuggestionPreviewExpressions.value.filter(
+        (expression): expression is string =>
+          expression !== null && !completionPreviews.value.has(expression),
+      ),
+    ),
+  ].slice(0, COMPLETION_PREVIEW_MAX_CANDIDATES);
+  if (pending.length === 0) {
+    return;
+  }
+
+  const requestId = ++completionPreviewRequestId;
+  try {
+    const response = await expressionApi.previewCompletions({
+      expressions: pending,
+      workflow_id: workflowId,
+      current_node_id: currentNodeId,
+      field_name: props.dialogKeyLabel || undefined,
+      input_body: workflowStore.buildExecutionRequestBody(),
+      selected_loop_iteration_index: selectedLoopIterationIndex.value,
+      node_results: availableNodeResults.value.map((result) => ({
+        node_id: result.node_id,
+        label: result.node_label,
+        output: result.output,
+      })),
+    });
+    if (requestId !== completionPreviewRequestId) {
+      return;
+    }
+
+    const nextPreviews = new Map(completionPreviews.value);
+    for (const item of response.previews) {
+      nextPreviews.set(item.expression, item.preview ?? "");
+    }
+    completionPreviews.value = nextPreviews;
+  } catch {
+    // Previews are advisory: a failed batch just leaves those rows blank.
+  }
+}
+
 function updateDialogSuggestions(): void {
   const element = dialogTextareaRef.value;
   if (!element) {
@@ -1290,10 +1428,14 @@ function updateDialogSuggestions(): void {
 
   const cursorPos = element.selectionStart || 0;
   dialogSuggestions.value = getSuggestions(dialogValue.value, cursorPos);
+  dialogSuggestionCursorPos.value = cursorPos;
   dialogSelectedIndex.value = 0;
   showDialogDropdown.value = dialogSuggestions.value.length > 0;
   if (showDialogDropdown.value) {
     updateDialogDropdownPosition();
+    scheduleCompletionPreviews();
+  } else {
+    clearCompletionPreviewTimer();
   }
 }
 
@@ -2217,6 +2359,7 @@ onUnmounted((): void => {
   unsubDismissOverlays?.();
   clearInlineBlurHideTimer();
   clearAutoEvaluateTimer();
+  clearCompletionPreviewTimer();
   clearPendingOutputBottomStickTimer();
   clearFinalResultCopyResetTimer();
 });
@@ -2865,12 +3008,23 @@ defineExpose({
                       :is="getTypeIcon(suggestion)"
                       :class="cn('h-4 w-4 shrink-0', getTypeColor(suggestion))"
                     />
-                    <span class="flex-1 font-mono">{{ suggestion.label }}</span>
+                    <span class="shrink-0 font-mono">{{ suggestion.label }}</span>
                     <span
                       v-if="suggestion.detail"
-                      class="text-xs text-muted-foreground"
+                      class="min-w-0 flex-1 truncate text-xs text-muted-foreground"
                     >
                       {{ suggestion.detail }}
+                    </span>
+                    <span
+                      v-else
+                      class="flex-1"
+                    />
+                    <span
+                      v-if="dialogSuggestionPreview(index)"
+                      class="max-w-[45%] shrink-0 truncate font-mono text-xs font-bold text-foreground"
+                      :title="dialogSuggestionPreview(index)"
+                    >
+                      {{ dialogSuggestionPreview(index) }}
                     </span>
                   </button>
                 </template>

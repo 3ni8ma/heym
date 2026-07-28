@@ -1321,7 +1321,10 @@ export function useExpressionCompletion(
           ? `${prefix}${context.nodeLabel}.${context.propertyPath.join(".")}.`
           : `${prefix}${context.nodeLabel}.`;
 
-      const fullExpression = basePath + insertText;
+      // Index suggestions attach directly to the path: `$node.items[0]`, never `$node.items.[0]`.
+      const fullExpression = insertText.startsWith("[")
+        ? basePath.slice(0, -1) + insertText
+        : basePath + insertText;
       const newText = beforeExpression + fullExpression + afterCursor;
 
       let newCursorPos = beforeExpression.length + fullExpression.length;

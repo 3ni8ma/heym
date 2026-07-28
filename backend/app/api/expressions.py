@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
@@ -40,6 +41,11 @@ router = APIRouter()
 # Enough room for brief reasoning plus long expressions; low values truncate completions and break parsing.
 EXPRESSION_GENERATE_MAX_OUTPUT_TOKENS = 8192
 
+# One keystroke can offer a full method list; cap the batch so a single request stays bounded.
+COMPLETION_PREVIEW_MAX_EXPRESSIONS = 40
+# Previews sit on one dropdown row, so keep them short instead of shipping whole payloads.
+COMPLETION_PREVIEW_MAX_CHARS = 160
+
 
 class NodeResultItem(BaseModel):
     """A node result supplied by the frontend canvas after a test run."""
@@ -49,16 +55,44 @@ class NodeResultItem(BaseModel):
     output: Any
 
 
-class ExpressionEvaluateRequest(BaseModel):
-    """Request payload for the unified expression evaluator endpoint."""
+class ExpressionContextRequest(BaseModel):
+    """Evaluation context shared by the evaluate and completion-preview endpoints."""
 
-    expression: str = Field(..., max_length=EXPRESSION_MAX_LENGTH)
     workflow_id: UUID
     current_node_id: str
     field_name: str | None = None
     input_body: Any = None
     selected_loop_iteration_index: int | None = None
     node_results: list[NodeResultItem] = Field(default_factory=list)
+
+
+class ExpressionEvaluateRequest(ExpressionContextRequest):
+    """Request payload for the unified expression evaluator endpoint."""
+
+    expression: str = Field(..., max_length=EXPRESSION_MAX_LENGTH)
+
+
+class ExpressionCompletionPreviewRequest(ExpressionContextRequest):
+    """Candidate expressions from the autocomplete dropdown, one per suggestion row."""
+
+    expressions: list[str] = Field(
+        default_factory=list,
+        max_length=COMPLETION_PREVIEW_MAX_EXPRESSIONS,
+    )
+
+
+class ExpressionCompletionPreviewItem(BaseModel):
+    """Preview for one candidate; `preview` is null when the candidate has no answer."""
+
+    expression: str
+    preview: str | None = None
+    result_type: str | None = None
+
+
+class ExpressionCompletionPreviewResponse(BaseModel):
+    """Previews in the same order as the requested expressions."""
+
+    previews: list[ExpressionCompletionPreviewItem]
 
 
 class ExpressionGeneratePriorAttempt(BaseModel):
@@ -286,18 +320,23 @@ async def get_workflow_by_id(
     return await get_workflow_for_user(db, workflow_id, user.id)
 
 
-@router.post(
-    "/evaluate",
-    response_model=ExpressionEvaluateResponse,
-    status_code=status.HTTP_200_OK,
-)
-async def evaluate_expression(
-    request: ExpressionEvaluateRequest,
+@dataclass
+class EvaluationSetup:
+    """Everything needed to evaluate expressions for one canvas evaluation request."""
+
+    service: ExpressionEvaluatorService
+    context: dict[str, Any]
+    workflow_nodes: list[Any]
+    workflow_edges: list[Any]
+
+
+async def build_evaluation_setup(
+    request: ExpressionContextRequest,
     http_request: Request,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> ExpressionEvaluateResponse:
-    """Evaluate an expression or template using pinned data and last-run node outputs."""
+    db: AsyncSession,
+    current_user: User,
+) -> EvaluationSetup:
+    """Load the workflow and build the evaluator context shared by both evaluate endpoints."""
     workflow = await get_workflow_by_id(request.workflow_id, db, current_user)
     if workflow is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workflow not found")
@@ -343,19 +382,112 @@ async def evaluate_expression(
         workflow_description=workflow.description or "",
         public_base_url=build_public_base_url(http_request),
     )
-    response = service.evaluate(
+    return EvaluationSetup(
+        service=service,
+        context=context,
+        workflow_nodes=workflow_nodes,
+        workflow_edges=workflow_edges,
+    )
+
+
+def format_completion_preview(
+    evaluated: ExpressionEvaluateResponse,
+    expression: str,
+) -> str | None:
+    """Render a one-line example answer, or None when the candidate produced no answer."""
+    if evaluated.error is not None or evaluated.result is None:
+        return None
+
+    value = evaluated.result
+    # Unresolved references echo the source text back; that is not an answer worth showing.
+    if isinstance(value, str) and value.strip() == expression.strip():
+        return None
+
+    try:
+        rendered = json.dumps(value, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        rendered = str(value)
+
+    collapsed = " ".join(rendered.split())
+    if not collapsed:
+        return None
+    if len(collapsed) > COMPLETION_PREVIEW_MAX_CHARS:
+        return collapsed[: COMPLETION_PREVIEW_MAX_CHARS - 1] + "…"
+    return collapsed
+
+
+@router.post(
+    "/evaluate",
+    response_model=ExpressionEvaluateResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def evaluate_expression(
+    request: ExpressionEvaluateRequest,
+    http_request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ExpressionEvaluateResponse:
+    """Evaluate an expression or template using pinned data and last-run node outputs."""
+    setup = await build_evaluation_setup(request, http_request, db, current_user)
+    response = setup.service.evaluate(
         request.expression,
-        context,
+        setup.context,
         current_node_id=request.current_node_id,
     )
     response.selected_loop_total = get_selected_loop_total(
-        workflow_nodes,
-        workflow_edges,
+        setup.workflow_nodes,
+        setup.workflow_edges,
         request.current_node_id,
-        context,
-        service,
+        setup.context,
+        setup.service,
     )
     return response
+
+
+@router.post(
+    "/completion-previews",
+    response_model=ExpressionCompletionPreviewResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def preview_completion_expressions(
+    request: ExpressionCompletionPreviewRequest,
+    http_request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> ExpressionCompletionPreviewResponse:
+    """Evaluate autocomplete candidates so the dialog can show an example answer per suggestion."""
+    if not request.expressions:
+        return ExpressionCompletionPreviewResponse(previews=[])
+
+    setup = await build_evaluation_setup(request, http_request, db, current_user)
+
+    previews: list[ExpressionCompletionPreviewItem] = []
+    for expression in request.expressions:
+        candidate = expression.strip()
+        if not candidate or len(candidate) > EXPRESSION_MAX_LENGTH:
+            previews.append(ExpressionCompletionPreviewItem(expression=expression))
+            continue
+
+        try:
+            evaluated = setup.service.evaluate(
+                candidate,
+                setup.context,
+                current_node_id=request.current_node_id,
+            )
+        except Exception:
+            # A broken candidate is expected here - it must leave its row blank, not fail the batch.
+            previews.append(ExpressionCompletionPreviewItem(expression=expression))
+            continue
+
+        previews.append(
+            ExpressionCompletionPreviewItem(
+                expression=expression,
+                preview=format_completion_preview(evaluated, candidate),
+                result_type=evaluated.result_type if evaluated.error is None else None,
+            )
+        )
+
+    return ExpressionCompletionPreviewResponse(previews=previews)
 
 
 @router.post(
