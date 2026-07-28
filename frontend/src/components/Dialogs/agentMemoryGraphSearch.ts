@@ -60,12 +60,16 @@ function edgeMatchesSearch(edge: AgentMemoryEdgeDTO, tokens: string[]): boolean 
 }
 
 export interface MemoryGraphSearchResult {
-  /** Entities whose own text matched, plus both ends of every relationship that matched. */
   visibleNodeIds: Set<string>;
-  /** Relationships between two visible entities — everything else is unrelated to the query. */
   visibleEdgeIds: Set<string>;
 }
 
+/**
+ * An entity hit brings its whole neighbourhood: every relationship it takes part in and the
+ * entity on the far side of each. A relationship hit brings only the two entities it joins and
+ * stops there — searching a relation type is a question about that relation, so the ends' own
+ * other relationships are not part of the answer.
+ */
 export function searchMemoryGraph(
   nodes: AgentMemoryNodeDTO[],
   edges: AgentMemoryEdgeDTO[],
@@ -78,20 +82,28 @@ export function searchMemoryGraph(
     };
   }
 
-  const visibleNodeIds = new Set<string>();
+  const hitNodeIds = new Set<string>();
   for (const node of nodes) {
     if (nodeMatchesSearch(node, tokens)) {
-      visibleNodeIds.add(node.id);
-    }
-  }
-  for (const edge of edges) {
-    if (edgeMatchesSearch(edge, tokens)) {
-      visibleNodeIds.add(edge.source_node_id);
-      visibleNodeIds.add(edge.target_node_id);
+      hitNodeIds.add(node.id);
     }
   }
 
+  const visibleNodeIds = new Set(hitNodeIds);
   const visibleEdgeIds = new Set<string>();
+  for (const edge of edges) {
+    const expandsFromEntityHit =
+      hitNodeIds.has(edge.source_node_id) || hitNodeIds.has(edge.target_node_id);
+    if (!expandsFromEntityHit && !edgeMatchesSearch(edge, tokens)) {
+      continue;
+    }
+    visibleEdgeIds.add(edge.id);
+    visibleNodeIds.add(edge.source_node_id);
+    visibleNodeIds.add(edge.target_node_id);
+  }
+
+  // A relationship between two entities that are both on screen is worth drawing even when
+  // neither end was a hit (both arrived as neighbours of one).
   for (const edge of edges) {
     if (visibleNodeIds.has(edge.source_node_id) && visibleNodeIds.has(edge.target_node_id)) {
       visibleEdgeIds.add(edge.id);

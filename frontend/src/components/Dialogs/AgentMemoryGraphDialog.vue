@@ -138,31 +138,16 @@ const workflowStore = useWorkflowStore();
 
 const flowPaneRef = ref<InstanceType<typeof AgentMemoryGraphFlowPane> | null>(null);
 const dialogContentRef = ref<HTMLElement | null>(null);
-/** Vue Flow canvas subtree (layout ref only; undo uses document capture scoped to dialog body). */
-const graphAreaRef = ref<HTMLElement | null>(null);
+/**
+ * Expands the canvas and the sidebar together to cover the viewport. Deliberately a fixed-inset
+ * overlay rather than the browser Fullscreen API: the browser consumes Escape itself to leave
+ * fullscreen, which would collapse the canvas before the search box ever got the key (see
+ * handleDialogEscape for the order the two are supposed to unwind in).
+ */
 const graphCanvasFullscreen = ref(false);
 
-function syncGraphCanvasFullscreen(): void {
-  const el = graphAreaRef.value;
-  graphCanvasFullscreen.value = Boolean(
-    el && document.fullscreenElement && document.fullscreenElement === el,
-  );
-}
-
-async function toggleGraphCanvasFullscreen(): Promise<void> {
-  const el = graphAreaRef.value;
-  if (!el) {
-    return;
-  }
-  try {
-    if (document.fullscreenElement === el) {
-      await document.exitFullscreen();
-    } else {
-      await el.requestFullscreen();
-    }
-  } catch {
-    showToast("Fullscreen is not available in this browser", "error");
-  }
+function toggleGraphCanvasFullscreen(): void {
+  graphCanvasFullscreen.value = !graphCanvasFullscreen.value;
 }
 
 const loading = ref(false);
@@ -990,7 +975,6 @@ watch(
   async (open) => {
     if (open) {
       document.addEventListener("keydown", onDocumentUndoCapture, true);
-      document.addEventListener("fullscreenchange", syncGraphCanvasFullscreen);
       await nextTick();
       dialogContentRef.value?.focus({ preventScroll: true });
       requestAnimationFrame(() => {
@@ -1001,15 +985,6 @@ watch(
       clearSearchSettleTimer();
       collapseSearch();
       document.removeEventListener("keydown", onDocumentUndoCapture, true);
-      document.removeEventListener("fullscreenchange", syncGraphCanvasFullscreen);
-      const gEl = graphAreaRef.value;
-      if (gEl && document.fullscreenElement === gEl) {
-        try {
-          await document.exitFullscreen();
-        } catch {
-          /* ignore */
-        }
-      }
       graphCanvasFullscreen.value = false;
       needleAnimating.value = false;
       tooltipState.value = null;
@@ -1031,7 +1006,6 @@ onUnmounted(() => {
     clearTimeout(dimmingClearTimer);
   }
   document.removeEventListener("keydown", onDocumentUndoCapture, true);
-  document.removeEventListener("fullscreenchange", syncGraphCanvasFullscreen);
 });
 
 watch(graphCanvasFullscreen, (fs, wasFs) => {
@@ -1512,10 +1486,16 @@ function handleDialogEscape(event: KeyboardEvent): void {
   }
   event.preventDefault();
   event.stopImmediatePropagation();
-  // Dialog listens on window in the capture phase, so Escape can only be intercepted here —
-  // an @keydown handler on the search input itself would never run.
+  // Unwinds innermost first: clear the query, then put the search box away, then leave
+  // fullscreen, and only close the dialog once none of those are open. Dialog listens on window
+  // in the capture phase, so this is the only place Escape can be intercepted — a @keydown
+  // handler on the search input itself would never run.
   if (searchExpanded.value) {
     clearOrCollapseSearch();
+    return;
+  }
+  if (graphCanvasFullscreen.value) {
+    graphCanvasFullscreen.value = false;
     return;
   }
   emit("close");
@@ -1644,11 +1624,11 @@ function handleDialogEscape(event: KeyboardEvent): void {
       <div
         v-else
         class="grid grid-cols-1 lg:grid-cols-[1fr_minmax(17.5rem,21rem)] gap-3 flex-1 min-h-0 overflow-hidden items-stretch"
+        :class="{ 'agent-memory-graph-fs-root': graphCanvasFullscreen }"
       >
         <div
-          ref="graphAreaRef"
           class="agent-memory-graph-flow relative flex flex-col border border-border rounded-lg overflow-hidden bg-muted/30 min-h-[220px] h-[min(42vh,360px)] max-h-[50vh] lg:h-full lg:max-h-none lg:min-h-0"
-          :class="{ 'agent-memory-graph-canvas-fs': graphCanvasFullscreen, 'needles-spinning': needleAnimating, 'compact-mode': labelsHidden }"
+          :class="{ 'needles-spinning': needleAnimating, 'compact-mode': labelsHidden }"
         >
           <AgentMemoryGraphFlowPane
             v-if="flowNodes.length"
@@ -1827,8 +1807,8 @@ function handleDialogEscape(event: KeyboardEvent): void {
           >
             <Wand2 class="w-4 h-4" />
           </Button>
-          <!-- Compact-mode-only hover popover: position:fixed escapes overflow:hidden AND stays
-               inside the browser-fullscreen element's subtree (unlike Teleport to body). -->
+          <!-- Compact-mode-only hover popover: position:fixed escapes the ancestors'
+               overflow:hidden and outranks the expanded canvas overlay. -->
           <div
             v-if="tooltipState"
             class="fixed z-[9999] pointer-events-none max-w-[240px] rounded-md border border-border/60 bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-lg whitespace-pre-wrap break-words leading-relaxed"
@@ -2109,14 +2089,27 @@ function handleDialogEscape(event: KeyboardEvent): void {
   --vf-node-text: hsl(var(--foreground));
 }
 
-.agent-memory-graph-flow.agent-memory-graph-canvas-fs {
+/* Fullscreen covers the canvas and the sidebar together, so the edit/new-entity panel stays on
+   the right instead of being left behind on the hidden page. */
+.agent-memory-graph-fs-root {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
   height: 100vh !important;
-  min-height: 100vh !important;
   max-height: 100vh !important;
-  border-radius: 0;
+  padding: 0.75rem;
+  background: hsl(var(--background));
+  /* Not the lg: breakpoint — fullscreen must keep the sidebar beside the canvas at any width. */
+  grid-template-columns: minmax(0, 1fr) minmax(17.5rem, 21rem);
 }
 
-.agent-memory-graph-canvas-fs :deep(.agent-memory-vue-flow) {
+.agent-memory-graph-fs-root .agent-memory-graph-flow {
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: none !important;
+}
+
+.agent-memory-graph-fs-root :deep(.agent-memory-vue-flow) {
   flex: 1 1 0;
   min-height: 0;
   height: 100%;
