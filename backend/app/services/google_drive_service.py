@@ -175,9 +175,7 @@ class GoogleDriveService:
         files: list[dict[str, Any]] = []
         page_token = ""
         while max_results is None or len(files) < max_results:
-            remaining = (
-                _MAX_PAGE_SIZE if max_results is None else max_results - len(files)
-            )
+            remaining = _MAX_PAGE_SIZE if max_results is None else max_results - len(files)
             params: dict[str, Any] = {
                 "q": " and ".join(clauses),
                 "pageSize": min(remaining, _MAX_PAGE_SIZE),
