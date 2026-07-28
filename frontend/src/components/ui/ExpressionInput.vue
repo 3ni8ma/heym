@@ -189,6 +189,15 @@ const dialogSelectionEnd = ref(0);
 const dialogHistory = ref<DialogHistoryEntry[]>([]);
 const dialogHistoryIndex = ref(-1);
 const applyingDialogHistory = ref(false);
+const navigatorPlatformIsMac = computed((): boolean => {
+  if (typeof navigator === "undefined") {
+    return false;
+  }
+  return (
+    navigator.platform.toLowerCase().startsWith("mac") ||
+    navigator.userAgent.includes("Mac")
+  );
+});
 const lastRunRequestNodeResults = ref<EvaluatedNodeResultInput[] | null>(null);
 const lastRunDialogSnapshot = ref<string | null>(null);
 const lastInspectedSignature = ref<string | null>(null);
@@ -1492,7 +1501,8 @@ function handleDialogShortcutKeyDown(event: KeyboardEvent): void {
     event.preventDefault();
     event.stopPropagation();
     event.stopImmediatePropagation();
-    applyDialogChanges({ closeDialog: false });
+    // Match the Apply button: write the value back and close the dialog.
+    applyDialogChanges();
     return;
   }
 
@@ -2438,6 +2448,7 @@ defineExpose({
         />
 
         <div
+          data-expression-evaluate-dialog
           class="pointer-events-auto relative z-10 mx-3 flex h-[min(92dvh,900px)] w-[min(96vw,1400px)] flex-col overflow-hidden rounded-lg border bg-background shadow-2xl sm:mx-4"
         >
           <div
@@ -2938,10 +2949,14 @@ defineExpose({
               </button>
               <button
                 type="button"
-                class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                class="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90"
+                :title="navigatorPlatformIsMac ? 'Apply (⌘Enter)' : 'Apply (Ctrl+Enter)'"
                 @click="applyDialogChanges()"
               >
                 Apply
+                <span class="text-[11px] font-normal tracking-wide text-primary-foreground/90">{{
+                  navigatorPlatformIsMac ? "⌘↵" : "⌃↵"
+                }}</span>
               </button>
             </div>
           </div>

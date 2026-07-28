@@ -255,6 +255,30 @@ class TestListFolderFiles(unittest.TestCase):
 
         self.assertEqual(result["count"], 2)
 
+    def test_none_max_results_pages_until_exhausted(self) -> None:
+        service = _valid_service()
+        page1 = MagicMock()
+        page1.status_code = 200
+        page1.json.return_value = {
+            "files": [{"id": "f1", "name": "n1", "mimeType": "text/plain"}],
+            "nextPageToken": "token-2",
+        }
+        page2 = MagicMock()
+        page2.status_code = 200
+        page2.json.return_value = {
+            "files": [{"id": "f2", "name": "n2", "mimeType": "text/plain"}],
+        }
+
+        with patch(
+            "app.services.google_drive_service.httpx.get", side_effect=[page1, page2]
+        ) as get:
+            result = service.list_folder_files("folder-1", max_results=None)
+
+        self.assertEqual(get.call_count, 2)
+        self.assertEqual(get.call_args_list[0].kwargs["params"]["pageSize"], 1000)
+        self.assertEqual(result["count"], 2)
+        self.assertEqual([f["id"] for f in result["files"]], ["f1", "f2"])
+
 
 class TestDownloadFile(unittest.TestCase):
     def test_binary_file_uses_alt_media(self) -> None:

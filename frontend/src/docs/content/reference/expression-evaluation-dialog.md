@@ -14,7 +14,7 @@ The Expression Evaluation Dialog is the expanded editor for expression-capable f
 - The header shows **Evaluate — {field name}** when the field label is known.
 - The editor keeps autocomplete, field-to-field navigation, and the usual **Apply** / **Cancel** actions.
 - The preview refreshes automatically about **300 ms** after you stop typing.
-- Press `Ctrl` / `Cmd` + `Enter` to apply the current text back to the field without closing the dialog.
+- Press `Ctrl` / `Cmd` + `Enter` to apply the current text back to the field and close the dialog (same as **Apply**).
 
 ## Output Section
 
@@ -88,7 +88,7 @@ The generator receives the node outputs from the last test run on the canvas. If
 | Shortcut | Action |
 |---|---|
 | Typing pause (~300 ms) | Refresh backend preview |
-| `Ctrl` / `Cmd` + `Enter` | Apply without closing |
+| `Ctrl` / `Cmd` + `Enter` | Apply and close the dialog |
 | `Escape` | Close autocomplete first, otherwise close the dialog |
 
 ## Nested `$` in method arguments

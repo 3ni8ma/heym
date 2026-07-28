@@ -154,11 +154,16 @@ class GoogleDriveService:
     def list_folder_files(
         self,
         folder_id: str,
-        max_results: int = 100,
+        max_results: int | None = 100,
         query: str = "",
         include_trashed: bool = False,
     ) -> dict:
-        """List files inside a folder. Empty folder_id lists the Drive root."""
+        """List files inside a folder. Empty folder_id lists the Drive root.
+
+        Pass ``max_results=None`` to page through the entire folder (Drive pageSize
+        is still capped at 1000 per request). Each file includes ``size_bytes`` when
+        Google reports a size (folders and Google-native docs are ``null``).
+        """
         target = parse_drive_id(folder_id) or "root"
         clauses = [f"'{target}' in parents"]
         if not include_trashed:
@@ -169,8 +174,8 @@ class GoogleDriveService:
 
         files: list[dict[str, Any]] = []
         page_token = ""
-        while len(files) < max_results:
-            remaining = max_results - len(files)
+        while max_results is None or len(files) < max_results:
+            remaining = _MAX_PAGE_SIZE if max_results is None else max_results - len(files)
             params: dict[str, Any] = {
                 "q": " and ".join(clauses),
                 "pageSize": min(remaining, _MAX_PAGE_SIZE),
@@ -206,7 +211,8 @@ class GoogleDriveService:
             if not page_token:
                 break
 
-        files = files[:max_results]
+        if max_results is not None:
+            files = files[:max_results]
         return {
             "status": "success",
             "operation": "listFolderFiles",

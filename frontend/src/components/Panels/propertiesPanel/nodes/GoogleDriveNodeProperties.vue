@@ -133,11 +133,11 @@ const {
       <!-- listFolderFiles extras -->
       <template v-if="selectedNode.data.gdOperation === 'listFolderFiles'">
         <div class="space-y-2">
-          <Label>Max Results</Label>
+          <Label>Max Results (optional)</Label>
           <ExpressionInput
             ref="googleDriveMaxResultsExpressionInputRef"
-            :model-value="selectedNode.data.gdMaxResults || '100'"
-            placeholder="100"
+            :model-value="selectedNode.data.gdMaxResults ?? '100'"
+            placeholder="100 — leave empty or 0 for all"
             :nodes="workflowStore.nodes"
             :node-results="workflowStore.nodeResults"
             :edges="workflowStore.edges"
@@ -152,6 +152,10 @@ const {
             @register-field-index="onGoogleDriveRegisterExpressionFieldIndex"
             @update:model-value="updateNodeData('gdMaxResults', $event)"
           />
+          <p class="text-xs text-muted-foreground">
+            Caps how many files are returned. Empty or <code>0</code> loads the whole folder
+            (paged). Each file includes <code>size_bytes</code> when Drive reports a size.
+          </p>
         </div>
 
         <div class="space-y-2">

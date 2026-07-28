@@ -157,13 +157,21 @@ def execute(ctx: NodeExecutionContext) -> object:
         service = GoogleDriveService(credential_id, gd_config, db)
 
         if operation == "listFolderFiles":
-            raw_max = field("gdMaxResults", "100")
-            try:
-                max_results = int(float(raw_max or "100"))
-            except (ValueError, TypeError):
-                max_results = 100
-            if max_results < 1:
-                max_results = 100
+            raw_max_value = node_data.get("gdMaxResults")
+            if raw_max_value is None:
+                max_results: int | None = 100
+            else:
+                stripped = field("gdMaxResults").strip()
+                # Empty or 0 = page through the entire folder (optional unlimited listing).
+                if stripped == "" or stripped == "0":
+                    max_results = None
+                else:
+                    try:
+                        max_results = int(float(stripped))
+                    except (ValueError, TypeError):
+                        max_results = 100
+                    if max_results < 1:
+                        max_results = 100
             return service.list_folder_files(
                 field("gdFolderId"),
                 max_results=max_results,

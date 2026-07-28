@@ -21,7 +21,7 @@ The **Google Drive** node lists, downloads, updates, and deletes files and folde
 | `gdOperation` | string | Operation: `listFolderFiles`, `downloadFile`, `syncToHeymDrive`, `updateFile`, `removeFile`, `removeFolder` |
 | `gdFolderId` | expression | Folder ID or full Drive folder URL. Used by `listFolderFiles` and `removeFolder`. Empty means the Drive root. |
 | `gdFileId` | expression | File ID or full Drive/Docs URL. Used by `downloadFile`, `syncToHeymDrive`, `updateFile`, `removeFile`. |
-| `gdMaxResults` | expression | For `listFolderFiles`: maximum files to return (default 100). |
+| `gdMaxResults` | expression | For `listFolderFiles`: max files to return (default 100). Empty or `0` loads the whole folder via paging. Each listed file includes `size_bytes` when Drive reports a size. |
 | `gdQuery` | expression | For `listFolderFiles`: extra Drive query ANDed with the folder filter, e.g. `mimeType='application/pdf'`. |
 | `gdIncludeTrashed` | boolean | For `listFolderFiles`: include trashed files. Default false. |
 | `gdExportFormat` | string | For `downloadFile` / `syncToHeymDrive`: `pdf`, `docx`, `xlsx`, `pptx`, `csv`, `txt`. Empty means automatic. Ignored for regular files. |
