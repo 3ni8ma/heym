@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import type { Edge, Node } from "@vue-flow/core";
-import { Eye, EyeOff, Maximize2, Minimize2, RefreshCw, Trash2, Wand2 } from "lucide-vue-next";
+import { Eye, EyeOff, Maximize2, Minimize2, RefreshCw, Search, Trash2, Wand2, X } from "lucide-vue-next";
 
 import { REVEAL_DURATION_MS } from "@/components/Dialogs/AgentMemoryGraphEdge.vue";
 import AgentMemoryGraphFlowPane from "@/components/Dialogs/AgentMemoryGraphFlowPane.vue";
+import { parseSearchTokens, searchMemoryGraph } from "@/components/Dialogs/agentMemoryGraphSearch";
 import {
   clusterColorForType,
   computeDegrees,
@@ -175,10 +176,99 @@ const knownPositions = ref<Map<string, { x: number; y: number }>>(new Map());
 
 function captureLivePositions(): void {
   const live = flowPaneRef.value?.snapshotPositions();
-  if (live && live.size > 0) {
-    knownPositions.value = live;
+  if (!live || live.size === 0) {
+    return;
   }
+  // Merge, don't replace: a snapshot only covers rendered nodes, so replacing would discard the
+  // positions of nodes the search filter is currently hiding.
+  const merged = new Map(knownPositions.value);
+  for (const [id, position] of live) {
+    merged.set(id, position);
+  }
+  knownPositions.value = merged;
 }
+
+/** Free-text filter over entity name/type/attributes and relationship type/properties. Anything
+ * that doesn't match (or hang off a match) is removed from the canvas rather than dimmed. */
+const searchQuery = ref("");
+const searchTokens = computed(() => parseSearchTokens(searchQuery.value));
+const searchActive = computed(() => searchTokens.value.length > 0);
+
+const searchResult = computed(() => {
+  const g = graph.value;
+  return searchMemoryGraph(g?.nodes ?? [], g?.edges ?? [], searchTokens.value);
+});
+
+const visibleNodeIds = computed<Set<string>>(() => searchResult.value.visibleNodeIds);
+const visibleEdgeIds = computed<Set<string>>(() => searchResult.value.visibleEdgeIds);
+
+const searchMatchCount = computed(() => visibleNodeIds.value.size);
+const totalNodeCount = computed(() => graph.value?.nodes.length ?? 0);
+
+/** Collapsed to a shortcut button until invoked, so it doesn't sit over the graph unused. */
+const searchExpanded = ref(false);
+const searchInputRef = ref<HTMLInputElement | null>(null);
+
+const isMacPlatform =
+  typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.userAgent);
+const searchShortcutLabel = isMacPlatform ? "⌘F" : "Ctrl F";
+
+async function expandSearch(): Promise<void> {
+  searchExpanded.value = true;
+  await nextTick();
+  searchInputRef.value?.focus();
+  searchInputRef.value?.select();
+}
+
+function collapseSearch(): void {
+  searchExpanded.value = false;
+  searchQuery.value = "";
+}
+
+/** One button, two steps: clear the query first, then put the box away once it's empty. */
+function clearOrCollapseSearch(): void {
+  if (searchQuery.value.length > 0) {
+    searchQuery.value = "";
+    searchInputRef.value?.focus();
+    return;
+  }
+  collapseSearch();
+}
+
+let searchSettleTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearSearchSettleTimer(): void {
+  if (searchSettleTimer === null) {
+    return;
+  }
+  clearTimeout(searchSettleTimer);
+  searchSettleTimer = null;
+}
+
+/** The filter applies per keystroke; only the re-settle/refit is debounced. */
+const SEARCH_SETTLE_DELAY_MS = 220;
+
+watch(searchQuery, () => {
+  // flowNodes is about to change size — snapshot first or survivors snap back (see
+  // captureLivePositions).
+  captureLivePositions();
+  clearSearchSettleTimer();
+  searchSettleTimer = setTimeout(() => {
+    searchSettleTimer = null;
+    if (!props.open) {
+      return;
+    }
+    flowPaneRef.value?.reheat();
+    void fitGraphViewportAfterLayoutChange();
+  }, SEARCH_SETTLE_DELAY_MS);
+});
+
+watch(visibleNodeIds, (ids) => {
+  const selected = selectedNodeId.value;
+  if (selected !== null && !ids.has(selected)) {
+    selectedNodeId.value = null;
+  }
+});
 
 function neighborIdsOf(nodeId: string | null, g: AgentMemoryGraphResponse | null): Set<string> {
   if (!nodeId || !g) {
@@ -203,6 +293,11 @@ const selectedNeighborIds = computed<Set<string>>(() => neighborIdsOf(selectedNo
 
 /** selectedNeighborIds with the hub itself excluded — the hub is the tree's root, not one of its
  * leaves, so it must never trigger (or be hidden by) the leaf-hover popover below. */
+/** What travels with the hub when the hub is dragged; search-hidden neighbors are excluded. */
+const selectionGroupIds = computed<string[]>(() =>
+  [...selectedNeighborIds.value].filter((id) => visibleNodeIds.value.has(id)),
+);
+
 const selectedLeafIds = computed<Set<string>>(() => {
   const hub = selectedNodeId.value;
   if (hub === null) {
@@ -376,7 +471,9 @@ async function fitGraphViewportAfterLayoutChange(): Promise<void> {
 }
 
 function tidyMemoryGraphLayout(): void {
-  flowPaneRef.value?.reheat();
+  // Also releases hand-dragged nodes back to the simulation — otherwise "tidy" would leave the
+  // very nodes the user moved stuck where they were dropped.
+  flowPaneRef.value?.tidy();
 }
 
 function toggleLabels(): void {
@@ -527,9 +624,11 @@ const flowNodes = computed<Node[]>(() => {
     return [];
   }
   const seeds = seedPositions(g.nodes);
+  // Whole-graph degrees, so search filtering can't change a node's size mid-query.
   const degrees = computeDegrees(g.nodes, g.edges);
   const compact = labelsHidden.value;
-  return g.nodes.map((node) => {
+  const visible = visibleNodeIds.value;
+  return g.nodes.filter((node) => visible.has(node.id)).map((node) => {
     const degree = degrees.get(node.id) ?? 0;
     const radius = compact
       ? Math.max(4, Math.round(nodeRadius(degree) * COMPACT_RADIUS_SCALE))
@@ -567,33 +666,36 @@ const flowEdges = computed<Edge[]>(() => {
   const selected = selectedNodeId.value;
   const dimming = dimmingNodeId.value;
   const hovered = hoveredEdgeId.value;
-  return g.edges.map((e) => {
-    const touchesSelection =
-      selected !== null && (selected === e.source_node_id || selected === e.target_node_id);
-    const touchesDimming =
-      dimming !== null && (dimming === e.source_node_id || dimming === e.target_node_id);
-    return {
-      id: e.id,
-      type: "agentMemory",
-      source: e.source_node_id,
-      target: e.target_node_id,
-      data: {
-        relationshipType: e.relationship_type,
-        pathCurvature: edgePathCurvature(e.id),
-        // dimmed lags behind on deselect (see dimmingNodeId); active/growFromEnd track the
-        // real selection immediately so the fill/drain animation itself is not delayed.
-        dimmed: dimming !== null && !touchesDimming,
-        active: touchesSelection,
-        // The fill animation should always grow outward from the selected node, regardless of
-        // which end of the edge it is.
-        growFromEnd: touchesSelection && selected === e.target_node_id,
-        // Hovering one active edge hides its active siblings' label chips (not their lines) so
-        // overlapping labels near a hub can be read one at a time (see hoveredEdgeId — already
-        // gated there to only ever be an active edge's id, so this only fires within one chain).
-        hoveredOut: hovered !== null && touchesSelection && hovered !== e.id,
-      },
-    };
-  });
+  const visibleEdges = visibleEdgeIds.value;
+  return g.edges
+    .filter((e) => visibleEdges.has(e.id))
+    .map((e) => {
+      const touchesSelection =
+        selected !== null && (selected === e.source_node_id || selected === e.target_node_id);
+      const touchesDimming =
+        dimming !== null && (dimming === e.source_node_id || dimming === e.target_node_id);
+      return {
+        id: e.id,
+        type: "agentMemory",
+        source: e.source_node_id,
+        target: e.target_node_id,
+        data: {
+          relationshipType: e.relationship_type,
+          pathCurvature: edgePathCurvature(e.id),
+          // dimmed lags behind on deselect (see dimmingNodeId); active/growFromEnd track the
+          // real selection immediately so the fill/drain animation itself is not delayed.
+          dimmed: dimming !== null && !touchesDimming,
+          active: touchesSelection,
+          // The fill animation should always grow outward from the selected node, regardless of
+          // which end of the edge it is.
+          growFromEnd: touchesSelection && selected === e.target_node_id,
+          // Hovering one active edge hides its active siblings' label chips (not their lines) so
+          // overlapping labels near a hub can be read one at a time (see hoveredEdgeId — already
+          // gated there to only ever be an active edge's id, so this only fires within one chain).
+          hoveredOut: hovered !== null && touchesSelection && hovered !== e.id,
+        },
+      };
+    });
 });
 
 /**
@@ -640,7 +742,10 @@ const edgesForSidebarList = computed(() => {
   if (!g?.edges.length) {
     return [];
   }
-  return g.edges.map((edge) => ({ edge, status: edgePrimaryStatus(edge) }));
+  const visibleEdges = visibleEdgeIds.value;
+  return g.edges
+    .filter((edge) => visibleEdges.has(edge.id))
+    .map((edge) => ({ edge, status: edgePrimaryStatus(edge) }));
 });
 
 const selectedNode = computed<AgentMemoryNodeDTO | null>(() => {
@@ -691,7 +796,7 @@ const incomingConnections = computed<ConnectionRow[]>(() => {
 
 async function focusOnConnection(nodeId: string): Promise<void> {
   selectedNodeId.value = nodeId;
-  await flowPaneRef.value?.focusNodes([...selectedNeighborIds.value]);
+  await flowPaneRef.value?.focusNodes(selectionGroupIds.value);
 }
 
 const editName = ref("");
@@ -859,9 +964,22 @@ function applyUndoShortcut(ev: KeyboardEvent): boolean {
   return true;
 }
 
+function applySearchShortcut(ev: KeyboardEvent): boolean {
+  if (!props.open || !(ev.ctrlKey || ev.metaKey) || ev.key.toLowerCase() !== "f") {
+    return false;
+  }
+  ev.preventDefault();
+  ev.stopPropagation();
+  void expandSearch();
+  return true;
+}
+
 function onDocumentUndoCapture(ev: KeyboardEvent): void {
   const t = ev.target;
   if (!(t instanceof Node) || !dialogContentRef.value?.contains(t)) {
+    return;
+  }
+  if (applySearchShortcut(ev)) {
     return;
   }
   applyUndoShortcut(ev);
@@ -880,6 +998,8 @@ watch(
       });
     } else {
       clearCompactModeAnimationTimer();
+      clearSearchSettleTimer();
+      collapseSearch();
       document.removeEventListener("keydown", onDocumentUndoCapture, true);
       document.removeEventListener("fullscreenchange", syncGraphCanvasFullscreen);
       const gEl = graphAreaRef.value;
@@ -906,6 +1026,7 @@ watch(
 
 onUnmounted(() => {
   clearCompactModeAnimationTimer();
+  clearSearchSettleTimer();
   if (dimmingClearTimer !== null) {
     clearTimeout(dimmingClearTimer);
   }
@@ -927,7 +1048,7 @@ function onNodeClick(ev: { node: Node }): void {
   const wasSelected = selectedNodeId.value === ev.node.id;
   selectedNodeId.value = wasSelected ? null : ev.node.id;
   if (!wasSelected) {
-    void flowPaneRef.value?.focusNodes([...selectedNeighborIds.value]);
+    void flowPaneRef.value?.focusNodes(selectionGroupIds.value);
   }
 }
 
@@ -1391,6 +1512,12 @@ function handleDialogEscape(event: KeyboardEvent): void {
   }
   event.preventDefault();
   event.stopImmediatePropagation();
+  // Dialog listens on window in the capture phase, so Escape can only be intercepted here —
+  // an @keydown handler on the search input itself would never run.
+  if (searchExpanded.value) {
+    clearOrCollapseSearch();
+    return;
+  }
   emit("close");
 }
 </script>
@@ -1399,21 +1526,21 @@ function handleDialogEscape(event: KeyboardEvent): void {
   <Dialog
     :open="open"
     title="Agent memory graph"
-    size="4xl"
+    size="6xl"
     @escape="handleDialogEscape"
     @close="emit('close')"
   >
     <template #header-trailing>
       <button
         type="button"
-        class="dialog-header-icon-btn flex items-center justify-center w-11 h-11 min-h-[44px] min-w-[44px] md:w-8 md:h-8 rounded-xl text-muted-foreground hover:text-foreground transition-all duration-200 disabled:opacity-40 disabled:pointer-events-none"
+        class="dialog-header-icon-btn flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:text-foreground transition-all duration-200 disabled:opacity-40 disabled:pointer-events-none"
         :disabled="loading || !workflowId || !canvasNodeId"
         title="Reload graph from server"
         aria-label="Reload memory graph"
         @click="refreshGraph"
       >
         <RefreshCw
-          class="w-4 h-4"
+          class="h-3.5 w-3.5"
           :class="{ 'animate-spin': loading }"
         />
       </button>
@@ -1425,9 +1552,12 @@ function handleDialogEscape(event: KeyboardEvent): void {
     >
       <p class="text-xs text-muted-foreground shrink-0">
         Graph updates in the background after each successful agent run (including sub-agents).
-        Drag nodes to rearrange; click a node to edit or delete. Backspace or Delete removes the
-        current selection on the canvas (saved immediately). Ctrl+Z undoes the last change
-        (not while typing in a field).
+        Search (Ctrl/Cmd+F) filters the canvas down to the entities and relationships that match
+        and hides everything else. Drag a node
+        to place it (dragging a selected node moves its connected entities with it); Tidy layout
+        hands them back to the auto-layout. Click a node to edit or delete. Backspace or Delete
+        removes the current selection on the canvas (saved immediately). Ctrl+Z undoes the last
+        change (not while typing in a field).
       </p>
 
       <div
@@ -1437,7 +1567,7 @@ function handleDialogEscape(event: KeyboardEvent): void {
         <div class="font-medium text-xs uppercase text-muted-foreground tracking-wide">
           Share memory with other agents
         </div>
-        <p class="text-[10px] text-muted-foreground leading-snug">
+        <p class="text-xs text-muted-foreground leading-relaxed">
           Read only: peer agents receive this graph in their system prompt. Read &amp; write: peers
           may also merge new facts into this graph after a successful run (same credential as the
           peer agent).
@@ -1528,6 +1658,7 @@ function handleDialogEscape(event: KeyboardEvent): void {
             :edges="flowEdges"
             :hotkeys-enabled="open"
             :selected-node-id="selectedNodeId"
+            :selection-group-ids="selectionGroupIds"
             @node-click="onNodeClick"
             @edge-click="onEdgeClick"
             @edge-mouse-enter="onEdgeMouseEnter"
@@ -1568,9 +1699,60 @@ function handleDialogEscape(event: KeyboardEvent): void {
           </AgentMemoryGraphFlowPane>
           <div
             v-else
-            class="flex-1 min-h-[200px] flex items-center justify-center text-sm text-muted-foreground"
+            class="flex-1 min-h-[200px] flex items-center justify-center px-6 text-center text-sm text-muted-foreground"
           >
-            No memory entities yet. Run the workflow or add nodes in the sidebar.
+            {{
+              searchActive
+                ? `Nothing matches “${searchQuery}”.`
+                : "No memory entities yet. Run the workflow or add nodes in the sidebar."
+            }}
+          </div>
+
+          <div
+            v-if="graph?.nodes.length"
+            class="absolute left-2 top-2 z-[6] flex max-w-[calc(100%-1rem)] items-center gap-1.5"
+          >
+            <button
+              v-if="!searchExpanded"
+              type="button"
+              class="flex h-9 items-center gap-1.5 rounded-lg border border-border bg-card/95 px-2.5 text-muted-foreground shadow-md backdrop-blur-sm hover:text-foreground"
+              :title="`Search entities and relationships (${searchShortcutLabel})`"
+              aria-label="Search entities and relationships"
+              @click="expandSearch"
+            >
+              <Search class="h-3.5 w-3.5" />
+              <kbd class="font-sans text-[10px] font-medium tracking-wide">
+                {{ searchShortcutLabel }}
+              </kbd>
+            </button>
+            <div
+              v-else
+              class="relative"
+            >
+              <input
+                ref="searchInputRef"
+                v-model="searchQuery"
+                type="text"
+                placeholder="Search name, type, attributes, relationships…"
+                aria-label="Search memory entities and relationships"
+                class="h-9 w-[24rem] max-w-full rounded-lg border border-border bg-card/95 pl-3.5 pr-8 text-xs text-foreground shadow-md backdrop-blur-sm placeholder:text-muted-foreground/70 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/15"
+              >
+              <button
+                type="button"
+                class="absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                :title="searchQuery ? 'Clear search' : 'Close search'"
+                :aria-label="searchQuery ? 'Clear search' : 'Close search'"
+                @click="clearOrCollapseSearch"
+              >
+                <X class="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <span
+              v-if="searchActive"
+              class="shrink-0 rounded-md border border-border bg-card/95 px-2 py-1 text-[10px] font-medium text-muted-foreground shadow-md backdrop-blur-sm"
+            >
+              {{ searchMatchCount }} / {{ totalNodeCount }}
+            </span>
           </div>
 
           <!-- Whirl animation: hub orbits 8 dots around canvas centre -->
