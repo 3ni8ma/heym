@@ -61,6 +61,16 @@ When the backend result is an object or array, the Output area can show an inter
 - Press `Tab` or `Enter` to insert the selected suggestion.
 - Use `↑` / `↓` to move through the suggestion list.
 
+### Example Answers
+
+When you continue a `$…` reference with a dot, each suggestion row shows the answer that suggestion would produce, in bold on the right of the row.
+
+- Typing `$set.listItems.first().toString().u` lists `upper`, `urlEncode`, `urlDecode`, and `unescape`, each with its evaluated result — so you can pick by outcome instead of by name.
+- Results are evaluated on the backend against the same pinned data and last-run outputs the dialog preview uses, so they match what the field will produce.
+- Only suggestions that stand on their own are evaluated: zero-argument methods (`upper()`, `first()`, `keys()`) and plain properties (`length`, `year`). Suggestions that need arguments first — `map`, `filter`, `sort`, `replace` — are left blank.
+- A row stays blank when the candidate produces no answer: an error, a `null`, or a method that does not apply to that value.
+- Answers are shortened to one line. Hover a shortened answer to see more of it.
+
 ## Build with AI
 
 The **Build with AI** button appears in the top-right corner of the evaluate dialog when a workflow is loaded. It opens a nested modal where you can describe the expression you want in plain text and have an LLM generate it for you.

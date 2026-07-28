@@ -1103,6 +1103,26 @@ export interface ExpressionEvaluateResponse {
   selected_loop_total?: number | null;
 }
 
+export interface ExpressionCompletionPreviewRequest {
+  expressions: string[];
+  workflow_id: string;
+  current_node_id: string;
+  field_name?: string;
+  input_body?: unknown;
+  selected_loop_iteration_index?: number | null;
+  node_results: ExpressionEvaluateCanvasResult[];
+}
+
+export interface ExpressionCompletionPreviewItem {
+  expression: string;
+  preview: string | null;
+  result_type: string | null;
+}
+
+export interface ExpressionCompletionPreviewResponse {
+  previews: ExpressionCompletionPreviewItem[];
+}
+
 export interface AgentProgressEntry {
   name: string;
   arguments: Record<string, unknown>;

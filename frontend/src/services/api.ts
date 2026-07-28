@@ -45,6 +45,8 @@ import type {
   AllExecutionHistoryEntryLight,
   CodexFollowup,
   CodexFollowupAnswerPayload,
+  ExpressionCompletionPreviewRequest,
+  ExpressionCompletionPreviewResponse,
   ExpressionEvaluateRequest,
   ExpressionEvaluateResponse,
   ExecutionResult,
@@ -3603,6 +3605,16 @@ export const expressionApi = {
   ): Promise<ExpressionEvaluateResponse> => {
     const response = await api.post<ExpressionEvaluateResponse>(
       "/expressions/evaluate",
+      request,
+    );
+    return response.data;
+  },
+
+  previewCompletions: async (
+    request: ExpressionCompletionPreviewRequest,
+  ): Promise<ExpressionCompletionPreviewResponse> => {
+    const response = await api.post<ExpressionCompletionPreviewResponse>(
+      "/expressions/completion-previews",
       request,
     );
     return response.data;

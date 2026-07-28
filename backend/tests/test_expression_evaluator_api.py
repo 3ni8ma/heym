@@ -5,7 +5,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from app.api.expressions import ExpressionEvaluateRequest, evaluate_expression
+from app.api.expressions import (
+    COMPLETION_PREVIEW_MAX_CHARS,
+    COMPLETION_PREVIEW_MAX_EXPRESSIONS,
+    ExpressionCompletionPreviewRequest,
+    ExpressionEvaluateRequest,
+    evaluate_expression,
+    format_completion_preview,
+    preview_completion_expressions,
+)
+from app.services.expression_evaluator import ExpressionEvaluateResponse
 
 
 class ExpressionEvaluateApiTests(unittest.IsolatedAsyncioTestCase):
@@ -623,6 +632,189 @@ class ExpressionEvaluateApiTests(unittest.IsolatedAsyncioTestCase):
                 current_node_id=self.current_node_id,
                 node_results=[],
             )
+
+
+class ExpressionCompletionPreviewApiTests(unittest.IsolatedAsyncioTestCase):
+    """Autocomplete rows show an example answer per suggestion, blank when there is none."""
+
+    def setUp(self) -> None:
+        self.user = MagicMock()
+        self.user.id = uuid.uuid4()
+        self.workflow_id = uuid.uuid4()
+        self.current_node_id = "node-target"
+        self.db = AsyncMock()
+
+    def _workflow(self, pinned: dict) -> MagicMock:
+        workflow = MagicMock()
+        workflow.id = self.workflow_id
+        workflow.owner_id = self.user.id
+        workflow.nodes = [
+            {
+                "id": "node-upstream",
+                "type": "set",
+                "data": {"label": "set", "pinnedData": pinned},
+            },
+            {"id": self.current_node_id, "type": "output", "data": {"label": "finalOutput"}},
+        ]
+        workflow.edges = [{"id": "e1", "source": "node-upstream", "target": self.current_node_id}]
+        return workflow
+
+    def _request(self, expressions: list[str]) -> ExpressionCompletionPreviewRequest:
+        return ExpressionCompletionPreviewRequest(
+            expressions=expressions,
+            workflow_id=self.workflow_id,
+            current_node_id=self.current_node_id,
+            field_name="mapped",
+            input_body=None,
+            selected_loop_iteration_index=None,
+            node_results=[],
+        )
+
+    def _http_request(self) -> MagicMock:
+        req = MagicMock()
+        req.headers.get.return_value = None
+        return req
+
+    async def _preview(self, pinned: dict, expressions: list[str]) -> list:
+        workflow = self._workflow(pinned)
+        with (
+            patch("app.api.expressions.get_workflow_by_id", AsyncMock(return_value=workflow)),
+            patch("app.api.expressions.get_credentials_context", AsyncMock(return_value={})),
+            patch(
+                "app.api.expressions.get_global_variables_context",
+                AsyncMock(return_value={}),
+            ),
+        ):
+            response = await preview_completion_expressions(
+                self._request(expressions),
+                http_request=self._http_request(),
+                db=self.db,
+                current_user=self.user,
+            )
+        return response.previews
+
+    async def test_route_is_registered(self) -> None:
+        from app.main import app
+
+        paths = {route.path for route in app.router.routes}
+        self.assertIn("/api/expressions/completion-previews", paths)
+
+    async def test_previews_follow_request_order(self) -> None:
+        previews = await self._preview(
+            {"listItems": [1, 2, 3, 4, 5], "title": "hey"},
+            [
+                "$set.listItems.length",
+                "$set.listItems.first()",
+                "$set.title.upper()",
+            ],
+        )
+
+        self.assertEqual(
+            [item.expression for item in previews],
+            ["$set.listItems.length", "$set.listItems.first()", "$set.title.upper()"],
+        )
+        self.assertEqual([item.preview for item in previews], ["5", "1", '"HEY"'])
+
+    async def test_chained_method_candidate_is_previewed(self) -> None:
+        previews = await self._preview(
+            {"listItems": [1, 2, 3, 4, 5]},
+            ["$set.listItems.first().toString().upper()"],
+        )
+
+        self.assertEqual(previews[0].preview, '"1"')
+        self.assertEqual(previews[0].result_type, "string")
+
+    async def test_unresolvable_candidate_leaves_row_blank(self) -> None:
+        previews = await self._preview(
+            {"listItems": [1, 2, 3]},
+            ["$set.listItems.notARealMethod()", "$set.missingKey"],
+        )
+
+        self.assertIsNone(previews[0].preview)
+        self.assertIsNone(previews[1].preview)
+
+    async def test_blank_candidates_are_skipped(self) -> None:
+        previews = await self._preview({"title": "hey"}, ["", "   ", "$set.title"])
+
+        self.assertEqual([item.preview for item in previews], [None, None, '"hey"'])
+
+    async def test_long_preview_is_truncated_to_one_line(self) -> None:
+        previews = await self._preview(
+            {"text": "line one\nline    two " + ("x" * 400)},
+            ["$set.text"],
+        )
+
+        preview = previews[0].preview
+        self.assertIsNotNone(preview)
+        self.assertEqual(len(preview), COMPLETION_PREVIEW_MAX_CHARS)
+        self.assertTrue(preview.endswith("…"))
+        # A dropdown row is one line: newlines stay JSON-escaped and runs of spaces collapse.
+        self.assertNotIn("\n", preview)
+        self.assertIn("line one\\nline two", preview)
+
+    async def test_empty_expressions_skips_workflow_lookup(self) -> None:
+        lookup = AsyncMock()
+        with patch("app.api.expressions.get_workflow_by_id", lookup):
+            response = await preview_completion_expressions(
+                self._request([]),
+                http_request=self._http_request(),
+                db=self.db,
+                current_user=self.user,
+            )
+
+        self.assertEqual(response.previews, [])
+        lookup.assert_not_awaited()
+
+    async def test_workflow_not_found_returns_404(self) -> None:
+        with patch("app.api.expressions.get_workflow_by_id", AsyncMock(return_value=None)):
+            with self.assertRaises(HTTPException) as context:
+                await preview_completion_expressions(
+                    self._request(["$set.title"]),
+                    http_request=self._http_request(),
+                    db=self.db,
+                    current_user=self.user,
+                )
+
+        self.assertEqual(context.exception.status_code, 404)
+
+    def test_request_rejects_oversized_batch(self) -> None:
+        with self.assertRaises(ValidationError):
+            ExpressionCompletionPreviewRequest(
+                expressions=["$set.title"] * (COMPLETION_PREVIEW_MAX_EXPRESSIONS + 1),
+                workflow_id=self.workflow_id,
+                current_node_id=self.current_node_id,
+                node_results=[],
+            )
+
+    def test_format_drops_errors_nulls_and_echoed_source(self) -> None:
+        error_response = ExpressionEvaluateResponse(
+            result=None, result_type="null", preserved_type=False, error="boom"
+        )
+        null_response = ExpressionEvaluateResponse(
+            result=None, result_type="null", preserved_type=False, error=None
+        )
+        echo_response = ExpressionEvaluateResponse(
+            result="$set.title.nope()", result_type="string", preserved_type=False, error=None
+        )
+
+        self.assertIsNone(format_completion_preview(error_response, "$set.title"))
+        self.assertIsNone(format_completion_preview(null_response, "$set.title"))
+        self.assertIsNone(format_completion_preview(echo_response, "$set.title.nope()"))
+
+    def test_format_renders_values_as_compact_json(self) -> None:
+        def response(result: object, result_type: str) -> ExpressionEvaluateResponse:
+            return ExpressionEvaluateResponse(
+                result=result, result_type=result_type, preserved_type=True, error=None
+            )
+
+        self.assertEqual(format_completion_preview(response(5, "number"), "$set.n"), "5")
+        self.assertEqual(format_completion_preview(response(True, "boolean"), "$set.b"), "true")
+        self.assertEqual(
+            format_completion_preview(response([1, 2], "array"), "$set.items"), "[1, 2]"
+        )
+        self.assertEqual(
+            format_completion_preview(response({"a": "ç"}, "object"), "$set.obj"), '{"a": "ç"}'
+        )
 
 
 if __name__ == "__main__":
