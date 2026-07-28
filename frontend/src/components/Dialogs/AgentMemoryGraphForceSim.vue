@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onUnmounted, watch } from "vue";
+import { computed, onUnmounted, watch } from "vue";
 import { useVueFlow } from "@vue-flow/core";
 
 interface ForceLink {
@@ -7,14 +7,22 @@ interface ForceLink {
   target: string;
 }
 
-const props = defineProps<{
-  links: ForceLink[];
-  active: boolean;
-  /** Node whose incident links should rest at FOCUS_LINK_DISTANCE instead of LINK_DISTANCE, so
-   * selecting a hub physically pushes its neighbors apart to make room for the edge labels and
-   * captions that only appear while it's selected (see AgentMemoryGraphDialog.vue). */
-  focusNodeId?: string | null;
-}>();
+const props = withDefaults(
+  defineProps<{
+    links: ForceLink[];
+    active: boolean;
+    /** Node whose incident links should rest at FOCUS_LINK_DISTANCE instead of LINK_DISTANCE, so
+     * selecting a hub physically pushes its neighbors apart to make room for the edge labels and
+     * captions that only appear while it's selected (see AgentMemoryGraphDialog.vue). */
+    focusNodeId?: string | null;
+    /** Hand-placed nodes. The sim neither moves nor clamps them, but they still repel the free
+     * nodes so the rest settles around them. Cleared by "Tidy layout". */
+    pinnedIds?: string[];
+  }>(),
+  { focusNodeId: null, pinnedIds: () => [] },
+);
+
+const pinnedIdSet = computed(() => new Set(props.pinnedIds));
 
 const { getNodes, findNode, updateNode, viewport, dimensions } = useVueFlow();
 
@@ -98,15 +106,24 @@ function clusterCentroids(): Map<string, { x: number; y: number; count: number }
 
 function tick(): void {
   const allNodes = getNodes.value;
-  const movableNodes = allNodes.filter((n) => !n.dragging);
+  const pinned = pinnedIdSet.value;
+  const movableNodes = allNodes.filter((n) => !n.dragging && !pinned.has(n.id));
   if (allNodes.length === 0) {
     rafId = null;
     return;
   }
 
+  const movableIds = new Set(movableNodes.map((n) => n.id));
   for (const n of movableNodes) {
     if (!velocity.has(n.id)) {
       velocity.set(n.id, { vx: 0, vy: 0 });
+    }
+  }
+  // Dropping the entry is what keeps pinned/dragged nodes out of the link-spring loop below, and
+  // means they restart from rest rather than resuming stale momentum once released.
+  for (const id of [...velocity.keys()]) {
+    if (!movableIds.has(id)) {
+      velocity.delete(id);
     }
   }
 
