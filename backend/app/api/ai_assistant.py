@@ -2495,7 +2495,69 @@ def _summarize_tool_result(tool_name: str, result_json: str) -> str:
     return result_json[:200] + ("..." if len(result_json) > 200 else "")
 
 
-def _tool_end_yield(tc_id: str, summary: str, ms: float, status: str = "success") -> str:
+def _chat_tool_lifecycle_status(
+    tool_name: str,
+    tool_result: Any,
+    explicit_status: str | None = None,
+) -> str:
+    """Derive dashboard-chat tool status from structured execution data."""
+    from app.services.agent_tool_observability import normalize_tool_call_status
+
+    def _normalized_lifecycle(status: Any) -> str | None:
+        if not isinstance(status, str) or not status.strip():
+            return None
+        normalized = normalize_tool_call_status(status)
+        return None if normalized == "unknown" else normalized
+
+    if explicit_status:
+        normalized = _normalized_lifecycle(explicit_status)
+        if normalized is not None:
+            return normalized
+
+    structured_result = tool_result
+    if isinstance(tool_result, str):
+        try:
+            structured_result = json.loads(tool_result)
+        except (json.JSONDecodeError, TypeError):
+            return "success"
+    if not isinstance(structured_result, dict):
+        return "success"
+
+    error = structured_result.get("error")
+    if error is not None:
+        normalized = _normalized_lifecycle(structured_result.get("status"))
+        if normalized is not None:
+            return normalized
+        return "error"
+
+    # Card status is domain data (for example active/error), not tool lifecycle state.
+    if tool_name != "get_card_detail":
+        normalized = _normalized_lifecycle(structured_result.get("status"))
+        if normalized is not None:
+            return normalized
+
+    execution = structured_result.get("execution")
+    if isinstance(execution, dict):
+        nested_error = execution.get("error")
+        nested_status = execution.get("status")
+        if nested_error is not None:
+            normalized = _normalized_lifecycle(nested_status)
+            if normalized is not None:
+                return normalized
+            return "error"
+        normalized = _normalized_lifecycle(nested_status)
+        if normalized is not None:
+            return normalized
+    return "success"
+
+
+def _tool_end_yield(
+    tc_id: str,
+    summary: str,
+    ms: float,
+    *,
+    status: str,
+) -> str:
     return (
         "data: "
         + json.dumps(
@@ -2509,6 +2571,31 @@ def _tool_end_yield(tc_id: str, summary: str, ms: float, status: str = "success"
         )
         + "\n\n"
     )
+
+
+def _cancelled_tool_end_yield(
+    tc_id: str,
+    *,
+    name: str,
+    step_label: str,
+    request: dict[str, Any],
+    result: str | None,
+    step_start: float,
+    run_steps: list[dict[str, Any]],
+) -> str:
+    """Close an already-started Chat tool with a terminal cancelled lifecycle event."""
+    step_ms = round((time.time() - step_start) * 1000, 2)
+    summary = _summarize_tool_result(name, result) if result is not None else "Execution cancelled"
+    run_steps.append(
+        {
+            "label": step_label,
+            "tool": name,
+            "request": request,
+            "response_summary": summary,
+            "execution_time_ms": step_ms,
+        }
+    )
+    return _tool_end_yield(tc_id, summary, step_ms, status="cancelled")
 
 
 def _context_breakdown(
@@ -2848,6 +2935,7 @@ async def stream_dashboard_chat(
                         tc.id,
                         run_steps[-1]["response_summary"],
                         run_steps[-1]["execution_time_ms"],
+                        status=_chat_tool_lifecycle_status(name, result),
                     )
                 elif name == "execute_workflow":
                     workflow_id_str = args.get("workflow_id", "") or ""
@@ -2891,7 +2979,20 @@ async def stream_dashboard_chat(
                         public_base_url,
                         cancel_event,
                     )
+                    tool_request = {
+                        "workflow_id": workflow_id_str,
+                        "inputs": args.get("inputs") or {},
+                    }
                     if cancel_event is not None and cancel_event.is_set():
+                        yield _cancelled_tool_end_yield(
+                            tc.id,
+                            name=name,
+                            step_label=step_label,
+                            request=tool_request,
+                            result=result,
+                            step_start=step_start,
+                            run_steps=run_steps,
+                        )
                         elapsed_ms = (time.time() - start_time) * 1000
                         _record_dashboard_run("cancelled", round(elapsed_ms, 2))
                         return
@@ -2900,10 +3001,7 @@ async def stream_dashboard_chat(
                         {
                             "label": step_label,
                             "tool": name,
-                            "request": {
-                                "workflow_id": workflow_id_str,
-                                "inputs": args.get("inputs") or {},
-                            },
+                            "request": tool_request,
                             "response_summary": _summarize_tool_result(name, result),
                             "execution_time_ms": step_ms,
                         }
@@ -2912,6 +3010,7 @@ async def stream_dashboard_chat(
                         tc.id,
                         run_steps[-1]["response_summary"],
                         run_steps[-1]["execution_time_ms"],
+                        status=_chat_tool_lifecycle_status(name, result),
                     )
                     pending_review = _extract_pending_hitl_review_payload(result)
                     try:
@@ -3031,7 +3130,17 @@ async def stream_dashboard_chat(
                             attachment=attachment,
                             cancel_event=cancel_event,
                         )
+                        tool_request = {"goal": goal, "inputs": inputs}
                         if cancel_event is not None and cancel_event.is_set():
+                            yield _cancelled_tool_end_yield(
+                                tc.id,
+                                name=name,
+                                step_label=step_label,
+                                request=tool_request,
+                                result=result,
+                                step_start=step_start,
+                                run_steps=run_steps,
+                            )
                             elapsed_ms = (time.time() - start_time) * 1000
                             _record_dashboard_run("cancelled", round(elapsed_ms, 2))
                             return
@@ -3040,7 +3149,7 @@ async def stream_dashboard_chat(
                             {
                                 "label": step_label,
                                 "tool": name,
-                                "request": {"goal": goal, "inputs": inputs},
+                                "request": tool_request,
                                 "response_summary": _summarize_tool_result(name, result),
                                 "execution_time_ms": step_ms,
                             }
@@ -3049,6 +3158,7 @@ async def stream_dashboard_chat(
                             tc.id,
                             run_steps[-1]["response_summary"],
                             run_steps[-1]["execution_time_ms"],
+                            status=_chat_tool_lifecycle_status(name, result),
                         )
                     try:
                         workflow_created_payload = json.loads(result)
@@ -3179,7 +3289,21 @@ async def stream_dashboard_chat(
                             attachment=attachment,
                             cancel_event=cancel_event,
                         )
+                        tool_request = {
+                            "workflow_id": workflow_id_str,
+                            "instructions": instructions,
+                            "inputs": inputs,
+                        }
                         if cancel_event is not None and cancel_event.is_set():
+                            yield _cancelled_tool_end_yield(
+                                tc.id,
+                                name=name,
+                                step_label=step_label,
+                                request=tool_request,
+                                result=result,
+                                step_start=step_start,
+                                run_steps=run_steps,
+                            )
                             elapsed_ms = (time.time() - start_time) * 1000
                             _record_dashboard_run("cancelled", round(elapsed_ms, 2))
                             return
@@ -3188,11 +3312,7 @@ async def stream_dashboard_chat(
                             {
                                 "label": step_label,
                                 "tool": name,
-                                "request": {
-                                    "workflow_id": workflow_id_str,
-                                    "instructions": instructions,
-                                    "inputs": inputs,
-                                },
+                                "request": tool_request,
                                 "response_summary": _summarize_tool_result(name, result),
                                 "execution_time_ms": step_ms,
                             }
@@ -3201,6 +3321,7 @@ async def stream_dashboard_chat(
                             tc.id,
                             run_steps[-1]["response_summary"],
                             run_steps[-1]["execution_time_ms"],
+                            status=_chat_tool_lifecycle_status(name, result),
                         )
                     try:
                         workflow_created_payload = json.loads(result)
@@ -3290,6 +3411,7 @@ async def stream_dashboard_chat(
                         tc.id,
                         run_steps[-1]["response_summary"],
                         run_steps[-1]["execution_time_ms"],
+                        status=_chat_tool_lifecycle_status(name, result),
                     )
                 elif name == "wait_for_execution_update":
                     execution_history_id = str(args.get("execution_history_id") or "").strip()
@@ -3339,6 +3461,7 @@ async def stream_dashboard_chat(
                         tc.id,
                         run_steps[-1]["response_summary"],
                         run_steps[-1]["execution_time_ms"],
+                        status=_chat_tool_lifecycle_status(name, result),
                     )
                 elif name == "get_workflow_definition":
                     workflow_id_str = args.get("workflow_id", "") or ""
@@ -3385,6 +3508,7 @@ async def stream_dashboard_chat(
                         tc.id,
                         run_steps[-1]["response_summary"],
                         run_steps[-1]["execution_time_ms"],
+                        status=_chat_tool_lifecycle_status(name, result),
                     )
                 elif name == "get_analytics_stats":
                     workflow_id_str = args.get("workflow_id") or ""
@@ -3429,6 +3553,7 @@ async def stream_dashboard_chat(
                         tc.id,
                         run_steps[-1]["response_summary"],
                         run_steps[-1]["execution_time_ms"],
+                        status=_chat_tool_lifecycle_status(name, result),
                     )
                 elif name == "get_recent_executions":
                     time_range = args.get("time_range") or "24h"
@@ -3471,6 +3596,7 @@ async def stream_dashboard_chat(
                         tc.id,
                         run_steps[-1]["response_summary"],
                         run_steps[-1]["execution_time_ms"],
+                        status=_chat_tool_lifecycle_status(name, result),
                     )
                 elif name == "search_documentation":
                     query = args.get("query", "") or ""
@@ -3514,6 +3640,7 @@ async def stream_dashboard_chat(
                         tc.id,
                         run_steps[-1]["response_summary"],
                         run_steps[-1]["execution_time_ms"],
+                        status=_chat_tool_lifecycle_status(name, result),
                     )
                 elif name == "get_global_variables":
                     var_name = args.get("name") or None
@@ -3551,6 +3678,7 @@ async def stream_dashboard_chat(
                         tc.id,
                         run_steps[-1]["response_summary"],
                         run_steps[-1]["execution_time_ms"],
+                        status=_chat_tool_lifecycle_status(name, result),
                     )
                 elif name == "get_teams":
                     team_name_filter = args.get("team_name") or None
@@ -3590,6 +3718,7 @@ async def stream_dashboard_chat(
                         tc.id,
                         run_steps[-1]["response_summary"],
                         run_steps[-1]["execution_time_ms"],
+                        status=_chat_tool_lifecycle_status(name, result),
                     )
                 elif name == "get_schedule_events":
                     view_window = args.get("view_window")
@@ -3670,6 +3799,7 @@ async def stream_dashboard_chat(
                         tc.id,
                         run_steps[-1]["response_summary"],
                         run_steps[-1]["execution_time_ms"],
+                        status=_chat_tool_lifecycle_status(name, result),
                     )
                 elif name == "list_boards":
                     step_label = "Listing boards..."
@@ -3702,6 +3832,7 @@ async def stream_dashboard_chat(
                         tc.id,
                         run_steps[-1]["response_summary"],
                         run_steps[-1]["execution_time_ms"],
+                        status=_chat_tool_lifecycle_status(name, result),
                     )
                 elif name == "create_board_task":
                     step_label = "Adding task to board..."
@@ -3742,6 +3873,7 @@ async def stream_dashboard_chat(
                         tc.id,
                         run_steps[-1]["response_summary"],
                         run_steps[-1]["execution_time_ms"],
+                        status=_chat_tool_lifecycle_status(name, result),
                     )
                 elif name == "get_board_tasks":
                     step_label = "Reading board tasks..."
@@ -3781,6 +3913,7 @@ async def stream_dashboard_chat(
                         tc.id,
                         run_steps[-1]["response_summary"],
                         run_steps[-1]["execution_time_ms"],
+                        status=_chat_tool_lifecycle_status(name, result),
                     )
                 elif name == "get_card_detail":
                     step_label = "Reading card detail..."
@@ -3815,6 +3948,7 @@ async def stream_dashboard_chat(
                         tc.id,
                         run_steps[-1]["response_summary"],
                         run_steps[-1]["execution_time_ms"],
+                        status=_chat_tool_lifecycle_status(name, result),
                     )
                 else:
                     step_label = f"Running {name}..."
@@ -3847,6 +3981,7 @@ async def stream_dashboard_chat(
                         tc.id,
                         run_steps[-1]["response_summary"],
                         run_steps[-1]["execution_time_ms"],
+                        status=_chat_tool_lifecycle_status(name, result),
                     )
                 content_for_llm = _sanitize_tool_result_for_llm(result, name)
                 messages_to_use.append(

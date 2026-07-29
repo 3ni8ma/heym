@@ -175,6 +175,7 @@ test("renders JSON trace events as expandable trees with a raw toggle", async ({
               {
                 id: "call-1",
                 name: "catalog.search",
+                status: "timeout",
                 arguments: {
                   query: "wireless headphones",
                   filters: { in_stock: true },
@@ -188,6 +189,16 @@ test("renders JSON trace events as expandable trees with a raw toggle", async ({
                 mcp_server: "Catalog",
               },
             ],
+            tool_metrics: {
+              count: 1,
+              success: 0,
+              error: 0,
+              pending: 0,
+              timeout: 1,
+              cancelled: 0,
+              total_duration_ms: 210,
+              max_duration_ms: 210,
+            },
           },
           error: null,
         },
@@ -204,6 +215,15 @@ test("renders JSON trace events as expandable trees with a raw toggle", async ({
   await page.goto("/?tab=traces");
   await page.getByRole("button", { name: /JSON event workflow/ }).click();
   await expect(page.getByText("Trace Details", { exact: true })).toBeVisible();
+  const toolMetrics = page.getByTestId("trace-tool-metrics");
+  await expect(toolMetrics.getByText("1 calls", { exact: true })).toBeVisible();
+  await expect(toolMetrics.getByText("1 timeout", { exact: true })).toBeVisible();
+
+  const answerStep = page.getByTestId("trace-step-answer");
+  await expect(answerStep.getByText("1 timeout", { exact: true })).toBeVisible();
+  await expect(
+    page.getByTestId("trace-step-tool-call-1").getByText("Timeout", { exact: true }),
+  ).toBeVisible();
 
   const userStep = page.getByTestId("trace-step-msg-0");
   await userStep.getByRole("button").first().click();

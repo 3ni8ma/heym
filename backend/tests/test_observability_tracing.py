@@ -47,6 +47,17 @@ class TracingDisabledTest(unittest.TestCase):
             span.set_attribute("heym.test", 1)
         self.assertIsNotNone(tracer)
 
+    def test_agent_tool_span_is_noop_when_disabled(self) -> None:
+        self.assertFalse(tracing.is_enabled())
+        with tracing.agent_tool_span(
+            tool_name="fetch_data",
+            tool_call_id="call-1",
+            source="node_tool",
+        ) as span:
+            self.assertIsNone(span)
+            tracing.set_span_attribute(span, "heym.agent.tool.status", "success")
+            tracing.record_agent_tool_exception(span, RuntimeError("ignored"))
+
     def test_execute_node_takes_noop_fast_path_when_disabled(self) -> None:
         executor = _make_executor()
         with patch.object(executor, "_execute_node_inner", return_value=_success_result()) as inner:
@@ -130,6 +141,261 @@ class NodeSpanTest(_EnabledTracingTestBase):
         self.assertEqual(attrs["heym.llm.model"], "gpt-4o")
         self.assertEqual(attrs["heym.llm.total_tokens"], 15)
         self.assertEqual(attrs["heym.llm.prompt_tokens"], 10)
+
+    def test_agent_tool_span_has_tool_identity_and_status(self) -> None:
+        with tracing.agent_tool_span(
+            tool_name="fetch_data",
+            tool_call_id="call-1",
+            source="node_tool",
+            mcp_server="weather",
+            workflow_id="workflow-1",
+            node_id="agent-1",
+            node_label="Research Agent",
+            iteration=2,
+        ) as span:
+            span.set_attribute("heym.agent.tool.status", "success")
+
+        tool_spans = [
+            s for s in self.exporter.get_finished_spans() if s.name == "heym.agent.tool.execute"
+        ]
+        self.assertEqual(len(tool_spans), 1)
+        attrs = dict(tool_spans[0].attributes)
+        self.assertEqual(attrs["heym.agent.tool.name"], "fetch_data")
+        self.assertEqual(attrs["heym.agent.tool.call_id"], "call-1")
+        self.assertEqual(attrs["heym.agent.tool.source"], "node_tool")
+        self.assertEqual(attrs["heym.agent.tool.mcp_server"], "weather")
+        self.assertEqual(attrs["heym.workflow.id"], "workflow-1")
+        self.assertEqual(attrs["heym.node.id"], "agent-1")
+        self.assertEqual(attrs["heym.node.label"], "Research Agent")
+        self.assertEqual(attrs["heym.agent.tool.iteration"], 2)
+        self.assertEqual(attrs["heym.agent.tool.status"], "success")
+
+    def test_agent_tool_span_nests_under_agent_node_span(self) -> None:
+        """Tool spans from execute_with_tools must nest under the Agent node span.
+
+        Production Agent execution opens the node span in ``execute_node``, then
+        reaches ``LLMService.execute_with_tools`` via ``run_async`` / ``asyncio.run``
+        and runs tool bodies with ``asyncio.to_thread``. This regression covers that
+        path instead of calling ``agent_tool_span`` directly inside a patched inner.
+        """
+        from types import SimpleNamespace
+
+        from app.db.models import CredentialType
+        from app.services.llm_service import LLMService
+        from app.services.workflow_executor import run_async
+
+        executor = WorkflowExecutor(
+            nodes=[{"id": "agent-1", "type": "agent", "data": {"label": "Research Agent"}}],
+            edges=[],
+            workflow_id=uuid.uuid4(),
+        )
+        node_result = NodeResult(
+            node_id="agent-1",
+            node_label="Research Agent",
+            node_type="agent",
+            status="success",
+            output={"text": "done"},
+            execution_time_ms=2.0,
+        )
+
+        def fake_agent_inner(*_args: object, **_kwargs: object) -> NodeResult:
+            tool_call = SimpleNamespace(
+                id="call-child",
+                type="function",
+                function=SimpleNamespace(name="fetch_data", arguments="{}"),
+            )
+            responses = [
+                SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            message=SimpleNamespace(content=None, tool_calls=[tool_call])
+                        )
+                    ],
+                    usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+                ),
+                SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(message=SimpleNamespace(content="done", tool_calls=[]))
+                    ],
+                    usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+                ),
+            ]
+
+            def create(**_create_kwargs: object) -> SimpleNamespace:
+                return responses.pop(0)
+
+            client = SimpleNamespace(
+                base_url="http://test",
+                chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
+            )
+            service = LLMService(CredentialType.openai, "test-key")
+
+            def tool_executor(*_tool_args: object) -> dict[str, object]:
+                return {"ok": True, "status": "success"}
+
+            with patch.object(service, "_get_client", return_value=(client, "Test")):
+                run_async(
+                    service.execute_with_tools(
+                        model="test-model",
+                        system_instruction=None,
+                        user_message="run tool",
+                        tools=[
+                            {
+                                "name": "fetch_data",
+                                "parameters": {"type": "object"},
+                                "_source": "node_tool",
+                            }
+                        ],
+                        tool_executor=tool_executor,
+                    )
+                )
+            return node_result
+
+        with patch.object(executor, "_execute_node_inner", side_effect=fake_agent_inner):
+            executor.execute_node("agent-1", {})
+
+        spans = self.exporter.get_finished_spans()
+        node_span = next(span for span in spans if span.name == "heym.node.execute")
+        tool_span = next(span for span in spans if span.name == "heym.agent.tool.execute")
+        self.assertIsNotNone(tool_span.parent)
+        self.assertEqual(tool_span.parent.span_id, node_span.context.span_id)
+        self.assertEqual(tool_span.context.trace_id, node_span.context.trace_id)
+        self.assertEqual(dict(tool_span.attributes)["heym.agent.tool.name"], "fetch_data")
+        self.assertEqual(dict(tool_span.attributes)["heym.agent.tool.call_id"], "call-child")
+
+    def test_agent_tool_span_nests_when_run_async_uses_worker_thread(self) -> None:
+        """When a loop is already running, run_async must reattach OTel context."""
+        import asyncio
+        from types import SimpleNamespace
+
+        from app.db.models import CredentialType
+        from app.services.llm_service import LLMService
+        from app.services.workflow_executor import run_async
+
+        executor = WorkflowExecutor(
+            nodes=[{"id": "agent-1", "type": "agent", "data": {"label": "Research Agent"}}],
+            edges=[],
+            workflow_id=uuid.uuid4(),
+        )
+        node_result = NodeResult(
+            node_id="agent-1",
+            node_label="Research Agent",
+            node_type="agent",
+            status="success",
+            output={"text": "done"},
+            execution_time_ms=2.0,
+        )
+
+        def fake_agent_inner(*_args: object, **_kwargs: object) -> NodeResult:
+            tool_call = SimpleNamespace(
+                id="call-thread",
+                type="function",
+                function=SimpleNamespace(name="fetch_data", arguments="{}"),
+            )
+            responses = [
+                SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            message=SimpleNamespace(content=None, tool_calls=[tool_call])
+                        )
+                    ],
+                    usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+                ),
+                SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(message=SimpleNamespace(content="done", tool_calls=[]))
+                    ],
+                    usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1),
+                ),
+            ]
+
+            def create(**_create_kwargs: object) -> SimpleNamespace:
+                return responses.pop(0)
+
+            client = SimpleNamespace(
+                base_url="http://test",
+                chat=SimpleNamespace(completions=SimpleNamespace(create=create)),
+            )
+            service = LLMService(CredentialType.openai, "test-key")
+
+            with patch.object(service, "_get_client", return_value=(client, "Test")):
+                run_async(
+                    service.execute_with_tools(
+                        model="test-model",
+                        system_instruction=None,
+                        user_message="run tool",
+                        tools=[
+                            {
+                                "name": "fetch_data",
+                                "parameters": {"type": "object"},
+                                "_source": "node_tool",
+                            }
+                        ],
+                        tool_executor=lambda *_tool_args: {"ok": True},
+                    )
+                )
+            return node_result
+
+        async def _drive() -> None:
+            with patch.object(executor, "_execute_node_inner", side_effect=fake_agent_inner):
+                executor.execute_node("agent-1", {})
+
+        asyncio.run(_drive())
+
+        spans = self.exporter.get_finished_spans()
+        node_span = next(span for span in spans if span.name == "heym.node.execute")
+        tool_span = next(span for span in spans if span.name == "heym.agent.tool.execute")
+        self.assertIsNotNone(tool_span.parent)
+        self.assertEqual(tool_span.parent.span_id, node_span.context.span_id)
+        self.assertEqual(tool_span.context.trace_id, node_span.context.trace_id)
+
+    def test_agent_tool_span_records_uncaught_exception(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "tool exploded"):
+            with tracing.agent_tool_span(
+                tool_name="fetch_data",
+                tool_call_id="call-2",
+                source="node_tool",
+            ):
+                raise RuntimeError("tool exploded")
+
+        tool_span = next(
+            s for s in self.exporter.get_finished_spans() if s.name == "heym.agent.tool.execute"
+        )
+        self.assertEqual(tool_span.status.status_code, trace.StatusCode.ERROR)
+        self.assertTrue(any(event.name == "exception" for event in tool_span.events))
+
+    def test_agent_tool_exception_redacts_sensitive_error_text(self) -> None:
+        with tracing.agent_tool_span(
+            tool_name="fetch_data",
+            tool_call_id="call-secret",
+            source="node_tool",
+        ) as span:
+            tracing.record_agent_tool_exception(
+                span,
+                RuntimeError("upstream failed: api_key=sk-super-secret"),
+            )
+
+        tool_span = next(
+            s for s in self.exporter.get_finished_spans() if s.name == "heym.agent.tool.execute"
+        )
+        serialized = repr(
+            {
+                "status": tool_span.status.description,
+                "events": [
+                    {"name": event.name, "attributes": dict(event.attributes)}
+                    for event in tool_span.events
+                ],
+            }
+        )
+        self.assertNotIn("sk-super-secret", serialized)
+        self.assertIn("[REDACTED]", serialized)
+
+    def test_set_span_status_failure_is_swallowed(self) -> None:
+        class BrokenSpan:
+            def set_status(self, *_args: object, **_kwargs: object) -> None:
+                raise RuntimeError("otel broken")
+
+        tracing.set_span_status(BrokenSpan(), trace.StatusCode.ERROR, "boom")
 
 
 class WorkflowSpanTest(_EnabledTracingTestBase):
@@ -273,7 +539,7 @@ class ObservabilityStatusEndpointTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(dumped["enabled"])
         self.assertEqual(dumped["endpoint"], "http://collector:4318")
         self.assertEqual(dumped["instrumented"], ["fastapi", "httpx"])
-        self.assertEqual(dumped["spans"], ["workflow", "node"])
+        self.assertEqual(dumped["spans"], ["workflow", "node", "agent_tool"])
         # No secret/header value anywhere in the serialized status.
         self.assertNotIn("secret", str(dumped).lower())
         self.assertNotIn("authorization", str(dumped).lower())
