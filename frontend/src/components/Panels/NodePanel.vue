@@ -231,6 +231,7 @@ const icons = {
   sticky: StickyNote,
   merge: GitMerge,
   set: Settings2,
+  converter: Repeat,
   jsonOutputMapper: Braces,
   telegram: MessageSquare,
   slack: MessageSquare,

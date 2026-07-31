@@ -188,6 +188,12 @@ The Set node transforms and maps input data to custom output. Define key-value m
 
 See also [Variable](../nodes/variable-node.md), [Execute](../nodes/execute-node.md), and [Expression DSL](./expression-dsl.md).
 
+#### [Converter](../nodes/converter-node.md)
+
+The Converter node converts data between formats without writing code. The first supported conversions are `csvToJson` (CSV text into an array of row objects, or arrays when there is no header) and `jsonToCsv` (an array of objects/rows into CSV text). Configure the conversion direction, a source expression, the delimiter, and header handling; for `jsonToCsv` you can pin an explicit column order. Quoting, embedded delimiters, and embedded newlines follow RFC 4180. The result is available as `$converterNode.result`.
+
+See also [Set](../nodes/set-node.md), [DataTable](../nodes/datatable-node.md), and [Expression DSL](./expression-dsl.md).
+
 #### [Variable](../nodes/variable-node.md)
 
 The Variable node sets or updates a workflow-local variable (`$vars.variableName`) or a persistent [global variable](./global-variables.md) (`$global.variableName`). Use it for counters, accumulated lists, and shared state. Configure variable name, value expression, type coercion, and whether to store in the global store. Array variables support `$array()` and `.add()`.

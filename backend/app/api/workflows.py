@@ -459,6 +459,8 @@ def get_node_output_expression(node: dict) -> str | None:
         return f"${label}.results (array of iteration outputs)"
     if node_type == "merge":
         return f"${label}.merged"
+    if node_type == "converter":
+        return f"${label}.result"
     if node_type == "slack":
         return f"${label}.success"
     if node_type == "textInput":
