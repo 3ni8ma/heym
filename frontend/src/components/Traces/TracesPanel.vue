@@ -103,11 +103,29 @@ interface ToolCallEntry {
   source?: string;
   mcp_server?: string;
   workflow_name?: string;
+  status?: string;
+}
+
+interface ToolMetrics {
+  count?: number;
+  success?: number;
+  error?: number;
+  pending?: number;
+  timeout?: number;
+  cancelled?: number;
+  total_duration_ms?: number;
+  max_duration_ms?: number;
 }
 
 function getToolCallsFromResponse(response: Record<string, unknown> | null): ToolCallEntry[] | undefined {
   const arr = response?.tool_calls;
   return Array.isArray(arr) ? (arr as ToolCallEntry[]) : undefined;
+}
+
+function getToolMetricsFromResponse(response: Record<string, unknown> | null): ToolMetrics | null {
+  const metrics = response?.tool_metrics;
+  if (!metrics || typeof metrics !== "object" || Array.isArray(metrics)) return null;
+  return metrics as ToolMetrics;
 }
 
 function getSkillsFromRequest(request: Record<string, unknown> | null): string[] | undefined {
@@ -282,6 +300,12 @@ const steps = computed<TraceStep[]>(() =>
     ? buildTraceSteps(selectedTrace.value, { workflowNames: workflowNames.value })
     : [],
 );
+
+const selectedToolMetrics = computed<ToolMetrics | null>(() => {
+  if (!selectedTrace.value) return null;
+  const response = (selectedTrace.value.response ?? null) as Record<string, unknown> | null;
+  return getToolMetricsFromResponse(response);
+});
 
 async function copyToClipboard(text: string, type: "request" | "response"): Promise<void> {
   try {
@@ -977,6 +1001,42 @@ onMounted(async () => {
               {{ selectedTrace.total_tokens ?? "-" }}
             </div>
           </Card>
+        </div>
+
+        <div
+          v-if="selectedToolMetrics && (selectedToolMetrics.count ?? 0) > 0"
+          class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
+          data-testid="trace-tool-metrics"
+        >
+          <span class="font-medium text-foreground">Tools</span>
+          <span>{{ selectedToolMetrics.count }} calls</span>
+          <span v-if="(selectedToolMetrics.success ?? 0) > 0">
+            {{ selectedToolMetrics.success }} ok
+          </span>
+          <span
+            v-if="(selectedToolMetrics.error ?? 0) > 0"
+            class="text-destructive"
+          >
+            {{ selectedToolMetrics.error }} error
+          </span>
+          <span
+            v-if="(selectedToolMetrics.timeout ?? 0) > 0"
+            class="text-destructive"
+          >
+            {{ selectedToolMetrics.timeout }} timeout
+          </span>
+          <span v-if="(selectedToolMetrics.cancelled ?? 0) > 0">
+            {{ selectedToolMetrics.cancelled }} cancelled
+          </span>
+          <span v-if="(selectedToolMetrics.pending ?? 0) > 0">
+            {{ selectedToolMetrics.pending }} pending
+          </span>
+          <span
+            v-if="typeof selectedToolMetrics.total_duration_ms === 'number'"
+            class="tabular-nums"
+          >
+            {{ formatMillis(selectedToolMetrics.total_duration_ms) }} total
+          </span>
         </div>
 
         <TraceDurationChart

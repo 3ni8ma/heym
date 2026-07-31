@@ -539,9 +539,11 @@ export function usePropertiesPanelController() {
   const suppressCloseExpandDialogsForNavigationId = ref<string | null>(null);
   const llmSystemInstructionInputRef = ref<ExpandableFieldRef | null>(null);
   const llmImageExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const llmExtraBodyExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const currentLlmExpressionFieldIndex = ref(0);
   const agentSystemInstructionInputRef = ref<ExpandableFieldRef | null>(null);
   const agentImageExpressionInputRef = ref<ExpandableFieldRef | null>(null);
+  const agentExtraBodyExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const agentMcpEnvInputRefs = ref<Map<string, ExpandableFieldRef>>(new Map());
   const currentAgentExpressionFieldIndex = ref(0);
   const codexRepositoryUrlExpressionInputRef = ref<ExpandableFieldRef | null>(null);
@@ -565,6 +567,7 @@ export function usePropertiesPanelController() {
   const loadingGuardrailModels = ref(false);
   const loadingFallbackModels = ref(false);
   const jsonFormatError = ref(false);
+  const extraBodyFormatError = ref(false);
   const telegramCredentials = ref<CredentialListItem[]>([]);
   const slackCredentials = ref<CredentialListItem[]>([]);
   const slackTriggerCredentials = ref<CredentialListItem[]>([]);
@@ -3231,6 +3234,10 @@ export function usePropertiesPanelController() {
       return;
     }
     currentLlmExpressionFieldIndex.value = index;
+    if (index === llmExtraBodyExpressionIndex.value) {
+      llmExtraBodyExpressionInputRef.value?.openExpandDialog();
+      return;
+    }
     if (isImageOutputMode.value) {
       if (index === 0) {
         userMessageInputRef.value?.openExpandDialog();
@@ -3264,6 +3271,7 @@ export function usePropertiesPanelController() {
     llmSystemInstructionInputRef.value?.closeExpandDialog();
     userMessageInputRef.value?.closeExpandDialog();
     llmImageExpressionInputRef.value?.closeExpandDialog();
+    llmExtraBodyExpressionInputRef.value?.closeExpandDialog();
     currentLlmExpressionFieldIndex.value = newIndex;
     nextTick(() => {
       openLlmExpressionFieldAtIndex(newIndex);
@@ -3332,9 +3340,13 @@ export function usePropertiesPanelController() {
     } else if (index === 2 && n.data.imageInputEnabled) {
       agentImageExpressionInputRef.value?.openExpandDialog();
     } else if (index >= baseCount) {
-      const connId = agentMcpEnvConnectionIds.value[index - baseCount];
+      // Extra body sits after the MCP env slots so adding it never shifts their indices.
+      const envIndex = index - baseCount;
+      const connId = agentMcpEnvConnectionIds.value[envIndex];
       if (connId) {
         agentMcpEnvInputRefs.value.get(connId)?.openExpandDialog();
+      } else if (index === agentExtraBodyExpressionIndex.value) {
+        agentExtraBodyExpressionInputRef.value?.openExpandDialog();
       }
     }
   }
@@ -3355,6 +3367,7 @@ export function usePropertiesPanelController() {
     agentSystemInstructionInputRef.value?.closeExpandDialog();
     userMessageInputRef.value?.closeExpandDialog();
     agentImageExpressionInputRef.value?.closeExpandDialog();
+    agentExtraBodyExpressionInputRef.value?.closeExpandDialog();
     for (const input of agentMcpEnvInputRefs.value.values()) {
       input.closeExpandDialog();
     }
@@ -7265,15 +7278,35 @@ export function usePropertiesPanelController() {
     return workflowStore.selectedNode?.data.outputType === "image";
   });
 
+  /**
+   * Slot index of the extra body field, or -1 when it is not shown. Image output mode has
+   * no extra body field because image requests never receive the payload.
+   */
+  const llmExtraBodyExpressionIndex = computed((): number => {
+    const n = workflowStore.selectedNode;
+    if (!n || n.type !== "llm" || !n.data.extraBodyEnabled || isImageOutputMode.value) {
+      return -1;
+    }
+    return 2 + (n.data.imageInputEnabled ? 1 : 0);
+  });
+
   const llmExpressionFieldCount = computed((): number => {
     const n = workflowStore.selectedNode;
     if (!n || n.type !== "llm") {
       return 1;
     }
-    if (isImageOutputMode.value) {
-      return n.data.imageInputEnabled ? 2 : 1;
+    const base = isImageOutputMode.value ? 1 : 2;
+    const extraBodySlot = llmExtraBodyExpressionIndex.value === -1 ? 0 : 1;
+    return base + (n.data.imageInputEnabled ? 1 : 0) + extraBodySlot;
+  });
+
+  /** Slot index of the extra body field, or -1 while the toggle is off. */
+  const agentExtraBodyExpressionIndex = computed((): number => {
+    const n = workflowStore.selectedNode;
+    if (!n || n.type !== "agent" || !n.data.extraBodyEnabled) {
+      return -1;
     }
-    return n.data.imageInputEnabled ? 3 : 2;
+    return (n.data.imageInputEnabled ? 3 : 2) + agentMcpEnvConnectionIds.value.length;
   });
 
   const agentExpressionFieldCount = computed((): number => {
@@ -7281,7 +7314,11 @@ export function usePropertiesPanelController() {
     if (!n || n.type !== "agent") {
       return 1;
     }
-    return (n.data.imageInputEnabled ? 3 : 2) + agentMcpEnvConnectionIds.value.length;
+    return (
+      (n.data.imageInputEnabled ? 3 : 2) +
+      agentMcpEnvConnectionIds.value.length +
+      (n.data.extraBodyEnabled ? 1 : 0)
+    );
   });
 
   const agentMcpEnvConnectionIds = computed((): string[] => {
@@ -8175,6 +8212,26 @@ export function usePropertiesPanelController() {
     }
   }
 
+  function formatExtraBody(): void {
+    if (!selectedNode.value) return;
+    const raw = selectedNode.value.data.extraBody;
+    if (!raw || typeof raw !== "string") return;
+
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("Extra body must be a JSON object");
+      }
+      updateNodeData("extraBody", JSON.stringify(parsed, null, 2));
+      extraBodyFormatError.value = false;
+    } catch {
+      extraBodyFormatError.value = true;
+      setTimeout(() => {
+        extraBodyFormatError.value = false;
+      }, 2000);
+    }
+  }
+
   function updateNodeData(key: string, value: unknown): void {
     if (!selectedNode.value) return;
     const currentData = selectedNode.value.data as Record<string, unknown>;
@@ -8861,8 +8918,10 @@ export function usePropertiesPanelController() {
     redisKeyInputRef,
     llmSystemInstructionInputRef,
     llmImageExpressionInputRef,
+    llmExtraBodyExpressionInputRef,
     agentSystemInstructionInputRef,
     agentImageExpressionInputRef,
+    agentExtraBodyExpressionInputRef,
     codexRepositoryUrlExpressionInputRef,
     codexBaseBranchExpressionInputRef,
     codexTaskPromptExpressionInputRef,
@@ -8877,6 +8936,7 @@ export function usePropertiesPanelController() {
     loadingGuardrailModels,
     loadingFallbackModels,
     jsonFormatError,
+    extraBodyFormatError,
     slackTriggerCredentials,
     discordTriggerCredentials,
     loadingNotionDataSources,
@@ -9329,7 +9389,9 @@ export function usePropertiesPanelController() {
     getExpressionWarning,
     isImageOutputMode,
     llmExpressionFieldCount,
+    llmExtraBodyExpressionIndex,
     agentExpressionFieldCount,
+    agentExtraBodyExpressionIndex,
     mcpCallArgumentKeys,
     mcpCallExpressionFieldCount,
     selectedModelIsReasoning,
@@ -9389,6 +9451,7 @@ export function usePropertiesPanelController() {
     mcpCallSelectedTool,
     mcpCallToolOptions,
     formatJsonSchema,
+    formatExtraBody,
     updateNodeData,
     toggleWebSocketTriggerEvent,
     handleLabelChange,

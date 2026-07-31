@@ -28,6 +28,7 @@
 <br/>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
+[![MCP status](https://mcpvitals.com/badge/46f18385ee.svg?theme=flat-square)](https://mcpvitals.com/status/46f18385ee)
 [![Commons Clause](https://img.shields.io/badge/Condition-Commons%20Clause-orange.svg?style=flat-square)](COMMONS-CLAUSE.md)
 [![Heym Version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fheymrun%2Fheym%2Fmain%2Ffrontend%2Fpackage.json&query=%24.version&label=Heym&prefix=v&color=blueviolet&style=flat-square)](https://github.com/heymrun/heym/releases)
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
@@ -285,7 +286,7 @@ Heym Built for developers who want control and enterprise teams that need a trus
 14. Make's official docs cover Webhooks modules and HTTP(S) request modules, but I couldn't find a native WebSocket trigger or send module
 15. As of April 22, 2026, n8n's official docs document HTTP batching and loop/wait patterns rather than a native LLM batch-status branch, Zapier's official ChatGPT app docs list no triggers and only a generic API Request beta, and Make's official OpenAI integration page exposes batch actions like create/watch completed but not a first-class status-branching LLM node, so n8n/Make are marked partial and Zapier is marked unavailable for this specific pattern
 16. n8n has no native LLM token cost tracking; community workaround workflows exist (e.g. "Token Estim8r") but require manual installation and post-execution API calls — an open feature request exists as of May 2026. Zapier exposes no per-execution token count or USD cost to users; AI steps consume tasks only, with no model pricing table. Make switched to a credits model in August 2025 that partially reflects token consumption for Make-hosted AI, but third-party connections using your own API key are billed as 1 operation = 1 credit with no token counting, and there is no per-execution USD breakdown by model
-17. Heym emits native OpenTelemetry spans (one per workflow run plus one per node) over OTLP/HTTP to any compatible backend, with W3C trace-context propagation and no instrumentation code, configured via `HEYM_OTEL_*` env vars and disabled by default. n8n has a documented OpenTelemetry tracing setup for workflow and node executions (blog.n8n.io). Zapier and Make.com do not document OpenTelemetry export of their workflow/scenario executions as of June 2026
+17. Heym emits native OpenTelemetry spans (one per workflow run, one per node, plus Agent tool spans) over OTLP/HTTP to any compatible backend, with W3C trace-context propagation and no instrumentation code, configured via `HEYM_OTEL_*` env vars and disabled by default. n8n has a documented OpenTelemetry tracing setup for workflow and node executions (blog.n8n.io). Zapier and Make.com do not document OpenTelemetry export of their workflow/scenario executions as of June 2026
 18. Heym Workflow Analyzer runs the workflow when possible, reads the execution result, and generates a shared editable Markdown report covering improvement areas, purpose, and step-by-step behavior. n8n AI Workflow Builder can create/refine/debug workflows, Zapier AI troubleshooting explains errored runs, and Make scenario history/agent reasoning exposes run details, but their public docs do not describe the same shared run-aware workflow analysis document
 19. n8n Insights, Zapier Zap History/Task Usage, and Make Scenario History are monitoring/history surfaces. They do not document custom dashboard widgets backed by arbitrary workflow logic like Heym's Dashboard tab, where each widget can fetch, transform, retrieve, or generate data through its own hidden workflow
 20. [n8n All executions](https://docs.n8n.io/workflows/executions/all-executions/) lists running executions and can load previous execution data into the editor, while [Zapier run statuses](https://help.zapier.com/hc/en-us/articles/20505304170637-Review-run-statuses-in-Zap-workflows) exposes a running editor state. [Make Scenario History](https://help.make.com/scenario-history) documents run details and logs. Their public docs, checked July 18, 2026, do not describe Heym's exact combination: open an arbitrary in-flight production run from History or a Kanban card, restore its current snapshot, and keep receiving node animation and Debug logs on the same canvas.
@@ -331,6 +332,7 @@ ENCRYPTION_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
 sed -i.bak "s|^SECRET_KEY=.*|SECRET_KEY=${SECRET_KEY}|; s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=${ENCRYPTION_KEY}|" .env && rm -f .env.bak
 docker run --env-file .env \
   -p 4017:4017 \
+  -e FILE_STORAGE_DIR=/app/data/files \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$(pwd)/data/files:/app/data/files" \
   -v heym-codex-workspaces:/app/data/codex-workspaces \
@@ -341,6 +343,7 @@ docker run \
   -e ENCRYPTION_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))") \
   -e SECRET_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))") \
   -e DATABASE_URL=postgresql+asyncpg://postgres:postgres@host.docker.internal:6543/heym \
+  -e FILE_STORAGE_DIR=/app/data/files \
   -p 4017:4017 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$(pwd)/data/files:/app/data/files" \
@@ -350,7 +353,7 @@ docker run \
 
 Open the editor in your browser at port `4017` in either setup.
 See [ENVIRONMENT-VARIABLES.md](ENVIRONMENT-VARIABLES.md) for the full list of configuration variables and their defaults.
-For direct `docker run` setups, the `data/files` mount keeps Drive uploads, skill-generated files, and team-shared Drive files available across container restarts. The `heym-codex-workspaces` volume is the shared workspace that Python skills (and the Codex node) run in as a hardened sibling container; keep it mounted or skill execution fails closed. Per-run sandbox isolation needs Docker Engine 25.0+.
+For direct `docker run` setups, the `data/files` mount keeps Drive uploads, skill-generated files, and team-shared Drive files available across container restarts. `FILE_STORAGE_DIR=/app/data/files` is what makes that mount live: the release image starts the backend from `/app/backend`, so the default relative `./data/files` would resolve to `/app/backend/data/files` and land inside the container instead of your mount. `./run.sh` and `./deploy.sh` are unaffected — that image runs the backend from `/app`. The `heym-codex-workspaces` volume is the shared workspace that Python skills (and the Codex node) run in as a hardened sibling container; keep it mounted or skill execution fails closed. Per-run sandbox isolation needs Docker Engine 25.0+.
 The Docker socket mount lets Heym start hardened sibling containers and grants broad host control. Every MCP `stdio` server needs it, since the caller-supplied command always runs in a throwaway container rather than on the backend host; without a Docker daemon, stdio fails closed. Docker log access remains disabled unless you also set `DOCKER_LOGS_ENABLED=true` and `DOCKER_LOGS_ALLOWED_EMAILS=admin@example.com` for trusted users. Create the trusted admin account before enabling Docker logs, or keep `ALLOW_REGISTER=false`, so an unverified self-registration cannot claim an allow-listed email.
 
 ## Deploy & Call Workflows
@@ -372,7 +375,7 @@ cp .env.example .env
 ./deploy.sh --restart    # Restart services
 ```
 
-> Set `ALLOW_REGISTER=false` in `.env` to lock down registration in production.
+> Register your admin account first, then set `ALLOW_REGISTER=false` in `.env` and restart to lock down registration in production. There is no first-user bootstrap, so disabling registration against an empty database leaves no way to create an account.
 
 </details>
 
@@ -553,7 +556,7 @@ Every trace records input and output token counts alongside a real-time USD cost
 Define test cases with expected outputs. Run the entire suite with one click. Review pass/fail, actual vs expected, and historical run data. Ship AI workflows with confidence.
 
 ### OpenTelemetry Tracing
-Export a root span per workflow run plus a child span per node over OTLP/HTTP to Jaeger, Grafana Tempo, Honeycomb, Datadog, or any OpenTelemetry backend. Spans carry workflow id, node type, status, duration, and LLM token usage, with W3C trace context propagated across inbound webhooks, outbound HTTP, and sub-workflows. Disabled by default; turn it on with the `HEYM_OTEL_*` environment variables and review status under **Settings → Observability**. See the in-app docs (Reference > OpenTelemetry Tracing) for details.
+Export a root span per workflow run, a child span per node, and Agent tool spans (`heym.agent.tool.execute`) over OTLP/HTTP to Jaeger, Grafana Tempo, Honeycomb, Datadog, or any OpenTelemetry backend. Spans carry workflow id, node type, status, duration, LLM token usage, and tool identity/status, with W3C trace context propagated across inbound webhooks, outbound HTTP, and sub-workflows. Disabled by default; turn it on with the `HEYM_OTEL_*` environment variables and review status under **Settings → Observability**. See the in-app docs (Reference > OpenTelemetry Tracing) for details.
 
 ---
 
@@ -647,7 +650,7 @@ heym/
 | `FRONTEND_PORT` | Frontend server port | `4017` |
 | `ALLOW_REGISTER` | Enable user registration | `true` |
 | `REQUEST_BODY_MAX_SIZE_MB` | Maximum backend HTTP request body size; defaults to `100`, one MB above `FILE_MAX_SIZE_MB` to allow multipart overhead | `100` |
-| `HEYM_OTEL_ENABLED` | Enable OpenTelemetry tracing for workflow and node executions | `false` |
+| `HEYM_OTEL_ENABLED` | Enable OpenTelemetry tracing for workflow, node, and Agent tool executions | `false` |
 | `HEYM_OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP/HTTP base endpoint, e.g. `http://collector:4318` (spans posted to `/v1/traces`) | — |
 | `HEYM_OTEL_EXPORTER_OTLP_HEADERS` | Comma-separated `key=value` exporter headers for auth | — |
 | `HEYM_OTEL_SERVICE_NAME` | `service.name` resource attribute | `heym` |
@@ -755,7 +758,7 @@ Commercial licensing, enterprise deployment help, and professional support are a
 ## Contributors
 
 <a href="https://github.com/heymrun/heym/graphs/contributors">
-  <img alt="Heym contributors" src="https://contrib.rocks/image?repo=heymrun/heym&amp;v=0.0.79" />
+  <img alt="Heym contributors" src="https://contrib.rocks/image?repo=heymrun/heym&amp;v=0.0.81" />
 </a>
 
 </div>

@@ -39,11 +39,12 @@ from app.services.chart_payload import (
     build_chart_payload,  # noqa: F401 - public patch alias for node handlers
 )
 from app.services.execution_cancellation import (
-    clear_execution as _clear_sub_execution,
-)
-from app.services.execution_cancellation import (
+    buffer_live_execution_events,
     record_execution_node_completed,
     record_execution_node_started,
+)
+from app.services.execution_cancellation import (
+    clear_execution as _clear_sub_execution,
 )
 from app.services.execution_cancellation import (
     register_execution as _register_sub_execution,
@@ -52,9 +53,14 @@ from app.services.expression_evaluator import (
     _is_single_dollar_expression,
     should_resolve_embedded_dollar_refs_arithmetically,
 )
+from app.services.expression_evaluator import (
+    is_top_level_ternary_expression as _is_top_level_ternary_expression,
+)
 from app.services.highlight.highlight_builder import build_highlight_payload
 from app.services.llm_trace import LLMTraceContext
 from app.services.node_execution import NodeExecutionContext, execute_node_handler
+from app.services.node_execution.extra_body import resolve_extra_body
+from app.services.node_execution.llm_batch_input import normalize_batch_user_messages
 from app.services.timezone_utils import get_configured_timezone, normalize_datetime_to_timezone
 from app.services.websocket_utils import (
     send_websocket_message,  # noqa: F401 - public patch alias for node handlers
@@ -78,6 +84,26 @@ _POSTGRES_UNSAFE_JSON_STRING_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\
 
 _SLUG_RE = re.compile(r"[^a-zA-Z0-9]+")
 _EXECUTION_CONTEXT_INPUT_KEY = "__heym_execution_context"
+
+
+def _reconcile_resumed_tool_calls(
+    tool_calls: list[dict[str, Any]],
+    *,
+    decision: str,
+    finished_at: int,
+) -> list[dict[str, Any]]:
+    """Replace persisted HITL pending records with the completed review decision."""
+    reconciled = copy.deepcopy(tool_calls)
+    for tool_call in reconciled:
+        if tool_call.get("status") != "pending":
+            continue
+        tool_call["status"] = "success"
+        tool_call["result"] = {
+            "decision": decision,
+            "reviewed": True,
+        }
+        tool_call["finished_at"] = finished_at
+    return reconciled
 
 
 def _slugify_tool_name(label: str) -> str:
@@ -248,8 +274,15 @@ def run_async(coro):
         if loop.is_running():
             import concurrent.futures
 
+            # Preserve the active Agent/workflow span when we must hop to a worker
+            # thread to host a fresh asyncio.run() loop.
+            otel_ctx = tracing.capture_context()
+
+            def _run_with_otel() -> object:
+                return tracing.run_with_context(otel_ctx, lambda: asyncio.run(coro))
+
             with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(asyncio.run, coro)
+                future = pool.submit(_run_with_otel)
                 return future.result()
         else:
             return loop.run_until_complete(coro)
@@ -3410,6 +3443,13 @@ class WorkflowExecutor:
             result = self.resolve_expression(template, inputs, node_id)
             return str(result) if result is not None else ""
 
+        # `$cond ? a : b` always contains spaces, so the check above misses it and the
+        # template path below would substitute only the leading `$span` and keep the rest
+        # as literal text -- the evaluate dialog resolves the same value as an expression.
+        if self._is_top_level_ternary_expression(template):
+            result = self.resolve_expression(template.strip(), inputs, node_id)
+            return str(result) if result is not None else ""
+
         def replace_expr(expr: str) -> str:
             result = self.resolve_expression(expr, inputs, node_id)
             return str(result) if result is not None else expr
@@ -3439,6 +3479,7 @@ class WorkflowExecutor:
         on_batch_status_update: Callable[[dict[str, Any]], None] | None = None,
         should_abort: Callable[[], str | None] | None = None,
         request_timeout: float = 60.0,
+        extra_body: dict[str, Any] | None = None,
     ) -> dict:
         if not credential_id or not model:
             return {
@@ -3562,49 +3603,15 @@ class WorkflowExecutor:
                 response_format = {"type": "json_object"}
 
         if batch_mode_enabled:
-            if output_type == "image":
-                return {
-                    "text": "",
-                    "model": model,
-                    "error": "Batch mode is only supported for text outputs.",
-                }
-            if image_input:
-                return {
-                    "text": "",
-                    "model": model,
-                    "error": "Batch mode does not support image input.",
-                }
-            if not isinstance(user_message, list):
-                return {
-                    "text": "",
-                    "model": model,
-                    "error": (
-                        "Batch mode requires the User Message expression to resolve to an array. "
-                        'Example: $input.items.map("item.text")'
-                    ),
-                }
-            if not user_message:
-                return {
-                    "text": "",
-                    "model": model,
-                    "error": "Batch mode requires at least one item in the User Message array.",
-                }
-            normalized_user_messages: list[str] = []
-            for batch_item in user_message:
-                if batch_item is None:
-                    normalized_user_messages.append("")
-                elif isinstance(batch_item, (str, int, float, bool)):
-                    normalized_user_messages.append(str(batch_item))
-                else:
-                    return {
-                        "text": "",
-                        "model": model,
-                        "error": (
-                            "Batch mode items must resolve to strings or primitive values. "
-                            "Map objects into prompt strings before sending them to the LLM node."
-                        ),
-                    }
-            user_message = normalized_user_messages
+            normalized_messages, batch_input_error = normalize_batch_user_messages(
+                user_message=user_message,
+                model=model,
+                output_type=output_type,
+                image_input=image_input,
+            )
+            if batch_input_error is not None:
+                return batch_input_error
+            user_message = normalized_messages or []
 
         last_error: Exception | None = None
         last_model = model
@@ -3707,6 +3714,7 @@ class WorkflowExecutor:
                             on_status_update=on_batch_status_update,
                             should_abort=should_abort,
                             request_timeout=request_timeout,
+                            extra_body=extra_body,
                         )
                     )
                 else:
@@ -3728,6 +3736,7 @@ class WorkflowExecutor:
                             trace_context=trace_context,
                             conversation_history=self.conversation_history,
                             request_timeout=request_timeout,
+                            extra_body=extra_body,
                         )
                     )
                 out = dict(result)
@@ -3884,11 +3893,18 @@ class WorkflowExecutor:
                     "error": "HITL is not supported inside sub-agent tools. Request review from the parent agent before calling the sub-agent.",
                 }
             elapsed_ms = round((time.time() * 1000) - start_ms)
-            status = "error" if result.get("error") else "success"
             log_output = _build_agent_execution_log_output(result)
-            llm_tool_result = {"text": result.get("text", "")}
+            llm_tool_result: dict[str, Any] = {"text": result.get("text", "")}
+            # NodeResult keeps success/error for canvas/Debug UI compatibility.
+            # Lifecycle cancelled/timeout belongs only on the tool payload returned
+            # to the parent agent loop.
             if result.get("error"):
+                lifecycle = self._sub_agent_tool_lifecycle_status(result) or "error"
                 llm_tool_result["error"] = result["error"]
+                llm_tool_result["status"] = lifecycle
+                node_status = "error"
+            else:
+                node_status = "success"
             metadata: dict[str, Any] = {"invocation": "sub_agent_tool"}
             if trace_id:
                 metadata["trace_id"] = trace_id
@@ -3897,7 +3913,7 @@ class WorkflowExecutor:
                     node_id=target_node_id,
                     node_label=sub_agent_label_display,
                     node_type="agent",
-                    status=status,
+                    status=node_status,
                     output=log_output,
                     execution_time_ms=float(elapsed_ms),
                     error=result.get("error"),
@@ -3910,30 +3926,101 @@ class WorkflowExecutor:
                     _build_node_complete_event(delegated_result, log_output)
                 )
             return llm_tool_result
-        except Exception as exc:
-            elapsed_ms = round((time.time() * 1000) - start_ms)
-            metadata: dict[str, Any] = {"invocation": "sub_agent_tool"}
-            trace_id = getattr(exc, "trace_id", None)
-            if isinstance(trace_id, str) and trace_id:
-                metadata["trace_id"] = trace_id
-            delegated_result = self._stamp_node_result(
-                NodeResult(
-                    node_id=target_node_id,
-                    node_label=sub_agent_label_display,
-                    node_type="agent",
-                    status="error",
-                    output={},
-                    execution_time_ms=float(elapsed_ms),
-                    error=str(exc),
-                    metadata=metadata,
-                )
+        except WorkflowTimeoutError as exc:
+            return self._finalize_sub_agent_tool_failure(
+                target_node_id=target_node_id,
+                sub_agent_label_display=sub_agent_label_display,
+                start_ms=start_ms,
+                status="timeout",
+                error=str(exc) or "Workflow execution timed out",
+                exc=exc,
             )
-            self.delegated_agent_node_results.append(delegated_result)
-            if self.agent_progress_queue is not None:
-                self.agent_progress_queue.put(_build_node_complete_event(delegated_result, {}))
-            return {"text": "", "error": str(exc)}
+        except WorkflowCancelledError as exc:
+            return self._finalize_sub_agent_tool_failure(
+                target_node_id=target_node_id,
+                sub_agent_label_display=sub_agent_label_display,
+                start_ms=start_ms,
+                status="cancelled",
+                error=str(exc) or "Workflow execution cancelled",
+                exc=exc,
+            )
+        except Exception as exc:
+            return self._finalize_sub_agent_tool_failure(
+                target_node_id=target_node_id,
+                sub_agent_label_display=sub_agent_label_display,
+                start_ms=start_ms,
+                status="error",
+                error=str(exc),
+                exc=exc,
+            )
         finally:
             self._sub_agent_call_depth -= 1
+
+    def _sub_agent_tool_lifecycle_status(self, result: dict[str, Any]) -> str | None:
+        """Return cancelled for a failed sub-agent when trusted cancel signals exist.
+
+        Does not infer from free-form error text. Parent Stop sets ``cancel_event``;
+        nested tools that abort the agent loop with explicit ``cancelled`` populate
+        tool_calls / tool_metrics.
+
+        Nested ``timeout`` is intentionally ignored here: timeouts do not abort the
+        agent loop, so a later unrelated ``result.error`` must stay ``error``.
+        Timeout status is reserved for ``WorkflowTimeoutError`` at the exception
+        boundary.
+        """
+        if self.cancel_event is not None and self.cancel_event.is_set():
+            return "cancelled"
+        metrics = result.get("tool_metrics")
+        if isinstance(metrics, dict) and int(metrics.get("cancelled") or 0) > 0:
+            return "cancelled"
+        tool_calls = result.get("tool_calls")
+        if isinstance(tool_calls, list):
+            for entry in tool_calls:
+                if not isinstance(entry, dict):
+                    continue
+                if entry.get("status") == "cancelled":
+                    return "cancelled"
+                nested = entry.get("result")
+                if isinstance(nested, dict) and nested.get("status") == "cancelled":
+                    return "cancelled"
+        return None
+
+    def _finalize_sub_agent_tool_failure(
+        self,
+        *,
+        target_node_id: str,
+        sub_agent_label_display: str,
+        start_ms: float,
+        status: str,
+        error: str,
+        exc: BaseException,
+    ) -> dict[str, Any]:
+        """Record a failed sub-agent invocation and return a status-tagged tool payload.
+
+        ``NodeResult.status`` stays ``error`` so Debug/timeline UI keep working;
+        the tool payload carries the precise lifecycle status for the parent loop.
+        """
+        elapsed_ms = round((time.time() * 1000) - start_ms)
+        metadata: dict[str, Any] = {"invocation": "sub_agent_tool"}
+        trace_id = getattr(exc, "trace_id", None)
+        if isinstance(trace_id, str) and trace_id:
+            metadata["trace_id"] = trace_id
+        delegated_result = self._stamp_node_result(
+            NodeResult(
+                node_id=target_node_id,
+                node_label=sub_agent_label_display,
+                node_type="agent",
+                status="error",
+                output={},
+                execution_time_ms=float(elapsed_ms),
+                error=error,
+                metadata=metadata,
+            )
+        )
+        self.delegated_agent_node_results.append(delegated_result)
+        if self.agent_progress_queue is not None:
+            self.agent_progress_queue.put(_build_node_complete_event(delegated_result, {}))
+        return {"text": "", "status": status, "error": error}
 
     def _execute_sub_workflow_tool(
         self,
@@ -4052,6 +4139,24 @@ class WorkflowExecutor:
                             out["error"] = nr["error"]
                             break
             return out
+        except WorkflowTimeoutError as exc:
+            # Preserve lifecycle status at the source so the agent loop can abort
+            # on explicit cancelled/timeout without inferring from error text.
+            elapsed_ms = round((time.time() * 1000) - start_ms)
+            return {
+                "status": "timeout",
+                "outputs": {},
+                "execution_time_ms": elapsed_ms,
+                "error": str(exc) or "Workflow execution timed out",
+            }
+        except WorkflowCancelledError as exc:
+            elapsed_ms = round((time.time() * 1000) - start_ms)
+            return {
+                "status": "cancelled",
+                "outputs": {},
+                "execution_time_ms": elapsed_ms,
+                "error": str(exc) or "Workflow execution cancelled",
+            }
         except Exception as exc:
             elapsed_ms = round((time.time() * 1000) - start_ms)
             return {
@@ -4846,6 +4951,7 @@ class WorkflowExecutor:
         json_output_enabled = bool(node_data.get("jsonOutputEnabled", False))
         json_output_schema = node_data.get("jsonOutputSchema", "")
         hitl_enabled = bool(node_data.get("hitlEnabled", False))
+        agent_extra_body = resolve_extra_body(self, node_data, inputs, node_id)
         hitl_resolution = copy.deepcopy(self.hitl_resume_context.get(node_id or "") or {})
         hitl_agent_state = copy.deepcopy(hitl_resolution.get("_agent_state") or {})
         is_hitl_resume = bool(hitl_resolution)
@@ -5047,7 +5153,12 @@ class WorkflowExecutor:
             if hitl_agent_state:
                 resume_messages = copy.deepcopy(hitl_agent_state.get("messages") or [])
                 resume_messages.append({"role": "user", "content": approval_resume_text})
-                resume_tool_calls = copy.deepcopy(hitl_agent_state.get("tool_calls") or [])
+                raw_resume_tool_calls = hitl_agent_state.get("tool_calls") or []
+                resume_tool_calls = _reconcile_resumed_tool_calls(
+                    [entry for entry in raw_resume_tool_calls if isinstance(entry, dict)],
+                    decision=hitl_decision,
+                    finished_at=int(time.time() * 1000),
+                )
                 resume_elapsed_ms = float(hitl_agent_state.get("elapsed_ms") or 0.0)
                 resume_prompt_tokens = int(hitl_agent_state.get("prompt_tokens") or 0)
                 resume_completion_tokens = int(hitl_agent_state.get("completion_tokens") or 0)
@@ -5538,6 +5649,7 @@ class WorkflowExecutor:
                             initial_completion_tokens=resume_completion_tokens,
                             should_abort=should_abort_tool_loop,
                             request_timeout=request_timeout_seconds,
+                            extra_body=agent_extra_body,
                         )
                     )
                 else:
@@ -5558,6 +5670,7 @@ class WorkflowExecutor:
                             conversation_history=conversation_history,
                             skills_included=skills_used or None,
                             request_timeout=request_timeout_seconds,
+                            extra_body=agent_extra_body,
                         )
                     )
             except Exception as e:
@@ -5591,7 +5704,9 @@ class WorkflowExecutor:
                 tc.get("elapsed_ms", 0) for tc in tool_calls if tc.get("name") == "call_sub_agent"
             ]
             other_times = [
-                tc.get("elapsed_ms", 0) for tc in tool_calls if tc.get("name") != "call_sub_agent"
+                tc.get("elapsed_ms", 0)
+                for tc in tool_calls
+                if tc.get("name") not in {"call_sub_agent", "_context_compression"}
             ]
             tools_total_ms = (max(sub_agent_times) if sub_agent_times else 0) + sum(other_times)
             result["timing_breakdown"] = {
@@ -6719,6 +6834,10 @@ class WorkflowExecutor:
             transform_ternary_expression=self._transform_ternary_expression,
         )
 
+    def _is_top_level_ternary_expression(self, template: str) -> bool:
+        """True when the whole trimmed string is one ``$cond ? truthy : falsy`` ternary."""
+        return _is_top_level_ternary_expression(template, self)
+
     def _extract_square_bracket_inner(self, s: str, start: int) -> tuple[str | None, int]:
         """s[start] must be '['. Returns (inner_content, index_after_closing_bracket)."""
         if start >= len(s) or s[start] != "[":
@@ -6929,6 +7048,16 @@ class WorkflowExecutor:
     ) -> str:
         if not template:
             return str(inputs)
+
+        # Same ternary carve-out as `_resolve_template`, so message-style fields agree with
+        # the evaluate dialog instead of rendering `1113 > 0 ? a.x : b.y` as literal text.
+        if self._is_top_level_ternary_expression(template):
+            ternary_result = self.resolve_expression(
+                template.strip(), inputs, current_node_id, preserve_type=preserve_type
+            )
+            if preserve_type and isinstance(ternary_result, str):
+                return ternary_result
+            return str(ternary_result) if ternary_result is not None else template
 
         def replace_expr(expr: str) -> str:
             result = self.resolve_expression(
@@ -9327,7 +9456,15 @@ def build_node_start_message(
 
 
 def execute_workflow_streaming(**kwargs):
-    """Public streaming entry: wrap the run in an OTel root span (no-op when disabled).
+    """Public streaming entry: record live events so late observers replay them."""
+    yield from buffer_live_execution_events(
+        _execute_workflow_streaming_traced(**kwargs),
+        str(kwargs.get("execution_id") or ""),
+    )
+
+
+def _execute_workflow_streaming_traced(**kwargs):
+    """Wrap the run in an OTel root span (no-op when disabled).
 
     The canvas "Run" and portal use the streaming path, which has its own node
     loop and does not call ``WorkflowExecutor.execute``. This wrapper opens the
