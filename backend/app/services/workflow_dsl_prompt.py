@@ -444,6 +444,8 @@ In workflow expressions:
   - `reasoningEffort`: "low" | "medium" | "high" (for reasoning models)
   - `jsonOutputEnabled`: Boolean to enable structured JSON output (default: false) - for text mode only
   - `jsonOutputSchema`: JSON Schema string for structured output (optional, use with jsonOutputEnabled)
+  - `extraBodyEnabled`: Boolean to send provider-specific extra request parameters (default: false). NEVER set this unless the user explicitly asks for custom/raw API request parameters.
+  - `extraBody`: JSON object string merged into the LLM API request body (use with extraBodyEnabled), e.g. `"{ \"thinking\": { \"type\": \"disabled\" } }"`. Supports `$` expressions. Not applied to image output or guardrail checks.
   - `guardrailsEnabled`: Boolean to enable content safety guardrails (default: false)
   - `guardrailsCategories`: Array of blocked category keys (see Guardrails section below)
   - `guardrailsSeverity`: "low" | "medium" | "high" — detection sensitivity (default: "medium")
@@ -721,6 +723,8 @@ The response includes `$llmNodeLabel.image` (base64 data URL) which can be used 
   - `subWorkflowIds`: Array of workflow UUIDs this agent can call as tools (e.g. `["workflow-uuid-1"]`). Agent gets `call_sub_workflow` tool with `workflow_id` and `inputs` (object).
   - `jsonOutputEnabled`: Boolean to enable structured JSON output (default: false)
   - `jsonOutputSchema`: JSON Schema string for structured output (optional, use with jsonOutputEnabled)
+  - `extraBodyEnabled`: Boolean to send provider-specific extra request parameters (default: false). NEVER set this unless the user explicitly asks for custom/raw API request parameters.
+  - `extraBody`: JSON object string merged into every LLM API request the agent makes, including each tool-loop turn (use with extraBodyEnabled), e.g. `"{ \"thinking\": { \"type\": \"disabled\" } }"`. Supports `$` expressions. Not applied to guardrail checks.
   - `guardrailsEnabled`: Boolean to enable content safety guardrails (default: false)
   - `guardrailsCategories`: Array of blocked category keys (see Guardrails section below)
   - `guardrailsSeverity`: "low" | "medium" | "high" — detection sensitivity (default: "medium")

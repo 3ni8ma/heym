@@ -455,6 +455,8 @@ export interface NodeData {
   };
   jsonOutputEnabled?: boolean;
   jsonOutputSchema?: string;
+  extraBodyEnabled?: boolean;
+  extraBody?: string;
   hitlEnabled?: boolean;
   hitlSummary?: string;
   outputType?: LLMOutputType;
