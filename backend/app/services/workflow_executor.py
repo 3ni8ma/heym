@@ -59,6 +59,8 @@ from app.services.expression_evaluator import (
 from app.services.highlight.highlight_builder import build_highlight_payload
 from app.services.llm_trace import LLMTraceContext
 from app.services.node_execution import NodeExecutionContext, execute_node_handler
+from app.services.node_execution.extra_body import resolve_extra_body
+from app.services.node_execution.llm_batch_input import normalize_batch_user_messages
 from app.services.timezone_utils import get_configured_timezone, normalize_datetime_to_timezone
 from app.services.websocket_utils import (
     send_websocket_message,  # noqa: F401 - public patch alias for node handlers
@@ -3477,6 +3479,7 @@ class WorkflowExecutor:
         on_batch_status_update: Callable[[dict[str, Any]], None] | None = None,
         should_abort: Callable[[], str | None] | None = None,
         request_timeout: float = 60.0,
+        extra_body: dict[str, Any] | None = None,
     ) -> dict:
         if not credential_id or not model:
             return {
@@ -3600,49 +3603,15 @@ class WorkflowExecutor:
                 response_format = {"type": "json_object"}
 
         if batch_mode_enabled:
-            if output_type == "image":
-                return {
-                    "text": "",
-                    "model": model,
-                    "error": "Batch mode is only supported for text outputs.",
-                }
-            if image_input:
-                return {
-                    "text": "",
-                    "model": model,
-                    "error": "Batch mode does not support image input.",
-                }
-            if not isinstance(user_message, list):
-                return {
-                    "text": "",
-                    "model": model,
-                    "error": (
-                        "Batch mode requires the User Message expression to resolve to an array. "
-                        'Example: $input.items.map("item.text")'
-                    ),
-                }
-            if not user_message:
-                return {
-                    "text": "",
-                    "model": model,
-                    "error": "Batch mode requires at least one item in the User Message array.",
-                }
-            normalized_user_messages: list[str] = []
-            for batch_item in user_message:
-                if batch_item is None:
-                    normalized_user_messages.append("")
-                elif isinstance(batch_item, (str, int, float, bool)):
-                    normalized_user_messages.append(str(batch_item))
-                else:
-                    return {
-                        "text": "",
-                        "model": model,
-                        "error": (
-                            "Batch mode items must resolve to strings or primitive values. "
-                            "Map objects into prompt strings before sending them to the LLM node."
-                        ),
-                    }
-            user_message = normalized_user_messages
+            normalized_messages, batch_input_error = normalize_batch_user_messages(
+                user_message=user_message,
+                model=model,
+                output_type=output_type,
+                image_input=image_input,
+            )
+            if batch_input_error is not None:
+                return batch_input_error
+            user_message = normalized_messages or []
 
         last_error: Exception | None = None
         last_model = model
@@ -3745,6 +3714,7 @@ class WorkflowExecutor:
                             on_status_update=on_batch_status_update,
                             should_abort=should_abort,
                             request_timeout=request_timeout,
+                            extra_body=extra_body,
                         )
                     )
                 else:
@@ -3766,6 +3736,7 @@ class WorkflowExecutor:
                             trace_context=trace_context,
                             conversation_history=self.conversation_history,
                             request_timeout=request_timeout,
+                            extra_body=extra_body,
                         )
                     )
                 out = dict(result)
@@ -4980,6 +4951,7 @@ class WorkflowExecutor:
         json_output_enabled = bool(node_data.get("jsonOutputEnabled", False))
         json_output_schema = node_data.get("jsonOutputSchema", "")
         hitl_enabled = bool(node_data.get("hitlEnabled", False))
+        agent_extra_body = resolve_extra_body(self, node_data, inputs, node_id)
         hitl_resolution = copy.deepcopy(self.hitl_resume_context.get(node_id or "") or {})
         hitl_agent_state = copy.deepcopy(hitl_resolution.get("_agent_state") or {})
         is_hitl_resume = bool(hitl_resolution)
@@ -5677,6 +5649,7 @@ class WorkflowExecutor:
                             initial_completion_tokens=resume_completion_tokens,
                             should_abort=should_abort_tool_loop,
                             request_timeout=request_timeout_seconds,
+                            extra_body=agent_extra_body,
                         )
                     )
                 else:
@@ -5697,6 +5670,7 @@ class WorkflowExecutor:
                             conversation_history=conversation_history,
                             skills_included=skills_used or None,
                             request_timeout=request_timeout_seconds,
+                            extra_body=agent_extra_body,
                         )
                     )
             except Exception as e:

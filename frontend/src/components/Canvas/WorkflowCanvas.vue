@@ -1018,6 +1018,8 @@ function getDefaultNodeData(type: NodeType): WorkflowNode["data"] {
       batchModeEnabled: false,
       jsonOutputEnabled: false,
       jsonOutputSchema: "",
+      extraBodyEnabled: false,
+      extraBody: "",
     },
     agent: {
       label: "agent",
@@ -1034,6 +1036,8 @@ function getDefaultNodeData(type: NodeType): WorkflowNode["data"] {
       subAgentLabels: [],
       hitlEnabled: false,
       hitlSummary: "",
+      extraBodyEnabled: false,
+      extraBody: "",
     },
     codex: {
       label: "codex",
