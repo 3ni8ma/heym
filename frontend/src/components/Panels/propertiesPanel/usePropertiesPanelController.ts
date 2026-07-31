@@ -661,6 +661,7 @@ export function usePropertiesPanelController() {
   ];
   const crawlerUrlInputRef = ref<ExpandableFieldRef | null>(null);
   const consoleLogMessageInputRef = ref<ExpandableFieldRef | null>(null);
+  const converterSourceInputRef = ref<ExpandableFieldRef | null>(null);
   const switchExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const loopArrayExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const executeTemplateExpressionInputRef = ref<ExpandableFieldRef | null>(null);
@@ -2219,6 +2220,7 @@ export function usePropertiesPanelController() {
     rabbitmqMessageBodyInputRef.value?.closeExpandDialog();
     crawlerUrlInputRef.value?.closeExpandDialog();
     consoleLogMessageInputRef.value?.closeExpandDialog();
+    converterSourceInputRef.value?.closeExpandDialog();
     switchExpressionInputRef.value?.closeExpandDialog();
     loopArrayExpressionInputRef.value?.closeExpandDialog();
     executeTemplateExpressionInputRef.value?.closeExpandDialog();
@@ -2833,6 +2835,16 @@ export function usePropertiesPanelController() {
         }
       };
       nextTick(() => tryOpenDialog());
+    } else if (nodeType === "converter") {
+      const tryOpenDialog = (attempts = 0): void => {
+        if (attempts > 20) return;
+        if (converterSourceInputRef.value) {
+          nextTick(() => converterSourceInputRef.value?.openExpandDialog());
+        } else {
+          setTimeout(() => tryOpenDialog(attempts + 1), 100);
+        }
+      };
+      nextTick(() => tryOpenDialog());
     } else if (nodeType === "switch") {
       const tryOpenDialog = (attempts = 0): void => {
         if (attempts > 20) return;
@@ -3109,6 +3121,7 @@ export function usePropertiesPanelController() {
       case "throwError":
       case "crawler":
       case "consoleLog":
+      case "converter":
       case "switch":
       case "loop":
       case "grist":
@@ -8892,6 +8905,7 @@ export function usePropertiesPanelController() {
     websocketTriggerEventOptions,
     crawlerUrlInputRef,
     consoleLogMessageInputRef,
+    converterSourceInputRef,
     switchExpressionInputRef,
     loopArrayExpressionInputRef,
     executeTemplateExpressionInputRef,

@@ -353,6 +353,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       source: "$input.text",
       delimiter: ",",
       hasHeader: true,
+      trimValues: true,
       includeHeader: true,
       converterColumns: "",
     },

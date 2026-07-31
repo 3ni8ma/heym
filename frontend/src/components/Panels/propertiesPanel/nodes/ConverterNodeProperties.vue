@@ -9,6 +9,7 @@ const {
   workflowStore,
   selectedNode,
   selectedNodeEvaluateDialogLabel,
+  converterSourceInputRef,
   updateNodeData,
 } = usePropertiesPanelContext();
 
@@ -41,6 +42,7 @@ const conversionOptions = [
     >
       <Label>Source</Label>
       <ExpressionInput
+        ref="converterSourceInputRef"
         :model-value="selectedNode.data.source || ''"
         placeholder="$input.text"
         :rows="2"
@@ -95,6 +97,31 @@ const conversionOptions = [
       </div>
       <p class="text-xs text-muted-foreground">
         When enabled, header values become the keys of each row object.
+      </p>
+    </div>
+
+    <div
+      v-if="(selectedNode.data.conversion || 'csvToJson') === 'csvToJson'"
+      class="space-y-2"
+      data-testid="converter-trim-values-field"
+    >
+      <div class="flex items-center gap-2">
+        <input
+          id="converter-trim-values"
+          type="checkbox"
+          class="h-4 w-4 rounded border-input bg-background"
+          :checked="selectedNode.data.trimValues !== false"
+          @change="updateNodeData('trimValues', ($event.target as HTMLInputElement).checked)"
+        >
+        <Label
+          for="converter-trim-values"
+          class="text-sm font-medium"
+        >
+          Trim whitespace
+        </Label>
+      </div>
+      <p class="text-xs text-muted-foreground">
+        Strip surrounding spaces from header names and cell values.
       </p>
     </div>
 

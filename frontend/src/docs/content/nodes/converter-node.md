@@ -19,12 +19,13 @@ The **Converter** node converts data between formats without writing code. It is
 | `source` | expression | The data to convert. Leave empty to use the node's first input |
 | `delimiter` | string | Single-character field separator (default `,`) |
 | `hasHeader` | boolean | `csvToJson` only — treat the first row as the header (default `true`) |
+| `trimValues` | boolean | `csvToJson` only — strip whitespace around header names and cell values (default `true`) |
 | `includeHeader` | boolean | `jsonToCsv` only — write a header row (default `true`) |
 | `converterColumns` | string | `jsonToCsv` only — optional comma-separated column order |
 
 ## Behavior
 
-- **`csvToJson`** parses the source CSV text. With `hasHeader: true` each row becomes an object keyed by the header values; with `hasHeader: false` each row becomes an array of cell values. Quoted fields, embedded delimiters, and embedded newlines are handled per RFC 4180.
+- **`csvToJson`** parses the source CSV text. With `hasHeader: true` each row becomes an object keyed by the header values; with `hasHeader: false` each row becomes an array of cell values. Quoted fields, embedded delimiters, and embedded newlines are handled per RFC 4180. A leading UTF-8 BOM (common in Excel exports) is stripped, and duplicate header names are made unique (`a, a` → `a`, `a_2`). Set `delimiter` to `\t` to parse tab-separated values.
 - **`jsonToCsv`** builds CSV text from an array of objects (or arrays). Column order is taken from `converterColumns` when provided, otherwise inferred from the first object's keys. Values containing the delimiter, quotes, or newlines are quoted automatically.
 
 ## Example

@@ -425,6 +425,7 @@ export interface NodeData {
   delimiter?: string;
   hasHeader?: boolean;
   includeHeader?: boolean;
+  trimValues?: boolean;
   converterColumns?: string;
   pinnedData?: Record<string, unknown> | null;
   credentialId?: string;

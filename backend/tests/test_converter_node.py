@@ -82,6 +82,37 @@ class CsvToJsonTests(unittest.TestCase):
         self.assertEqual(output["conversion"], "csvToJson")
         self.assertEqual(output["result"], [{"name": "Ada"}])
 
+    def test_leading_utf8_bom_is_stripped(self) -> None:
+        output = converter_node.execute(_ctx({"conversion": "csvToJson"}, "\ufeffname,age\nAda,36"))
+
+        # The first key is "name", not the BOM-prefixed variant.
+        self.assertEqual(output["result"], [{"name": "Ada", "age": "36"}])
+
+    def test_duplicate_headers_are_made_unique(self) -> None:
+        output = converter_node.execute(_ctx({"conversion": "csvToJson"}, "a,a\n1,2"))
+
+        self.assertEqual(output["result"], [{"a": "1", "a_2": "2"}])
+
+    def test_tab_delimiter_via_escape(self) -> None:
+        output = converter_node.execute(
+            _ctx({"conversion": "csvToJson", "delimiter": "\\t"}, "name\tage\nAda\t36")
+        )
+
+        self.assertEqual(output["result"], [{"name": "Ada", "age": "36"}])
+
+    def test_trim_values_default_strips_whitespace(self) -> None:
+        output = converter_node.execute(_ctx({"conversion": "csvToJson"}, "name, age\nAda , 36"))
+
+        # Header keys and cell values are trimmed by default.
+        self.assertEqual(output["result"], [{"name": "Ada", "age": "36"}])
+
+    def test_trim_values_false_keeps_whitespace(self) -> None:
+        output = converter_node.execute(
+            _ctx({"conversion": "csvToJson", "trimValues": False}, "name, age\nAda , 36")
+        )
+
+        self.assertEqual(output["result"], [{"name": "Ada ", " age": " 36"}])
+
 
 class JsonToCsvTests(unittest.TestCase):
     def test_dicts_become_csv_with_header(self) -> None:

@@ -1294,6 +1294,7 @@ The http node ALWAYS returns a structured response object:
   - `source`: Expression for the input to convert (e.g. `"$previousNode.body"` or `"$userInput.body.text"`). If empty, the first input is used.
   - `delimiter`: Single-character field delimiter (default `,`)
   - `hasHeader`: Boolean, `csvToJson` only — first row is the header (default true)
+  - `trimValues`: Boolean, `csvToJson` only — strip whitespace around header names and cell values (default true)
   - `includeHeader`: Boolean, `jsonToCsv` only — write a header row (default true)
   - `converterColumns`: Optional explicit column order for `jsonToCsv` (comma-separated string)
 - **Output**: `$label.result` — parsed rows for `csvToJson`, CSV string for `jsonToCsv`.

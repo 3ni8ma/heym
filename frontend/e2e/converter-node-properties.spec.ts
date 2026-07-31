@@ -37,6 +37,7 @@ test("shows Converter csvToJson fields", async ({ page }) => {
     await expect(panel.getByTestId("converter-source-field")).toBeVisible();
     await expect(panel.getByTestId("converter-delimiter-field")).toBeVisible();
     await expect(panel.getByTestId("converter-has-header-field")).toBeVisible();
+    await expect(panel.getByTestId("converter-trim-values-field")).toBeVisible();
     // jsonToCsv-only fields are hidden for the csvToJson direction.
     await expect(panel.getByTestId("converter-include-header-field")).toHaveCount(0);
     await expect(panel.getByTestId("converter-columns-field")).toHaveCount(0);
@@ -77,8 +78,9 @@ test("shows Converter jsonToCsv fields", async ({ page }) => {
     await expect(panel.getByTestId("converter-source-field")).toBeVisible();
     await expect(panel.getByTestId("converter-include-header-field")).toBeVisible();
     await expect(panel.getByTestId("converter-columns-field")).toBeVisible();
-    // csvToJson-only header toggle is hidden for the jsonToCsv direction.
+    // csvToJson-only toggles are hidden for the jsonToCsv direction.
     await expect(panel.getByTestId("converter-has-header-field")).toHaveCount(0);
+    await expect(panel.getByTestId("converter-trim-values-field")).toHaveCount(0);
   } finally {
     await deleteWorkflow(page, workflow.id);
   }

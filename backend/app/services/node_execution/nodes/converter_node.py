@@ -6,6 +6,25 @@ import json
 
 from app.services.node_execution.base import NodeExecutionContext
 
+_DELIMITER_ESCAPES = {"\\t": "\t", "\\n": "\n", "\\r": "\r"}
+
+
+def _resolve_delimiter(raw: object) -> str:
+    """Resolve the configured delimiter, honoring escapes like ``\\t`` for tab."""
+    text = str(raw) if raw not in (None, "") else ","
+    text = _DELIMITER_ESCAPES.get(text, text)
+    return text[:1] or ","
+
+
+def _dedupe_headers(header: list[str]) -> list[str]:
+    """Make duplicate header names unique (``a, a`` -> ``a, a_2``)."""
+    counts: dict[str, int] = {}
+    result: list[str] = []
+    for name in header:
+        counts[name] = counts.get(name, 0) + 1
+        result.append(name if counts[name] == 1 else f"{name}_{counts[name]}")
+    return result
+
 
 def _coerce_rows(value: object) -> list:
     """Normalize an arbitrary value into a list of rows for CSV building."""
@@ -35,19 +54,23 @@ def _normalize_columns(columns_raw: object) -> list[str] | None:
     return None
 
 
-def _csv_to_json(text: object, delimiter: str, has_header: bool) -> list:
+def _csv_to_json(text: object, delimiter: str, has_header: bool, trim_values: bool) -> list:
     """Parse CSV text into a list of row dicts (with header) or row lists."""
     if not isinstance(text, str):
         text = str(text)
+    # Strip a leading UTF-8 BOM so Excel exports don't produce a "\ufeffname" key.
+    text = text.lstrip("\ufeff")
     if text.strip() == "":
         return []
     reader = csv.reader(io.StringIO(text), delimiter=delimiter)
     rows = list(reader)
+    if trim_values:
+        rows = [[cell.strip() for cell in row] for row in rows]
     if not rows:
         return []
     if not has_header:
         return rows
-    header = rows[0]
+    header = _dedupe_headers(rows[0])
     return [
         {header[i]: (row[i] if i < len(row) else "") for i in range(len(header))}
         for row in rows[1:]
@@ -103,7 +126,7 @@ def execute(ctx: NodeExecutionContext) -> object:
     node_data = ctx.node_data
 
     conversion = node_data.get("conversion", "csvToJson")
-    delimiter = str(node_data.get("delimiter") or ",")[:1] or ","
+    delimiter = _resolve_delimiter(node_data.get("delimiter"))
     source_template = node_data.get("source", "")
 
     if isinstance(source_template, str) and source_template.strip():
@@ -119,6 +142,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         result: object = _json_to_csv(source_value, delimiter, include_header, columns)
     else:
         has_header = node_data.get("hasHeader", True)
-        result = _csv_to_json(source_value, delimiter, has_header)
+        trim_values = node_data.get("trimValues", True)
+        result = _csv_to_json(source_value, delimiter, has_header, trim_values)
 
     return {"result": result, "conversion": conversion}
