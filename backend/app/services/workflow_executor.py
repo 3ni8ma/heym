@@ -39,11 +39,12 @@ from app.services.chart_payload import (
     build_chart_payload,  # noqa: F401 - public patch alias for node handlers
 )
 from app.services.execution_cancellation import (
-    clear_execution as _clear_sub_execution,
-)
-from app.services.execution_cancellation import (
+    buffer_live_execution_events,
     record_execution_node_completed,
     record_execution_node_started,
+)
+from app.services.execution_cancellation import (
+    clear_execution as _clear_sub_execution,
 )
 from app.services.execution_cancellation import (
     register_execution as _register_sub_execution,
@@ -9481,7 +9482,15 @@ def build_node_start_message(
 
 
 def execute_workflow_streaming(**kwargs):
-    """Public streaming entry: wrap the run in an OTel root span (no-op when disabled).
+    """Public streaming entry: record live events so late observers replay them."""
+    yield from buffer_live_execution_events(
+        _execute_workflow_streaming_traced(**kwargs),
+        str(kwargs.get("execution_id") or ""),
+    )
+
+
+def _execute_workflow_streaming_traced(**kwargs):
+    """Wrap the run in an OTel root span (no-op when disabled).
 
     The canvas "Run" and portal use the streaming path, which has its own node
     loop and does not call ``WorkflowExecutor.execute``. This wrapper opens the
