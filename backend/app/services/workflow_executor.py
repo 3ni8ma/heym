@@ -52,6 +52,9 @@ from app.services.expression_evaluator import (
     _is_single_dollar_expression,
     should_resolve_embedded_dollar_refs_arithmetically,
 )
+from app.services.expression_evaluator import (
+    is_top_level_ternary_expression as _is_top_level_ternary_expression,
+)
 from app.services.highlight.highlight_builder import build_highlight_payload
 from app.services.llm_trace import LLMTraceContext
 from app.services.node_execution import NodeExecutionContext, execute_node_handler
@@ -3435,6 +3438,13 @@ class WorkflowExecutor:
 
         if template.startswith("$") and " " not in template:
             result = self.resolve_expression(template, inputs, node_id)
+            return str(result) if result is not None else ""
+
+        # `$cond ? a : b` always contains spaces, so the check above misses it and the
+        # template path below would substitute only the leading `$span` and keep the rest
+        # as literal text -- the evaluate dialog resolves the same value as an expression.
+        if self._is_top_level_ternary_expression(template):
+            result = self.resolve_expression(template.strip(), inputs, node_id)
             return str(result) if result is not None else ""
 
         def replace_expr(expr: str) -> str:
@@ -6849,6 +6859,10 @@ class WorkflowExecutor:
             transform_ternary_expression=self._transform_ternary_expression,
         )
 
+    def _is_top_level_ternary_expression(self, template: str) -> bool:
+        """True when the whole trimmed string is one ``$cond ? truthy : falsy`` ternary."""
+        return _is_top_level_ternary_expression(template, self)
+
     def _extract_square_bracket_inner(self, s: str, start: int) -> tuple[str | None, int]:
         """s[start] must be '['. Returns (inner_content, index_after_closing_bracket)."""
         if start >= len(s) or s[start] != "[":
@@ -7059,6 +7073,16 @@ class WorkflowExecutor:
     ) -> str:
         if not template:
             return str(inputs)
+
+        # Same ternary carve-out as `_resolve_template`, so message-style fields agree with
+        # the evaluate dialog instead of rendering `1113 > 0 ? a.x : b.y` as literal text.
+        if self._is_top_level_ternary_expression(template):
+            ternary_result = self.resolve_expression(
+                template.strip(), inputs, current_node_id, preserve_type=preserve_type
+            )
+            if preserve_type and isinstance(ternary_result, str):
+                return ternary_result
+            return str(ternary_result) if ternary_result is not None else template
 
         def replace_expr(expr: str) -> str:
             result = self.resolve_expression(
