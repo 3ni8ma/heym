@@ -1296,12 +1296,30 @@ The http node ALWAYS returns a structured response object:
   - `label`: Node identifier
   - `conversion`: `"csvToJson"` (CSV text -> array of row objects) or `"jsonToCsv"` (array of objects/rows -> CSV text)
   - `source`: Expression for the input to convert (e.g. `"$previousNode.body"` or `"$userInput.body.text"`). If empty, the first input is used.
-  - `delimiter`: Single-character field delimiter (default `,`)
-  - `hasHeader`: Boolean, `csvToJson` only — first row is the header (default true)
-  - `trimValues`: Boolean, `csvToJson` only — strip whitespace around header names and cell values (default true)
+  - `delimiter`: Single-character field delimiter (default `,`). Use `"\\t"` for tab-separated values.
+  - `hasHeader`: Boolean, `csvToJson` only — first row is the header (default true). When false each row is an array of cell values instead of an object.
+  - `trimValues`: Boolean, `csvToJson` only — strip whitespace around header names and cell values (default true). Set false to keep whitespace inside quoted fields exactly as written.
   - `includeHeader`: Boolean, `jsonToCsv` only — write a header row (default true)
-  - `converterColumns`: Optional explicit column order for `jsonToCsv` (comma-separated string)
-- **Output**: `$label.result` — parsed rows for `csvToJson`, CSV string for `jsonToCsv`.
+  - `converterColumns`: Optional explicit column order for `jsonToCsv` (comma-separated string). When omitted, columns are inferred from the row keys.
+- **Output**: `$label.result` — parsed rows for `csvToJson`, CSV string for `jsonToCsv`. `$label.conversion` echoes the conversion that ran.
+
+**Example** (CSV text -> rows):
+```json
+{
+  "type": "converter",
+  "data": {
+    "label": "toRows",
+    "conversion": "csvToJson",
+    "source": "$userInput.body.text",
+    "delimiter": ",",
+    "hasHeader": true,
+    "trimValues": true
+  }
+}
+```
+For `name,age\\nAda,36` downstream nodes read `$toRows.result` -> `[{ "name": "Ada", "age": "36" }]`.
+
+**⚠️ USE `converter` INSTEAD OF `execute`/`llm` FOR CSV**: When the user asks to parse, read, or build CSV/TSV, use a `converter` node. Do NOT write Python in an `execute` node and do NOT ask an LLM to reformat the rows — quoting, embedded newlines, and BOM handling are already correct here. Loop over `$label.result` with a `loop` node to process rows one by one.
 
 ### 14. sticky (Note)
 - **Purpose**: Add documentation notes to canvas (not executed)
