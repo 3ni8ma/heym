@@ -25,7 +25,8 @@ The **Converter** node converts data between formats without writing code. It is
 
 ## Behavior
 
-- **`csvToJson`** parses the source CSV text. With `hasHeader: true` each row becomes an object keyed by the header values; with `hasHeader: false` each row becomes an array of cell values. Quoted fields, embedded delimiters, and embedded newlines are handled per RFC 4180. A leading UTF-8 BOM (common in Excel exports) is stripped, and duplicate header names are made unique (`a, a` → `a`, `a_2`). Set `delimiter` to `\t` to parse tab-separated values.
+- **`csvToJson`** parses the source CSV text. With `hasHeader: true` each row becomes an object keyed by the header values; with `hasHeader: false` each row becomes an array of cell values. Quoted fields, embedded delimiters, and embedded newlines are handled per RFC 4180. A leading UTF-8 BOM (common in Excel exports) is stripped, and duplicate header names are made unique without overwriting a real column (`a, a, a_2` → `a`, `a_3`, `a_2`). Set `delimiter` to `\t` to parse tab-separated values.
+- **`trimValues`** (default `true`) strips surrounding whitespace from header names and cell values, **including inside quoted fields** (`" padded "` → `padded`). RFC 4180 treats quoted whitespace as data, so set `trimValues: false` to preserve it exactly.
 - **`jsonToCsv`** builds CSV text from an array of objects (or arrays). Column order is taken from `converterColumns` when provided, otherwise inferred from the first object's keys. Values containing the delimiter, quotes, or newlines are quoted automatically.
 
 ## Example

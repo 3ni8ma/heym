@@ -17,12 +17,25 @@ def _resolve_delimiter(raw: object) -> str:
 
 
 def _dedupe_headers(header: list[str]) -> list[str]:
-    """Make duplicate header names unique (``a, a`` -> ``a, a_2``)."""
-    counts: dict[str, int] = {}
+    """Make duplicate header names unique (``a, a`` -> ``a, a_2``).
+
+    A generated suffix is bumped until the candidate is free — not already used
+    and not another original column name elsewhere in the header — so a real
+    column such as ``a_2`` is never overwritten and no value is dropped.
+    """
+    originals = list(header)
+    used: set[str] = set()
     result: list[str] = []
-    for name in header:
-        counts[name] = counts.get(name, 0) + 1
-        result.append(name if counts[name] == 1 else f"{name}_{counts[name]}")
+    for name in originals:
+        candidate = name
+        if candidate in used:
+            index = 2
+            candidate = f"{name}_{index}"
+            while candidate in used or candidate in originals:
+                index += 1
+                candidate = f"{name}_{index}"
+        used.add(candidate)
+        result.append(candidate)
     return result
 
 

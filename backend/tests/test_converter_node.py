@@ -93,6 +93,12 @@ class CsvToJsonTests(unittest.TestCase):
 
         self.assertEqual(output["result"], [{"a": "1", "a_2": "2"}])
 
+    def test_dedupe_does_not_collide_with_existing_column(self) -> None:
+        # The generated suffix must skip a real "a_2" column so no value is lost.
+        output = converter_node.execute(_ctx({"conversion": "csvToJson"}, "a,a,a_2\n1,2,3"))
+
+        self.assertEqual(output["result"], [{"a": "1", "a_3": "2", "a_2": "3"}])
+
     def test_tab_delimiter_via_escape(self) -> None:
         output = converter_node.execute(
             _ctx({"conversion": "csvToJson", "delimiter": "\\t"}, "name\tage\nAda\t36")
