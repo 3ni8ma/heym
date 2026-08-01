@@ -1081,6 +1081,7 @@ function getDefaultNodeData(type: NodeType): WorkflowNode["data"] {
     sticky: { label: "stickyNote", stickyTitle: "Sticky Note", stickyColor: "yellow", note: "Double click to edit" },
     merge: { label: "merge", inputCount: 2 },
     set: { label: "set", mappings: [{ key: "text", value: "$input.text" }] },
+    converter: { label: "converter", conversion: "csvToJson", source: "$input.text", delimiter: ",", hasHeader: true, trimValues: true, includeHeader: true, converterColumns: "" },
     jsonOutputMapper: {
       label: "jsonResponse",
       mappings: [{ key: "message", value: "$input.text" }],

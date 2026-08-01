@@ -148,6 +148,7 @@ export type NodeType =
   | "sticky"
   | "merge"
   | "set"
+  | "converter"
   | "jsonOutputMapper"
   | "telegram"
   | "slack"
@@ -419,6 +420,13 @@ export interface NodeData {
   outputSchema?: OutputSchemaField[];
   inputCount?: number;
   mappings?: MappingField[];
+  conversion?: string;
+  source?: string;
+  delimiter?: string;
+  hasHeader?: boolean;
+  includeHeader?: boolean;
+  trimValues?: boolean;
+  converterColumns?: string;
   pinnedData?: Record<string, unknown> | null;
   credentialId?: string;
   githubCredentialId?: string;

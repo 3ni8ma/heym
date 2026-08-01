@@ -1289,6 +1289,20 @@ The http node ALWAYS returns a structured response object:
 3. Functions return their native type - randomInt returns a number, no conversion needed
 4. For modulo/math on set node output: `$generateRandom.randomNumber % 2 == 0` (use the key name, e.g., "randomNumber")
 
+### 13b. converter (Data Format Conversion)
+- **Purpose**: Convert data between formats without writing code. First conversions: CSV text <-> JSON rows.
+- **Inputs**: 1 | **Outputs**: 1
+- **Data fields**:
+  - `label`: Node identifier
+  - `conversion`: `"csvToJson"` (CSV text -> array of row objects) or `"jsonToCsv"` (array of objects/rows -> CSV text)
+  - `source`: Expression for the input to convert (e.g. `"$previousNode.body"` or `"$userInput.body.text"`). If empty, the first input is used.
+  - `delimiter`: Single-character field delimiter (default `,`)
+  - `hasHeader`: Boolean, `csvToJson` only — first row is the header (default true)
+  - `trimValues`: Boolean, `csvToJson` only — strip whitespace around header names and cell values (default true)
+  - `includeHeader`: Boolean, `jsonToCsv` only — write a header row (default true)
+  - `converterColumns`: Optional explicit column order for `jsonToCsv` (comma-separated string)
+- **Output**: `$label.result` — parsed rows for `csvToJson`, CSV string for `jsonToCsv`.
+
 ### 14. sticky (Note)
 - **Purpose**: Add documentation notes to canvas (not executed)
 - **Inputs**: 0 | **Outputs**: 0
