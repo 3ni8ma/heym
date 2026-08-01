@@ -27,6 +27,8 @@
 
 <br/>
 
+[![PR checks](https://img.shields.io/github/actions/workflow/status/heymrun/heym/pr-checks.yml?style=flat-square&event=pull_request&label=PR%20checks&logo=githubactions&logoColor=white)](https://github.com/heymrun/heym/actions/workflows/pr-checks.yml)
+[![Release image](https://img.shields.io/github/actions/workflow/status/heymrun/heym/publish-release-image.yml?style=flat-square&label=release%20image&logo=docker&logoColor=white)](https://github.com/heymrun/heym/actions/workflows/publish-release-image.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=flat-square)](LICENSE)
 [![MCP status](https://mcpvitals.com/badge/46f18385ee.svg?theme=flat-square)](https://mcpvitals.com/status/46f18385ee)
 [![Commons Clause](https://img.shields.io/badge/Condition-Commons%20Clause-orange.svg?style=flat-square)](COMMONS-CLAUSE.md)
@@ -363,6 +365,8 @@ Heym workflows are not limited to the editor. Run them from the canvas, call the
 ## Production Readiness
 
 Heym is built to be inspected and operated in your own infrastructure. Docker deployment, JWT auth, team controls, shared credentials, `SECURITY.md`, execution history, logs, LLM traces, OpenTelemetry export, evals, and per-model USD cost tracking all live in the core self-hostable product.
+
+Every pull request runs the [PR checks](https://github.com/heymrun/heym/actions/workflows/pr-checks.yml) workflow: a file line-limit check, frontend ESLint, TypeScript strict typecheck and production build, backend Ruff format and lint, the backend unit test suite, and Playwright E2E tests against a live Postgres service.
 
 <details>
 <summary><b>🐳 Docker Production Deployment</b></summary>
@@ -758,7 +762,7 @@ Commercial licensing, enterprise deployment help, and professional support are a
 ## Contributors
 
 <a href="https://github.com/heymrun/heym/graphs/contributors">
-  <img alt="Heym contributors" src="https://contrib.rocks/image?repo=heymrun/heym&amp;v=0.0.81" />
+  <img alt="Heym contributors" src="https://contrib.rocks/image?repo=heymrun/heym&amp;v=0.0.82" />
 </a>
 
 </div>
