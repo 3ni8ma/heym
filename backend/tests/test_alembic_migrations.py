@@ -15,7 +15,16 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["103_add_google_drive_cred_type"])
+        self.assertEqual(self.script.get_heads(), ["104_add_cron_slot_claims"])
+
+    def test_cron_slot_claims_revision_follows_google_drive_revision(self) -> None:
+        cron_slot_revision = self.script.get_revision("104_add_cron_slot_claims")
+
+        self.assertIsNotNone(cron_slot_revision)
+        self.assertEqual(
+            cron_slot_revision.down_revision,
+            "103_add_google_drive_cred_type",
+        )
 
     def test_live_execution_snapshot_revision_follows_opencode_revision(self) -> None:
         live_execution_revision = self.script.get_revision("101_add_live_execution_snapshots")
