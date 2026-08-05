@@ -1936,7 +1936,7 @@ The last node in the iteration body MUST connect BACK to the loop node's `loop` 
   - `searchLimit`: Maximum number of results to return (only for "search" operation, default: 3)
   - `metadataFilters`: JSON object with metadata filters for search (only for "search" operation)
 
-**SETUP**: Requires a Vector Store created in the Vector Stores tab with either a "RAG: Qdrant + OpenAI" credential (external Qdrant server) or a "RAG: Psql + OpenAI" credential (vectors stored in Heym's own Postgres database via pgvector — no external service). The same RAG operations, metadata filters, and reranking work identically with both backends.
+**SETUP**: Requires a Vector Store created in the Vector Stores tab with a "RAG: Qdrant + OpenAI" credential (external Qdrant server), a "RAG: Psql + OpenAI" credential (vectors stored in Heym's own Postgres database via pgvector — no external service), or a "RAG: Custom Embeddings" credential (any OpenAI-compatible embedding endpoint by URL, targeting either backend). The same RAG operations, metadata filters, and reranking work identically with every backend.
 
 **RAG Operations**:
 
