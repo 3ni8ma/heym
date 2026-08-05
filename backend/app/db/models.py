@@ -59,6 +59,7 @@ class CredentialType(str, PyEnum):
     clickhouse = "clickhouse"
     opencode = "opencode"
     google_drive = "google_drive"
+    rag = "rag"
 
 
 class WorkflowAuthType(str, PyEnum):
