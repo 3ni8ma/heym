@@ -1904,65 +1904,6 @@ def _restore_sub_workflow_executions(executions: list[dict] | None) -> list[SubW
     return restored
 
 
-def _detect_pandoc_format(mime_type: str, filename: str) -> str | None:
-    """Return pandoc input format string for the given MIME type / filename, or None if unsupported."""
-    _mime_map: dict[str, str] = {
-        "text/markdown": "markdown",
-        "text/html": "html",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
-        "text/plain": "markdown",
-        "text/csv": "csv",
-    }
-    if mime_type in _mime_map:
-        return _mime_map[mime_type]
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    _ext_map: dict[str, str] = {
-        "md": "markdown",
-        "markdown": "markdown",
-        "html": "html",
-        "htm": "html",
-        "docx": "docx",
-        "txt": "markdown",
-        "csv": "csv",
-    }
-    return _ext_map.get(ext)
-
-
-def _extract_pdf_text(src_bytes: bytes) -> str:
-    """Extract plain text from a PDF via pypdf."""
-    import io
-
-    import pypdf
-
-    reader = pypdf.PdfReader(io.BytesIO(src_bytes))
-    parts = [page.extract_text() for page in reader.pages if page.extract_text()]
-    return "\n\n".join(parts)
-
-
-def _convert_image(src_bytes: bytes, target_format: str) -> tuple[bytes, str]:
-    """Convert image bytes to target_format. Returns (output_bytes, output_mime_type)."""
-    import io
-
-    from PIL import Image
-
-    _fmt_map: dict[str, tuple[str, str]] = {
-        "jpg": ("JPEG", "image/jpeg"),
-        "jpeg": ("JPEG", "image/jpeg"),
-        "png": ("PNG", "image/png"),
-        "bmp": ("BMP", "image/bmp"),
-        "webp": ("WEBP", "image/webp"),
-    }
-    if target_format not in _fmt_map:
-        raise ValueError(f"Drive Node: unsupported image output format '{target_format}'")
-    pil_format, mime_type = _fmt_map[target_format]
-    img = Image.open(io.BytesIO(src_bytes))
-    if pil_format == "JPEG" and img.mode in ("RGBA", "LA", "P"):
-        img = img.convert("RGB")
-    buf = io.BytesIO()
-    img.save(buf, format=pil_format)
-    return buf.getvalue(), mime_type
-
-
 class WorkflowExecutor:
     def __init__(
         self,

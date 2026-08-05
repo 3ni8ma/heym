@@ -664,7 +664,17 @@ export function usePropertiesPanelController() {
   ];
   const crawlerUrlInputRef = ref<ExpandableFieldRef | null>(null);
   const consoleLogMessageInputRef = ref<ExpandableFieldRef | null>(null);
-  const converterSourceInputRef = ref<ExpandableFieldRef | null>(null);
+  type ConverterExpressionFieldKey = "source" | "converterFileId" | "ocrPageRange";
+
+  interface ConverterExpressionField {
+    key: ConverterExpressionFieldKey;
+    label: string;
+  }
+
+  const converterExpressionInputRefs = ref<Map<ConverterExpressionFieldKey, ExpandableFieldRef>>(
+    new Map(),
+  );
+  const currentConverterExpressionFieldIndex = ref(0);
   const switchExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const loopArrayExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const executeTemplateExpressionInputRef = ref<ExpandableFieldRef | null>(null);
@@ -2223,7 +2233,7 @@ export function usePropertiesPanelController() {
     rabbitmqMessageBodyInputRef.value?.closeExpandDialog();
     crawlerUrlInputRef.value?.closeExpandDialog();
     consoleLogMessageInputRef.value?.closeExpandDialog();
-    converterSourceInputRef.value?.closeExpandDialog();
+    closeConverterExpressionDialogs();
     switchExpressionInputRef.value?.closeExpandDialog();
     loopArrayExpressionInputRef.value?.closeExpandDialog();
     executeTemplateExpressionInputRef.value?.closeExpandDialog();
@@ -2839,10 +2849,12 @@ export function usePropertiesPanelController() {
       };
       nextTick(() => tryOpenDialog());
     } else if (nodeType === "converter") {
+      currentConverterExpressionFieldIndex.value = 0;
       const tryOpenDialog = (attempts = 0): void => {
         if (attempts > 20) return;
-        if (converterSourceInputRef.value) {
-          nextTick(() => converterSourceInputRef.value?.openExpandDialog());
+        const firstField = converterExpressionFields.value[0];
+        if (firstField && converterExpressionInputRefs.value.get(firstField.key)) {
+          nextTick(() => openConverterExpressionFieldAtIndex(0));
         } else {
           setTimeout(() => tryOpenDialog(attempts + 1), 100);
         }
@@ -5765,6 +5777,80 @@ export function usePropertiesPanelController() {
     currentChartOutputExpressionFieldIndex.value = index;
   }
 
+  const converterExpressionFields = computed<ConverterExpressionField[]>(() => {
+    const n = workflowStore.selectedNode;
+    if (!n || n.type !== "converter") {
+      return [];
+    }
+    const conversion = n.data.conversion || "csvToJson";
+    if (conversion === "pdfToText") {
+      return [
+        { key: "converterFileId", label: "File" },
+        { key: "ocrPageRange", label: "Page range" },
+      ];
+    }
+    if (conversion === "imageToText" || conversion === "fileConvert") {
+      return [{ key: "converterFileId", label: "File" }];
+    }
+    return [{ key: "source", label: "Source" }];
+  });
+
+  const converterExpressionFieldCount = computed((): number => {
+    return converterExpressionFields.value.length;
+  });
+
+  function converterExpressionFieldIndex(key: ConverterExpressionFieldKey): number {
+    const index = converterExpressionFields.value.findIndex((field) => field.key === key);
+    return index >= 0 ? index : 0;
+  }
+
+  function setConverterExpressionInputRef(key: ConverterExpressionFieldKey, el: unknown): void {
+    if (el) {
+      converterExpressionInputRefs.value.set(key, el as ExpandableFieldRef);
+    } else {
+      converterExpressionInputRefs.value.delete(key);
+    }
+  }
+
+  function openConverterExpressionFieldAtIndex(index: number): void {
+    const n = selectedNode.value;
+    if (!n || n.type !== "converter") {
+      return;
+    }
+    const field = converterExpressionFields.value[index];
+    if (!field) {
+      return;
+    }
+    currentConverterExpressionFieldIndex.value = index;
+    converterExpressionInputRefs.value.get(field.key)?.openExpandDialog();
+  }
+
+  function closeConverterExpressionDialogs(): void {
+    for (const input of converterExpressionInputRefs.value.values()) {
+      input.closeExpandDialog();
+    }
+  }
+
+  function handleConverterExpressionFieldNavigate(direction: "prev" | "next"): void {
+    const total = converterExpressionFieldCount.value;
+    const newIndex =
+      direction === "prev"
+        ? currentConverterExpressionFieldIndex.value - 1
+        : currentConverterExpressionFieldIndex.value + 1;
+    if (newIndex < 0 || newIndex >= total) {
+      return;
+    }
+    closeConverterExpressionDialogs();
+    currentConverterExpressionFieldIndex.value = newIndex;
+    nextTick(() => {
+      openConverterExpressionFieldAtIndex(newIndex);
+    });
+  }
+
+  function onConverterRegisterExpressionFieldIndex(index: number): void {
+    currentConverterExpressionFieldIndex.value = index;
+  }
+
   function onSetMappingRegisterFieldIndex(index: number): void {
     currentSetMappingIndex.value = index;
   }
@@ -6468,7 +6554,11 @@ export function usePropertiesPanelController() {
   const S3_LIST_OBJECTS_MAX_KEYS = 1000;
   const s3MaxKeysWarning = ref("");
 
-  const driveConvertFormatOptions = [
+  // Target formats for the converter node's fileConvert conversion. The source file
+  // is chosen by expression rather than picked from a list, so the full matrix is
+  // offered and the backend rejects an impossible pair with a clear message.
+  const converterTargetFormatOptions = [
+    { value: "", label: "Select format..." },
     { value: "pdf", label: "PDF (.pdf)" },
     { value: "docx", label: "Word Document (.docx)" },
     { value: "html", label: "HTML (.html)" },
@@ -6481,52 +6571,6 @@ export function usePropertiesPanelController() {
     { value: "bmp", label: "BMP Image (.bmp)" },
     { value: "webp", label: "WebP Image (.webp)" },
   ];
-
-  const _IMAGE_MIMES = new Set([
-    "image/jpeg",
-    "image/jpg",
-    "image/png",
-    "image/bmp",
-    "image/webp",
-  ]);
-
-  const _MIME_TO_FORMAT: Record<string, string> = {
-    "application/pdf": "pdf",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
-    "text/html": "html",
-    "text/markdown": "md",
-    "text/plain": "txt",
-    "text/csv": "csv",
-    "application/epub+zip": "epub",
-    "application/json": "json",
-    "image/jpeg": "jpg",
-    "image/jpg": "jpg",
-    "image/png": "png",
-    "image/bmp": "bmp",
-    "image/webp": "webp",
-  };
-
-  const driveConvertFormatOptionsFiltered = computed(() => {
-    const n = selectedNode.value;
-    if (!n || n.type !== "drive" || n.data.driveOperation !== "convertFile") {
-      return driveConvertFormatOptions;
-    }
-    const fileId = n.data.driveFileId;
-    if (!fileId) return driveConvertFormatOptions;
-    const file = driveFiles.value.find((f) => f.id === fileId);
-    if (!file) return driveConvertFormatOptions;
-
-    const inputFormat = _MIME_TO_FORMAT[file.mime_type];
-    const isImage = _IMAGE_MIMES.has(file.mime_type);
-
-    const allowed = isImage
-      ? ["jpg", "png", "bmp", "webp"]
-      : ["pdf", "docx", "html", "md", "txt", "csv", "epub"];
-
-    return driveConvertFormatOptions.filter(
-      (o) => allowed.includes(o.value) && o.value !== inputFormat,
-    );
-  });
 
   const dataTableOptions = computed(() => {
     const options = [{ value: "", label: "Select table..." }];
@@ -8965,7 +9009,11 @@ export function usePropertiesPanelController() {
     websocketTriggerEventOptions,
     crawlerUrlInputRef,
     consoleLogMessageInputRef,
-    converterSourceInputRef,
+    converterExpressionFieldCount,
+    converterExpressionFieldIndex,
+    setConverterExpressionInputRef,
+    handleConverterExpressionFieldNavigate,
+    onConverterRegisterExpressionFieldIndex,
     switchExpressionInputRef,
     loopArrayExpressionInputRef,
     executeTemplateExpressionInputRef,
@@ -9338,7 +9386,7 @@ export function usePropertiesPanelController() {
     s3MaxKeysWarning,
     dataTableOperationOptions,
     driveOperationOptions,
-    driveConvertFormatOptionsFiltered,
+    converterTargetFormatOptions,
     dataTableOptions,
     rabbitmqCredentialOptions,
     rabbitmqOperationOptions,

@@ -1081,7 +1081,7 @@ function getDefaultNodeData(type: NodeType): WorkflowNode["data"] {
     sticky: { label: "stickyNote", stickyTitle: "Sticky Note", stickyColor: "yellow", note: "Double click to edit" },
     merge: { label: "merge", inputCount: 2 },
     set: { label: "set", mappings: [{ key: "text", value: "$input.text" }] },
-    converter: { label: "converter", conversion: "csvToJson", source: "$input.text", delimiter: ",", hasHeader: true, trimValues: true, includeHeader: true, converterColumns: "" },
+    converter: { label: "converter", conversion: "csvToJson", source: "$input.text", delimiter: ",", hasHeader: true, trimValues: true, includeHeader: true, converterColumns: "", converterFileId: "", converterTargetFormat: "", ocrLanguage: "auto", ocrLanguageCustom: "", ocrEncoding: "utf-8", ocrNormalizeUnicode: true, ocrPsm: "3", ocrDpi: 300, ocrPageRange: "" },
     jsonOutputMapper: {
       label: "jsonResponse",
       mappings: [{ key: "message", value: "$input.text" }],

@@ -1290,18 +1290,27 @@ The http node ALWAYS returns a structured response object:
 4. For modulo/math on set node output: `$generateRandom.randomNumber % 2 == 0` (use the key name, e.g., "randomNumber")
 
 ### 13b. converter (Data Format Conversion)
-- **Purpose**: Convert data between formats without writing code. First conversions: CSV text <-> JSON rows.
+- **Purpose**: Convert data between formats without writing code. CSV text <-> JSON rows, Tesseract OCR from an image or PDF to plain text, and file format conversion of a stored Drive file.
 - **Inputs**: 1 | **Outputs**: 1
 - **Data fields**:
   - `label`: Node identifier
-  - `conversion`: `"csvToJson"` (CSV text -> array of row objects) or `"jsonToCsv"` (array of objects/rows -> CSV text)
-  - `source`: Expression for the input to convert (e.g. `"$previousNode.body"` or `"$userInput.body.text"`). If empty, the first input is used.
+  - `conversion`: `"csvToJson"` (CSV text -> array of row objects), `"jsonToCsv"` (array of objects/rows -> CSV text), `"imageToText"` (OCR an image file), `"pdfToText"` (OCR every selected PDF page), or `"fileConvert"` (rewrite a stored file in another format)
+  - `source`: Expression for the input to convert (e.g. `"$previousNode.body"` or `"$userInput.body.text"`). If empty, the first input is used. Text conversions only.
   - `delimiter`: Single-character field delimiter (default `,`). Use `"\\t"` for tab-separated values.
   - `hasHeader`: Boolean, `csvToJson` only — first row is the header (default true). When false each row is an array of cell values instead of an object.
   - `trimValues`: Boolean, `csvToJson` only — strip whitespace around header names and cell values (default true). Set false to keep whitespace inside quoted fields exactly as written.
   - `includeHeader`: Boolean, `jsonToCsv` only — write a header row (default true)
   - `converterColumns`: Optional explicit column order for `jsonToCsv` (comma-separated string). When omitted, columns are inferred from the row keys.
-- **Output**: `$label.result` — parsed rows for `csvToJson`, CSV string for `jsonToCsv`. `$label.conversion` echoes the conversion that ran.
+  - `converterFileId`: File conversions (`imageToText`, `pdfToText`, `fileConvert`) — expression pointing at a Heym Drive file, e.g. `"$Upload.file.id"`. A file object such as `"$Upload.file"`, an agent file (`"$reportAgent._generated_files[0].id"`), or a Heym download URL works too. The file must already be in Heym Drive (upload it with a `fileUploadTrigger`, or fetch it with a `drive` node `downloadUrl` operation first). Falls back to `source`/the first input when empty.
+  - `converterTargetFormat`: `fileConvert` only — output format. Document outputs `"pdf"` | `"docx"` | `"html"` | `"md"` | `"txt"` | `"epub"` go through pandoc; `"csv"` is only valid when the input is a JSON array of objects; image outputs `"jpg"` | `"png"` | `"bmp"` | `"webp"` are for image inputs. Document inputs are docx/html/md/txt/csv/pdf plus json. Images cannot become documents and documents cannot become images.
+  - `ocrLanguage`: `"auto"` (default) detects the script and picks the matching model. Otherwise a Tesseract code such as `"tur"`, `"eng"`, `"deu"`, `"chi_sim"`, or several joined with `+` (`"eng+tur"`). Use `"custom"` together with `ocrLanguageCustom` when the UI select cannot express the codes.
+  - `ocrLanguageCustom`: Free-text language codes used when `ocrLanguage` is `"custom"`.
+  - `ocrEncoding`: Charset the extracted text is normalized to — `"utf-8"` (default, keeps every character), `"utf-8-sig"`, `"utf-16"`, `"latin-1"`, `"cp1252"`, `"cp1254"`, `"iso-8859-9"`, or `"ascii"`. Narrow charsets replace characters they cannot represent.
+  - `ocrNormalizeUnicode`: Boolean (default true) — apply NFC normalization so combining marks become single characters (`s` + cedilla -> `ş`).
+  - `ocrPsm`: Tesseract page segmentation mode — `"3"` (default, automatic), `"1"`, `"4"`, `"6"` (single block), `"7"` (single line), `"11"`, `"12"`, `"13"`.
+  - `ocrDpi`: `pdfToText` only — rasterization DPI (default 300, min 72). Raise it for small print, lower it for speed.
+  - `ocrPageRange`: `pdfToText` only — `"3"` or `"2-5"`. Empty means every page.
+- **Output**: `$label.result` — parsed rows for `csvToJson`, CSV string for `jsonToCsv`, extracted text for `imageToText`/`pdfToText`, new file metadata for `fileConvert`. `$label.conversion` echoes the conversion that ran. OCR conversions also expose `$label.language` (the model actually used), `$label.encoding`, `$label.page_count`, `$label.pages` (array of `{page, text}`), and `$label.file` (id, filename, mime_type, size_bytes). `fileConvert` stores the output as a new Drive file and exposes `$label.id`, `$label.filename`, `$label.mime_type`, `$label.size_bytes`, `$label.download_url`, and `$label.source_file`; the original file is left untouched.
 
 **Example** (CSV text -> rows):
 ```json
@@ -1319,7 +1328,42 @@ The http node ALWAYS returns a structured response object:
 ```
 For `name,age\\nAda,36` downstream nodes read `$toRows.result` -> `[{ "name": "Ada", "age": "36" }]`.
 
+**Example** (scanned PDF -> text, Turkish):
+```json
+{
+  "type": "converter",
+  "data": {
+    "label": "readInvoice",
+    "conversion": "pdfToText",
+    "converterFileId": "$Upload.file.id",
+    "ocrLanguage": "tur",
+    "ocrEncoding": "utf-8",
+    "ocrDpi": 300,
+    "ocrPageRange": "1-3"
+  }
+}
+```
+Downstream nodes read `$readInvoice.result` for the whole document or `$readInvoice.pages` for per-page text.
+
 **⚠️ USE `converter` INSTEAD OF `execute`/`llm` FOR CSV**: When the user asks to parse, read, or build CSV/TSV, use a `converter` node. Do NOT write Python in an `execute` node and do NOT ask an LLM to reformat the rows — quoting, embedded newlines, and BOM handling are already correct here. Loop over `$label.result` with a `loop` node to process rows one by one.
+
+**Example** (agent report -> PDF):
+```json
+{
+  "type": "converter",
+  "data": {
+    "label": "convertDoc",
+    "conversion": "fileConvert",
+    "converterFileId": "$reportAgent._generated_files[0].id",
+    "converterTargetFormat": "pdf"
+  }
+}
+```
+Access the converted file downstream with `$convertDoc.id` and `$convertDoc.download_url`.
+
+**⚠️ FILE CONVERSION LIVES HERE, NOT ON `drive`**: The `drive` node's old `convertFile` operation was removed. Every format conversion is a `converter` node now. `drive` is for storing, fetching, sharing, and expiring files.
+
+**⚠️ USE `converter` FOR OCR**: When the user asks to read text out of a scan, screenshot, receipt, or image-only PDF, use `imageToText`/`pdfToText`. Do NOT send the raw file to an `llm` node for transcription and do NOT shell out to OCR tools from an `execute` node. The file has to live in Heym Drive first: chain `fileUploadTrigger` -> `converter`, or `drive` (`downloadUrl`) -> `converter`. Leave `ocrLanguage` at `"auto"` unless the user names a language.
 
 ### 14. sticky (Note)
 - **Purpose**: Add documentation notes to canvas (not executed)
@@ -3189,7 +3233,7 @@ If `playwrightAuthEnabled` is true, the first item in `playwrightSteps` must be 
 - **No credential required** — operates on files owned by the workflow owner
 - **Data fields**:
   - `label`: Node identifier
-  - `driveOperation`: Operation — `"get"` | `"getAll"` | `"downloadUrl"` | `"save"` | `"convertFile"` | `"delete"` | `"setPassword"` | `"setTtl"` | `"setMaxDownloads"` | `"shareWithMyTeams"` | `"unshareWithMyTeams"`
+  - `driveOperation`: Operation — `"get"` | `"getAll"` | `"downloadUrl"` | `"save"` | `"delete"` | `"setPassword"` | `"setTtl"` | `"setMaxDownloads"` | `"shareWithMyTeams"` | `"unshareWithMyTeams"`
   - `driveFileId`: UUID of the Drive file (supports expressions, e.g. `$agentLabel._generated_files[0].id`; all operations except getAll/downloadUrl/save)
   - `driveLimit`: Optional max number of files to return (getAll only; omit for no limit)
   - `driveSourceUrl`: URL to fetch and store as a Drive file (downloadUrl only, supports expressions)
@@ -3199,10 +3243,8 @@ If `playwrightAuthEnabled` is true, the first item in `playwrightSteps` must be 
   - `drivePassword`: Password string (setPassword only, supports expressions)
   - `driveTtlHours`: Hours until expiry as integer (setTtl only)
   - `driveMaxDownloads`: Max download count as integer (setMaxDownloads only)
-  - `driveConvertTargetFormat`: Target format for conversion (convertFile only); reuses `driveFileId` for the source file UUID
-    - Document outputs: `"pdf"` | `"docx"` | `"html"` | `"md"` | `"txt"` | `"epub"`
-    - CSV output: `"csv"` — only supported when input is a JSON array of objects
-    - Image outputs: `"jpg"` | `"png"` | `"bmp"` | `"webp"`
+
+**⚠️ FILE FORMAT CONVERSION MOVED**: The `drive` node no longer converts files. Use a `converter` node with `"conversion": "fileConvert"` (section 13b) and pass the Drive file id in `converterFileId`.
 
 **Operations Reference**:
 
@@ -3218,7 +3260,6 @@ If `playwrightAuthEnabled` is true, the first item in `playwrightSteps` must be 
 | `setMaxDownloads` | driveFileId, driveMaxDownloads | Replace default public token with one limited to N downloads |
 | `shareWithMyTeams` | driveFileId | Share the file read-only with all teams the workflow owner currently belongs to |
 | `unshareWithMyTeams` | driveFileId | Remove all team shares from the file |
-| `convertFile` | driveFileId, driveConvertTargetFormat | Convert file to a new format; stores result as a new Drive file (original unchanged). Inputs: docx/html/md/txt/csv/pdf + json (array of objects). Doc outputs: pdf/docx/html/md/txt/epub via pandoc; csv output: json→csv via Python csv module; image outputs: jpg/png/bmp/webp via Pillow. Same-format conversion not allowed. |
 
 **⚠️ CRITICAL: File ID comes from the agent/skill output**: When an Agent node runs a skill that generates files, the output contains `_generated_files` — an array of file objects. Each object has an `id` field. Reference it with `$agentLabel._generated_files[0].id`.
 
@@ -3338,22 +3379,6 @@ Access the saved file downstream: `$saveAudio.id`, `$saveAudio.download_url`
   }
 }
 ```
-
-**Example - Convert Markdown to PDF**:
-```json
-{
-  "id": "drive-convert",
-  "type": "drive",
-  "position": {"x": 600, "y": 200},
-  "data": {
-    "label": "convertDoc",
-    "driveOperation": "convertFile",
-    "driveFileId": "$reportAgent._generated_files[0].id",
-    "driveConvertTargetFormat": "pdf"
-  }
-}
-```
-Access the converted file downstream: `$convertDoc.id`, `$convertDoc.download_url`
 
 **Output access**:
 - `$nodeLabel.files` - Array of file metadata objects (getAll only)
