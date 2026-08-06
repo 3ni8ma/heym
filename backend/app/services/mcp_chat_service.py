@@ -2,8 +2,8 @@
 
 When the chat tool is enabled on the global MCP server or on a named MCP server,
 `heym_chat` shows up in `tools/list`. Calling it runs one full turn of the same
-agent loop the Chat tab uses, so every capability the Chat tab has today — and
-every one added later — is reachable from an MCP client without registering a
+agent loop the Chat tab uses, so every capability the Chat tab has today, plus
+every one added later, is reachable from an MCP client without registering a
 new tool per capability.
 
 Turns are persisted as a normal Chat tab conversation (`source="mcp"`), so the

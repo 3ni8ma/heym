@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import {
   AlertTriangle,
@@ -97,6 +97,13 @@ function pinWorkflowToTop(serverId: string, workflowId: string): void {
     ...recentlyToggledByServer.value,
     [serverId]: [workflowId, ...previous.filter((id) => id !== workflowId)],
   };
+  // Reordering alone is not enough: the list is a short scroll box that keeps its
+  // scroll position, so the row would land at index 0 above the visible area.
+  void nextTick(() => {
+    document
+      .querySelector<HTMLElement>(`[data-assigned-workflows="${serverId}"]`)
+      ?.scrollTo({ top: 0, behavior: "smooth" });
+  });
 }
 
 // Use browser's URL for SSE endpoint instead of backend-provided URL
@@ -993,6 +1000,7 @@ function addToCursor(): void {
                 </div>
                 <div
                   v-else
+                  :data-assigned-workflows="server.id"
                   class="space-y-1 max-h-48 overflow-y-auto pr-1"
                 >
                   <div

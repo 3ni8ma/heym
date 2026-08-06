@@ -47,14 +47,25 @@ const effectiveCredentialId = computed<string | null>(() => {
   return aiDefaults.resolveCredentialId(props.credentials, {}) ?? null;
 });
 
+/**
+ * The model the tool actually runs with. Mirrors the backend fallback: a stored
+ * model wins, otherwise the account's preferred model applies when it belongs to
+ * the credential in use.
+ */
+const effectiveModel = computed<string | null>(() =>
+  aiDefaults.resolveModel(effectiveCredentialId.value ?? "", models.value, {
+    savedModel: props.chatTool.model,
+  }),
+);
+
 const isConfigured = computed(
-  () => Boolean(effectiveCredentialId.value) && Boolean(props.chatTool.model),
+  () => Boolean(effectiveCredentialId.value) && Boolean(effectiveModel.value),
 );
 
 const statusText = computed(() => {
-  if (!props.chatTool.enabled) return "Disabled — heym_chat is not listed as an MCP tool";
+  if (!props.chatTool.enabled) return "Disabled, heym_chat is not listed as an MCP tool";
   if (!isConfigured.value) return "Pick a credential and a model so heym_chat can run";
-  return "Enabled — MCP clients can call heym_chat";
+  return "Enabled, MCP clients can call heym_chat";
 });
 
 async function loadModels(credentialId: string | null): Promise<void> {
@@ -85,8 +96,13 @@ function toggleEnabled(): void {
   const update: MCPChatToolUpdate = { enabled: !props.chatTool.enabled };
   // Turning it on with nothing stored persists whatever the account defaults resolve
   // to, so the saved config matches what the dropdowns already show.
-  if (update.enabled && !props.chatTool.credential_id && effectiveCredentialId.value) {
-    update.credential_id = effectiveCredentialId.value;
+  if (update.enabled) {
+    if (!props.chatTool.credential_id && effectiveCredentialId.value) {
+      update.credential_id = effectiveCredentialId.value;
+    }
+    if (!props.chatTool.model && effectiveModel.value) {
+      update.model = effectiveModel.value;
+    }
   }
   emitUpdate(update);
 }
@@ -149,10 +165,9 @@ function onModelSelect(value: string | undefined): void {
       v-if="!compact"
       class="text-sm text-muted-foreground mt-3"
     >
-      Exposes the Chat tab engine as a single <code class="px-1 py-0.5 bg-muted rounded">heym_chat</code>
-      tool. An MCP client sends one natural-language message and the engine does the rest — building and
-      running workflows, analytics, boards, schedules, docs search and everything else the Chat tab can do,
-      including capabilities added later. Each call is saved to your Chat history.
+      Turns the Chat tab engine into one <code class="px-1 py-0.5 bg-muted rounded">heym_chat</code> tool.
+      MCP clients send a plain message and Heym handles the rest: workflows, analytics, boards, schedules,
+      docs, and anything the Chat tab picks up later. Every call lands in your Chat history.
     </p>
 
     <div
@@ -180,7 +195,7 @@ function onModelSelect(value: string | undefined): void {
           Model
         </label>
         <SearchableSelect
-          :model-value="chatTool.model ?? ''"
+          :model-value="effectiveModel ?? ''"
           :options="modelOptions"
           :placeholder="loadingModels ? 'Loading models...' : 'Select model...'"
           search-placeholder="Search models..."
