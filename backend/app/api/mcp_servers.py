@@ -26,8 +26,10 @@ from app.api.mcp import (
     _schedule_legacy_sse_jsonrpc_response,
     _session_user_from_id,
     _stream_mcp_jsonrpc_response,
+    build_tools_with_chat,
+    dispatch_chat_tool_call,
     get_credentials_context_for_user,
-    workflow_to_mcp_tool,
+    validate_chat_tool_credential,
 )
 from app.api.workflows import _persist_global_variables_from_execution, collect_referenced_workflows
 from app.db.models import (
@@ -40,6 +42,8 @@ from app.db.models import (
 )
 from app.db.session import async_session_maker, get_db
 from app.models.schemas import (
+    MCPChatToolConfig,
+    MCPChatToolUpdate,
     MCPInitializeResult,
     MCPJSONRPCRequest,
     MCPServerCreate,
@@ -48,6 +52,7 @@ from app.models.schemas import (
     MCPServerWorkflowToggleRequest,
     MCPToolsListResponse,
 )
+from app.services import mcp_chat_service
 from app.services.execution_cancellation import clear_execution as clear_active_execution
 from app.services.execution_cancellation import register_execution
 from app.services.global_variables_service import get_global_variables_context
@@ -89,6 +94,23 @@ async def _get_server_workflows(db: AsyncSession, server_id: uuid.UUID) -> list[
         .where(MCPServerWorkflow.mcp_server_id == server_id)
     )
     return list(result.scalars().all())
+
+
+def _server_response(server: MCPServer, workflow_ids: list[uuid.UUID]) -> MCPServerResponse:
+    return MCPServerResponse(
+        id=server.id,
+        name=server.name,
+        api_key=server.api_key,
+        created_at=server.created_at,
+        workflow_ids=workflow_ids,
+        chat_tool=MCPChatToolConfig(
+            # `chat_enabled` is a column default, so it is still None before the
+            # INSERT that a freshly created server has not yet had.
+            enabled=bool(server.chat_enabled),
+            credential_id=server.chat_credential_id,
+            model=server.chat_model,
+        ),
+    )
 
 
 def _sanitize_tool_name(name: str) -> str:
@@ -226,15 +248,7 @@ async def list_mcp_servers(
     items = []
     for s in servers:
         workflow_ids = await _get_server_workflow_ids(db, s.id)
-        items.append(
-            MCPServerResponse(
-                id=s.id,
-                name=s.name,
-                api_key=s.api_key,
-                created_at=s.created_at,
-                workflow_ids=workflow_ids,
-            )
-        )
+        items.append(_server_response(s, workflow_ids))
     return MCPServerListResponse(servers=items)
 
 
@@ -252,13 +266,7 @@ async def create_mcp_server(
     db.add(server)
     await db.commit()
     await db.refresh(server)
-    return MCPServerResponse(
-        id=server.id,
-        name=server.name,
-        api_key=server.api_key,
-        created_at=server.created_at,
-        workflow_ids=[],
-    )
+    return _server_response(server, [])
 
 
 @router.delete("/{server_id}", status_code=204)
@@ -283,13 +291,7 @@ async def regenerate_server_key(
     await db.commit()
     await db.refresh(server)
     workflow_ids = await _get_server_workflow_ids(db, server.id)
-    return MCPServerResponse(
-        id=server.id,
-        name=server.name,
-        api_key=server.api_key,
-        created_at=server.created_at,
-        workflow_ids=workflow_ids,
-    )
+    return _server_response(server, workflow_ids)
 
 
 @router.patch("/{server_id}/workflows/{workflow_id}")
@@ -330,6 +332,34 @@ async def toggle_server_workflow(
     return {"enabled": body.enabled}
 
 
+@router.patch("/{server_id}/chat-tool", response_model=MCPChatToolConfig)
+async def update_server_chat_tool(
+    server_id: uuid.UUID,
+    body: MCPChatToolUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MCPChatToolConfig:
+    """Enable/disable the `heym_chat` tool on this named server and set its model."""
+    server = await _fetch_server_for_user(db, server_id, current_user.id)
+
+    provided = body.model_fields_set
+    if "credential_id" in provided:
+        await validate_chat_tool_credential(db, current_user.id, body.credential_id)
+        server.chat_credential_id = body.credential_id
+    if "model" in provided:
+        server.chat_model = body.model
+    if body.enabled is not None:
+        server.chat_enabled = body.enabled
+
+    await db.commit()
+    await db.refresh(server)
+    return MCPChatToolConfig(
+        enabled=server.chat_enabled,
+        credential_id=server.chat_credential_id,
+        model=server.chat_model,
+    )
+
+
 # ---------------------------------------------------------------------------
 # MCP Protocol endpoints (SSE, message, tools) — named server
 # ---------------------------------------------------------------------------
@@ -340,10 +370,10 @@ async def list_named_server_tools(
     server: tuple[User, MCPServer] = Depends(_get_named_server_context),
     db: AsyncSession = Depends(get_db),
 ) -> MCPToolsListResponse:
-    _, mcp_server = server
+    user, mcp_server = server
     workflows = await _get_server_workflows(db, mcp_server.id)
-    tools = [workflow_to_mcp_tool(w) for w in workflows]
-    return MCPToolsListResponse(tools=tools)
+    chat_settings = await mcp_chat_service.get_server_chat_settings(db, mcp_server.id, user.id)
+    return MCPToolsListResponse(tools=await build_tools_with_chat(workflows, chat_settings))
 
 
 @router.get("/{server_id}/sse")
@@ -438,7 +468,8 @@ async def _dispatch_named_server_jsonrpc(
 
     if msg.method == "tools/list":
         workflows = await _get_server_workflows(db, mcp_server.id)
-        tools = [workflow_to_mcp_tool(w) for w in workflows]
+        chat_settings = await mcp_chat_service.get_server_chat_settings(db, mcp_server.id, user.id)
+        tools = await build_tools_with_chat(workflows, chat_settings)
         return {
             "jsonrpc": "2.0",
             "id": msg.id,
@@ -448,6 +479,25 @@ async def _dispatch_named_server_jsonrpc(
     if msg.method == "tools/call":
         tool_name = msg.params.get("name", "")
         arguments = msg.params.get("arguments", {})
+
+        if tool_name == mcp_chat_service.MCP_CHAT_TOOL_NAME:
+            chat_settings = await mcp_chat_service.get_server_chat_settings(
+                db, mcp_server.id, user.id
+            )
+            if not chat_settings.enabled:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": msg.id,
+                    "error": {"code": -32601, "message": f"Tool not found: {tool_name}"},
+                }
+            return await dispatch_chat_tool_call(
+                request=request,
+                db=db,
+                msg_id=msg.id,
+                user_id=user.id,
+                chat_settings=chat_settings,
+                arguments=arguments,
+            )
 
         workflows = await _get_server_workflows(db, mcp_server.id)
         target_workflow = None

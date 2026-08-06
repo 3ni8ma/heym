@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
@@ -59,6 +60,7 @@ from app.services.credential_access import get_accessible_credential
 from app.services.encryption import decrypt_config
 from app.services.hitl_service import build_public_base_url
 from app.services.llm_trace import LLMTraceContext
+from app.services.mcp_chat_service import MCPChatError, MCPChatResult
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -658,6 +660,122 @@ async def _process_chat_queue(
         _chat_tasks.pop(conv_id, None)
 
 
+MCP_CONVERSATION_SOURCE = "mcp"
+
+
+async def _get_or_create_mcp_conversation(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    conversation_id: uuid.UUID | None,
+) -> tuple[DashboardConversation, bool]:
+    """Resolve the conversation an MCP chat turn writes into.
+
+    Returns the conversation and whether it was just created, so the caller
+    knows if the turn should also generate a title.
+    """
+    if conversation_id is not None:
+        result = await db.execute(
+            select(DashboardConversation).where(
+                DashboardConversation.id == conversation_id,
+                DashboardConversation.user_id == user_id,
+            )
+        )
+        conversation = result.scalar_one_or_none()
+        if conversation is None:
+            raise MCPChatError("conversation_id does not match a conversation you can access.")
+        return conversation, False
+
+    conversation = DashboardConversation(
+        id=uuid.uuid4(),
+        user_id=user_id,
+        title=DEFAULT_CONVERSATION_TITLE,
+        source=MCP_CONVERSATION_SOURCE,
+    )
+    db.add(conversation)
+    return conversation, True
+
+
+async def run_mcp_chat_turn(
+    *,
+    user_id: uuid.UUID,
+    message: str,
+    conversation_id: uuid.UUID | None,
+    credential_id: uuid.UUID,
+    model: str,
+    public_base_url: str,
+) -> MCPChatResult:
+    """Run one dashboard chat turn started by the `heym_chat` MCP tool.
+
+    Reuses the Chat tab's turn worker so MCP-driven turns stream to any open Chat
+    tab and persist messages, tool calls, and clarification pauses identically.
+    """
+    async with async_session_maker() as db:
+        conversation, is_new = await _get_or_create_mcp_conversation(db, user_id, conversation_id)
+        if conversation.is_running:
+            raise MCPChatError(
+                "This conversation is already running. Wait for it to finish, or omit "
+                "conversation_id to start a new one."
+            )
+
+        conv_uuid = conversation.id
+        should_generate_title = is_new or conversation.title == DEFAULT_CONVERSATION_TITLE
+        user_message = _build_user_message(message, None)
+        db.add(
+            DashboardMessage(
+                id=uuid.uuid4(),
+                conversation_id=conv_uuid,
+                role="user",
+                content=user_message["content"],
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        conversation.is_running = True
+        conversation.has_unread = False
+        conversation.queue_paused_by_message_id = None
+        conversation.last_credential_id = credential_id
+        conversation.last_model = model
+        await db.commit()
+
+    conv_id = str(conv_uuid)
+    turn = ChatTurn(
+        content=message,
+        credential_id=credential_id,
+        model=model,
+        attachment_data=None,
+        should_generate_title=should_generate_title,
+    )
+    await registry.create_task(conv_id)
+    try:
+        result = await _run_chat_turn(conv_id, user_id, turn, public_base_url)
+    finally:
+        _cancel_events.pop(conv_id, None)
+        await _finish_worker_state(conv_id)
+        await registry.finish(conv_id)
+
+    async with async_session_maker() as db:
+        msg_result = await db.execute(
+            select(DashboardMessage).where(DashboardMessage.id == result.assistant_message_id)
+        )
+        assistant_message = msg_result.scalar_one_or_none()
+
+    if assistant_message is None:
+        raise MCPChatError("The assistant did not produce a reply. Try again.")
+
+    tool_calls = assistant_message.tool_calls or []
+    tool_names = [str(call.get("name") or "") for call in tool_calls if call.get("name")]
+    return MCPChatResult(
+        conversation_id=conv_uuid,
+        text=_strip_hidden_markers(assistant_message.content),
+        tool_names=tool_names,
+        awaiting_clarification=result.paused_for_clarification,
+    )
+
+
+def _strip_hidden_markers(content: str) -> str:
+    """Drop the hidden HTML comment markers the Chat UI uses for workflow context."""
+    return re.sub(r"<!--\s*heym-workflow-id:.*?-->", "", content).strip()
+
+
 @router.get("", response_model=ConversationListResponse)
 async def list_conversations(
     current_user: User = Depends(get_current_user),
@@ -688,6 +806,7 @@ async def create_conversation(
     conversation = DashboardConversation(
         user_id=current_user.id,
         title=body.title or DEFAULT_CONVERSATION_TITLE,
+        source="chat",
     )
     db.add(conversation)
     await db.commit()
@@ -784,6 +903,7 @@ async def get_conversation(
     return ConversationDetailResponse(
         id=conversation.id,
         title=conversation.title,
+        source=conversation.source,
         is_pinned=conversation.is_pinned,
         is_running=conversation.is_running,
         has_unread=conversation.has_unread,

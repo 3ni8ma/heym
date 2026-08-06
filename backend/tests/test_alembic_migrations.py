@@ -15,7 +15,13 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["105_add_rag_credential_type"])
+        self.assertEqual(self.script.get_heads(), ["106_add_mcp_chat_tool"])
+
+    def test_mcp_chat_tool_revision_follows_rag_credential_revision(self) -> None:
+        chat_tool_revision = self.script.get_revision("106_add_mcp_chat_tool")
+
+        self.assertIsNotNone(chat_tool_revision)
+        self.assertEqual(chat_tool_revision.down_revision, "105_add_rag_credential_type")
 
     def test_rag_credential_revision_follows_cron_slot_revision(self) -> None:
         rag_revision = self.script.get_revision("105_add_rag_credential_type")

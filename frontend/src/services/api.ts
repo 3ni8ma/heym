@@ -2245,10 +2245,23 @@ export interface MCPWorkflowItem {
   updated_at?: string | null;
 }
 
+export interface MCPChatToolConfig {
+  enabled: boolean;
+  credential_id: string | null;
+  model: string | null;
+}
+
+export interface MCPChatToolUpdate {
+  enabled?: boolean;
+  credential_id?: string | null;
+  model?: string | null;
+}
+
 export interface MCPConfigResponse {
   mcp_api_key: string | null;
   mcp_endpoint_url: string;
   workflows: MCPWorkflowItem[];
+  chat_tool: MCPChatToolConfig;
 }
 
 export interface MCPRegenerateKeyResponse {
@@ -2275,6 +2288,7 @@ export interface MCPServerItem {
   api_key: string;
   created_at: string;
   workflow_ids: string[];
+  chat_tool: MCPChatToolConfig;
 }
 
 export interface MCPServerListResponse {
@@ -2302,6 +2316,13 @@ export const mcpApi = {
     const response = await api.post<MCPRegenerateKeyResponse>(
       "/mcp/regenerate-key",
     );
+    return response.data;
+  },
+
+  updateChatTool: async (
+    update: MCPChatToolUpdate,
+  ): Promise<MCPChatToolConfig> => {
+    const response = await api.patch<MCPChatToolConfig>("/mcp/chat-tool", update);
     return response.data;
   },
 
@@ -2345,6 +2366,17 @@ export const mcpServersApi = {
     await api.patch(`/mcp/servers/${serverId}/workflows/${workflowId}`, {
       enabled,
     });
+  },
+
+  updateChatTool: async (
+    serverId: string,
+    update: MCPChatToolUpdate,
+  ): Promise<MCPChatToolConfig> => {
+    const response = await api.patch<MCPChatToolConfig>(
+      `/mcp/servers/${serverId}/chat-tool`,
+      update,
+    );
+    return response.data;
   },
 };
 

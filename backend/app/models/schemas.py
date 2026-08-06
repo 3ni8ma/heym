@@ -1119,10 +1119,25 @@ class MCPWorkflowItem(BaseModel):
         from_attributes = True
 
 
+class MCPChatToolConfig(BaseModel):
+    """Chat-tool exposure settings for one MCP surface."""
+
+    enabled: bool = False
+    credential_id: uuid.UUID | None = None
+    model: str | None = None
+
+
+class MCPChatToolUpdate(BaseModel):
+    enabled: bool | None = None
+    credential_id: uuid.UUID | None = None
+    model: str | None = Field(None, max_length=128)
+
+
 class MCPConfigResponse(BaseModel):
     mcp_api_key: str | None = None
     mcp_endpoint_url: str
     workflows: list[MCPWorkflowItem] = Field(default_factory=list)
+    chat_tool: MCPChatToolConfig = Field(default_factory=MCPChatToolConfig)
 
 
 class MCPToggleRequest(BaseModel):
@@ -1147,6 +1162,7 @@ class MCPServerResponse(BaseModel):
     api_key: str
     created_at: datetime
     workflow_ids: list[uuid.UUID] = Field(default_factory=list)
+    chat_tool: MCPChatToolConfig = Field(default_factory=MCPChatToolConfig)
 
 
 class MCPServerListResponse(BaseModel):

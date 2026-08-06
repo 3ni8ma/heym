@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ConversationCreate(BaseModel):
@@ -16,14 +16,22 @@ class ConversationUpdate(BaseModel):
     is_pinned: bool | None = None
 
 
+def _coerce_source(value: object) -> object:
+    """Treat a missing/NULL source as a Chat tab conversation."""
+    return value or "chat"
+
+
 class ConversationResponse(BaseModel):
     id: uuid.UUID
     title: str
+    source: str = "chat"
     is_pinned: bool
     is_running: bool
     has_unread: bool
     created_at: datetime
     updated_at: datetime
+
+    _normalize_source = field_validator("source", mode="before")(_coerce_source)
 
     model_config = {"from_attributes": True}
 
@@ -72,6 +80,7 @@ class QueuedMessageResponse(BaseModel):
 class ConversationDetailResponse(BaseModel):
     id: uuid.UUID
     title: str
+    source: str = "chat"
     is_pinned: bool
     is_running: bool
     has_unread: bool
@@ -81,6 +90,8 @@ class ConversationDetailResponse(BaseModel):
     updated_at: datetime
     messages: list[MessageResponse]
     queued_messages: list[QueuedMessageResponse] = Field(default_factory=list)
+
+    _normalize_source = field_validator("source", mode="before")(_coerce_source)
 
     model_config = {"from_attributes": True}
 

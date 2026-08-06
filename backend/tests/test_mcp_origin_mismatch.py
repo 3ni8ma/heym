@@ -363,7 +363,13 @@ class MCPConfigURLTests(unittest.IsolatedAsyncioTestCase):
         BEFORE this fix, request.base_url ("http://127.0.0.1:10105/") was used directly,
         producing an unusable URL for users copying it into their MCP client config.
         """
-        user = SimpleNamespace(id=uuid.uuid4(), mcp_api_key="key-abc")
+        user = SimpleNamespace(
+            id=uuid.uuid4(),
+            mcp_api_key="key-abc",
+            mcp_chat_enabled=False,
+            mcp_chat_credential_id=None,
+            mcp_chat_model=None,
+        )
         request = _make_request(
             "http://127.0.0.1:10105/",
             headers={
@@ -385,7 +391,13 @@ class MCPConfigURLTests(unittest.IsolatedAsyncioTestCase):
         AFTER: when no X-Forwarded headers are present (local dev / direct access),
         request.base_url is used — same behaviour as before the fix.
         """
-        user = SimpleNamespace(id=uuid.uuid4(), mcp_api_key="key-local")
+        user = SimpleNamespace(
+            id=uuid.uuid4(),
+            mcp_api_key="key-local",
+            mcp_chat_enabled=False,
+            mcp_chat_credential_id=None,
+            mcp_chat_model=None,
+        )
         request = _make_request("http://localhost:10105/")
 
         result = await get_mcp_config(request=request, current_user=user, db=_make_empty_db())
@@ -399,7 +411,13 @@ class MCPConfigURLTests(unittest.IsolatedAsyncioTestCase):
         """
         X-Forwarded-Host takes precedence over the bare Host header when both are present.
         """
-        user = SimpleNamespace(id=uuid.uuid4(), mcp_api_key="key-fwd")
+        user = SimpleNamespace(
+            id=uuid.uuid4(),
+            mcp_api_key="key-fwd",
+            mcp_chat_enabled=False,
+            mcp_chat_credential_id=None,
+            mcp_chat_model=None,
+        )
         request = _make_request(
             "http://127.0.0.1:10105/",
             headers={
@@ -419,7 +437,13 @@ class MCPConfigURLTests(unittest.IsolatedAsyncioTestCase):
         When X-Forwarded-Host is absent but X-Forwarded-Proto + Host are present,
         the combination is used to construct the URL.
         """
-        user = SimpleNamespace(id=uuid.uuid4(), mcp_api_key="key-host")
+        user = SimpleNamespace(
+            id=uuid.uuid4(),
+            mcp_api_key="key-host",
+            mcp_chat_enabled=False,
+            mcp_chat_credential_id=None,
+            mcp_chat_model=None,
+        )
         request = _make_request(
             "http://127.0.0.1:10105/",
             headers={
