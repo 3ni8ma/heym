@@ -4,6 +4,8 @@ The **MCP** tab configures Model Context Protocol (MCP) integration. MCP lets AI
 
 Heym supports two modes: a **default server** that exposes all MCP-enabled workflows under a single endpoint, and **named servers** that give each logical group of workflows its own dedicated URL and API key.
 
+Both modes can expose two kinds of tools: individual **workflows**, and the **Heym chat tool** — the whole [Chat tab](./chat-tab.md) engine behind one `heym_chat` tool.
+
 <video src="/features/showcase/mcp.webm" controls playsinline muted preload="metadata" style="width:100%;border-radius:12px;margin:16px 0"></video>
 <p class="github-video-link"><a href="../../../../public/features/showcase/mcp.webm">▶ Watch MCP demo</a></p>
 
@@ -31,6 +33,42 @@ Each workflow can be exposed as an MCP tool:
 
 Workflow cards show the description and a preview of input field names so you can see what each tool expects before enabling it.
 
+## Heym Chat Tool
+
+The **Heym Capabilities** section turns the Chat tab engine into a single MCP tool named `heym_chat`. Enable it on the default server, on any named server, or on both — each surface keeps its own toggle and model selection.
+
+When it is on, `heym_chat` appears in `tools/list` alongside your workflow tools. An MCP client sends one natural-language message and the Heym engine takes it from there, with the same abilities the Chat tab has:
+
+- Build, edit, inspect, and run workflows through the Workflow AI Builder
+- Report analytics, recent executions, and upcoming cron schedules
+- List boards, create cards, and read card detail on the [Board tab](./board-tab.md)
+- Read teams and global variables, and search the documentation
+- Approve, edit, or refuse pending human-in-the-loop reviews
+
+Capabilities added to the Chat tab later become available through `heym_chat` automatically — there is no per-capability toggle to keep in sync.
+
+### Credential and model
+
+`heym_chat` runs the engine on your Heym account, so it needs an LLM credential of its own:
+
+| Field | Behavior |
+|-------|----------|
+| **Credential** | Pick any OpenAI, Google, or Custom credential you can access. Prefilled from the preferred credential in [Settings](../reference/user-settings.md) when you have not chosen one. |
+| **Model** | Loaded from the selected credential. Prefilled from your preferred model when the credential matches. |
+
+If either is missing, the tool still appears in `tools/list` but each call returns an error telling you to finish the setup in this tab.
+
+### Arguments and history
+
+| Argument | Required | Description |
+|----------|----------|-------------|
+| `message` | Yes | The instruction or question, in natural language. |
+| `conversation_id` | No | A `conversation_id` from a previous `heym_chat` result, to continue that thread. |
+
+Every call is written to your [Chat tab](./chat-tab.md) history as a normal conversation, marked with a plug icon in the conversation list. Messages, tool cards, and clarification pauses look exactly like a conversation you started yourself, and you can open the thread and keep talking in the browser. Each result returns its `conversation_id` so the MCP client can continue the same thread instead of opening a new one on every call.
+
+When the assistant needs clarification, it pauses and says so; reply with the answers using the same `conversation_id`.
+
 ## Named MCP Servers
 
 Named servers let you segment workflows into isolated MCP endpoints. Each server has its own URL and API key, so different AI clients, teams, or use cases can connect to exactly the workflows they need.
@@ -50,11 +88,14 @@ Each server card shows:
 | **SSE Endpoint** | Unique URL: `{origin}/api/mcp/servers/{uuid}/sse` |
 | **API Key** | Independent key; reveal with the eye icon, copy or regenerate as needed |
 | **How to connect** | **Copy JSON** copies the ready-to-paste MCP config; **Add to Cursor** installs it in one click |
+| **Heym Capabilities** | Toggle the `heym_chat` tool for this server and pick its credential and model |
 | **Assigned Workflows** | Toggle which of your workflows this server exposes |
 
 ### Workflow Assignment
 
 Workflow assignment is per-server and independent of the default server toggle. A workflow can be enabled on the default server and on multiple named servers simultaneously, or on none.
+
+Toggling a workflow moves it to the top of the assigned list, so the row you just changed stays visible instead of scrolling away.
 
 ### Authentication
 
@@ -83,6 +124,7 @@ Both endpoints support the SSE transport (GET, MCP spec 2024-11-05) and Streamab
 - [Agent Node](../nodes/agent-node.md) – Agent node with MCP tool support
 - [Agent Architecture](../reference/agent-architecture.md) – MCP client, tool dispatch, orchestrator
 - [Triggers](../reference/triggers.md) – MCP as a workflow entry point
+- [Chat Tab](./chat-tab.md) – The engine behind the `heym_chat` tool
 - [Workflows Tab](./workflows-tab.md) – Create and manage workflows
 - [Node Types](../reference/node-types.md) – AI nodes overview
 - [Contextual Showcase](../reference/contextual-showcase.md) – Compact page guide for dashboard surfaces

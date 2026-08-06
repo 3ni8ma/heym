@@ -96,6 +96,14 @@ class User(Base):
         nullable=True,
     )
     preferred_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Exposes the dashboard chat engine as the `heym_chat` tool on the global MCP server.
+    mcp_chat_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    mcp_chat_credential_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("credentials.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    mcp_chat_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -164,6 +172,14 @@ class MCPServer(Base):
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     api_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    # Exposes the dashboard chat engine as the `heym_chat` tool on this named server.
+    chat_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    chat_credential_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("credentials.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    chat_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -1753,6 +1769,8 @@ class DashboardConversation(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     title: Mapped[str] = mapped_column(String(255), nullable=False, default="New Chat")
+    # Where the conversation originated: "chat" (the Chat tab) or "mcp" (the heym_chat MCP tool).
+    source: Mapped[str] = mapped_column(String(20), nullable=False, default="chat")
     is_pinned: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_running: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     has_unread: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

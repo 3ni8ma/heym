@@ -29,6 +29,12 @@ The **Chat** tab provides a direct LLM chat interface. Use it to test models, as
 - **Voice input** – Use the microphone button for speech-to-text (browser-supported). When recording stops, Heym can lightly clean up the transcript before you send it
 - **Scheduled workflows** – Ask when cron workflows run (today, this week, this month, or a custom date range). The assistant uses the same schedule data as the [Scheduled](./scheduled-tab.md) tab and can limit results to workflows you own or include those shared with you
 
+## Using Chat from an MCP Client
+
+The Chat engine can also be reached from outside the browser. Enable the **Heym Chat Tool** in the [MCP tab](./mcp-tab.md) and MCP clients — Claude, Cursor, and anything else that speaks MCP — get a single `heym_chat` tool that runs this same engine with all of its capabilities.
+
+Those conversations land in this tab's history, marked with a plug icon in the conversation list. Open one to read what the client asked, see the tool cards it triggered, and continue the thread yourself. Answering a clarification question works the same way whether the turn started here or from an MCP client.
+
 ## Context Limit
 
 The chat keeps up to 25 recent messages in context. Older messages are trimmed to stay within model limits.
@@ -58,6 +64,7 @@ or special message format is required.
 
 ## Related
 
+- [MCP Tab](./mcp-tab.md) – Expose this engine to MCP clients as the `heym_chat` tool
 - [Settings](../reference/user-settings.md) – Set User Rules applied to all chat requests
 - [Credentials Tab](./credentials-tab.md) – Add and manage API keys
 - [Variables Tab](./global-variables-tab.md) – Global variables available to Chat

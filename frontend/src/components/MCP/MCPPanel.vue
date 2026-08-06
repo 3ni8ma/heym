@@ -19,13 +19,18 @@ import {
   X,
 } from "lucide-vue-next";
 
+import type { CredentialListItem } from "@/types/credential";
+
+import MCPChatToolControls from "@/components/MCP/MCPChatToolControls.vue";
 import Button from "@/components/ui/Button.vue";
 import Card from "@/components/ui/Card.vue";
 import { joinOriginAndPath } from "@/lib/appUrl";
 import { cn } from "@/lib/utils";
 import {
+  credentialsApi,
   mcpApi,
   mcpServersApi,
+  type MCPChatToolUpdate,
   type MCPConfigResponse,
   type MCPServerItem,
   type MCPWorkflowItem,
@@ -48,6 +53,11 @@ const allWorkflows = ref<MCPWorkflowItem[]>([]);
 const showServerApiKey = ref<Record<string, boolean>>({});
 const regeneratingServerKey = ref<string | null>(null);
 const togglingServerWorkflow = ref<string | null>(null);
+const llmCredentials = ref<CredentialListItem[]>([]);
+// Workflow ids most recently toggled inside a named server, newest first. The
+// assigned-workflow list is a short scroll box, so a toggled row is pinned to the
+// top instead of drifting out of view.
+const recentlyToggledByServer = ref<Record<string, string[]>>({});
 
 const toastMessage = ref("");
 const toastVisible = ref(false);
@@ -59,8 +69,17 @@ const enabledCount = computed(() => {
 
 function getServerWorkflowsSorted(server: MCPServerItem): MCPWorkflowItem[] {
   const selectedIds = new Set(server.workflow_ids);
+  const recentlyToggled = recentlyToggledByServer.value[server.id] ?? [];
 
   return [...allWorkflows.value].sort((a, b) => {
+    const aRecent = recentlyToggled.indexOf(a.id);
+    const bRecent = recentlyToggled.indexOf(b.id);
+    if (aRecent !== bRecent) {
+      if (aRecent === -1) return 1;
+      if (bRecent === -1) return -1;
+      return aRecent - bRecent;
+    }
+
     const aSelected = selectedIds.has(a.id);
     const bSelected = selectedIds.has(b.id);
     if (aSelected !== bSelected) return aSelected ? -1 : 1;
@@ -70,6 +89,14 @@ function getServerWorkflowsSorted(server: MCPServerItem): MCPWorkflowItem[] {
     if (aTime !== bTime) return bTime.localeCompare(aTime);
     return a.name.localeCompare(b.name);
   });
+}
+
+function pinWorkflowToTop(serverId: string, workflowId: string): void {
+  const previous = recentlyToggledByServer.value[serverId] ?? [];
+  recentlyToggledByServer.value = {
+    ...recentlyToggledByServer.value,
+    [serverId]: [workflowId, ...previous.filter((id) => id !== workflowId)],
+  };
 }
 
 // Use browser's URL for SSE endpoint instead of backend-provided URL
@@ -101,9 +128,17 @@ async function loadConfig(): Promise<void> {
   try {
     config.value = await mcpApi.getConfig();
     allWorkflows.value = config.value.workflows;
-    await loadNamedServers();
+    await Promise.all([loadNamedServers(), loadLLMCredentials()]);
   } finally {
     loading.value = false;
+  }
+}
+
+async function loadLLMCredentials(): Promise<void> {
+  try {
+    llmCredentials.value = await credentialsApi.listLLM();
+  } catch {
+    llmCredentials.value = [];
   }
 }
 
@@ -211,10 +246,46 @@ async function toggleServerWorkflow(server: MCPServerItem, workflowId: string): 
       }
       namedServers.value[idx] = { ...namedServers.value[idx], workflow_ids: ids };
     }
+    pinWorkflowToTop(server.id, workflowId);
   } catch {
     showToast("Failed to update workflow assignment", "error");
   } finally {
     togglingServerWorkflow.value = null;
+  }
+}
+
+async function updateGlobalChatTool(update: MCPChatToolUpdate): Promise<void> {
+  if (!config.value) return;
+  const previous = config.value.chat_tool;
+  try {
+    config.value.chat_tool = await mcpApi.updateChatTool(update);
+    if (update.enabled !== undefined) {
+      showToast(update.enabled ? "Heym chat tool enabled" : "Heym chat tool disabled");
+    }
+  } catch {
+    config.value.chat_tool = previous;
+    showToast("Failed to update the chat tool", "error");
+  }
+}
+
+async function updateServerChatTool(
+  server: MCPServerItem,
+  update: MCPChatToolUpdate,
+): Promise<void> {
+  const idx = namedServers.value.findIndex((s) => s.id === server.id);
+  if (idx === -1) return;
+  try {
+    const chatTool = await mcpServersApi.updateChatTool(server.id, update);
+    namedServers.value[idx] = { ...namedServers.value[idx], chat_tool: chatTool };
+    if (update.enabled !== undefined) {
+      showToast(
+        update.enabled
+          ? `Heym chat tool enabled on "${server.name}"`
+          : `Heym chat tool disabled on "${server.name}"`,
+      );
+    }
+  } catch {
+    showToast("Failed to update the chat tool", "error");
   }
 }
 
@@ -552,6 +623,19 @@ function addToCursor(): void {
       <div>
         <div class="flex items-center justify-between mb-4">
           <h3 class="font-semibold text-lg">
+            Heym Capabilities
+          </h3>
+        </div>
+        <MCPChatToolControls
+          :chat-tool="config.chat_tool"
+          :credentials="llmCredentials"
+          @update="updateGlobalChatTool"
+        />
+      </div>
+
+      <div>
+        <div class="flex items-center justify-between mb-4">
+          <h3 class="font-semibold text-lg">
             Available Workflows
           </h3>
           <span class="text-sm text-muted-foreground">
@@ -768,7 +852,9 @@ function addToCursor(): void {
                     {{ server.name }}
                   </p>
                   <p class="text-xs text-muted-foreground truncate">
-                    {{ server.workflow_ids.length }} workflow{{ server.workflow_ids.length !== 1 ? 's' : '' }} assigned
+                    {{ server.workflow_ids.length }} workflow{{ server.workflow_ids.length !== 1 ? 's' : '' }} assigned<template v-if="server.chat_tool.enabled">
+                      · chat tool on
+                    </template>
                   </p>
                 </div>
               </div>
@@ -885,6 +971,16 @@ function addToCursor(): void {
                     Add to Cursor
                   </Button>
                 </div>
+              </div>
+
+              <div>
+                <label class="text-xs font-medium text-muted-foreground block mb-2">Heym Capabilities</label>
+                <MCPChatToolControls
+                  :chat-tool="server.chat_tool"
+                  :credentials="llmCredentials"
+                  compact
+                  @update="updateServerChatTool(server, $event)"
+                />
               </div>
 
               <div>

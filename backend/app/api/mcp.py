@@ -32,6 +32,8 @@ from app.db.models import (
 )
 from app.db.session import async_session_maker, get_db
 from app.models.schemas import (
+    MCPChatToolConfig,
+    MCPChatToolUpdate,
     MCPConfigResponse,
     MCPFetchToolItem,
     MCPFetchToolsResponse,
@@ -47,7 +49,8 @@ from app.models.schemas import (
     MCPToolsListResponse,
     MCPWorkflowItem,
 )
-from app.services import file_intake_service
+from app.services import file_intake_service, mcp_chat_service
+from app.services.credential_access import get_accessible_credential
 from app.services.encryption import decrypt_config
 from app.services.execution_cancellation import (
     clear_execution as clear_active_execution,
@@ -494,6 +497,64 @@ def workflow_to_mcp_tool(workflow: Workflow) -> MCPTool:
     )
 
 
+async def build_tools_with_chat(
+    workflows: list[Workflow],
+    chat_settings: mcp_chat_service.MCPChatSettings,
+) -> list[MCPTool]:
+    """Workflow tools for an MCP surface, plus `heym_chat` when it is enabled."""
+    tools = [workflow_to_mcp_tool(w) for w in workflows]
+    if chat_settings.enabled:
+        tools.append(mcp_chat_service.build_chat_mcp_tool())
+    return tools
+
+
+async def dispatch_chat_tool_call(
+    *,
+    request: Request,
+    db: AsyncSession,
+    msg_id: int | str,
+    user_id: uuid.UUID,
+    chat_settings: mcp_chat_service.MCPChatSettings,
+    arguments: dict[str, Any],
+) -> dict[str, Any]:
+    """Run `heym_chat` and package the reply as a JSON-RPC tool result."""
+    try:
+        result = await mcp_chat_service.run_chat_tool(
+            db,
+            user_id=user_id,
+            settings=chat_settings,
+            arguments=arguments,
+            public_base_url=build_public_base_url(request),
+        )
+    except mcp_chat_service.MCPChatError as exc:
+        return _mcp_tool_result_jsonrpc_response(msg_id, str(exc), is_error=True)
+    except Exception as exc:  # noqa: BLE001 - surface engine failures to the MCP client
+        return _mcp_tool_result_jsonrpc_response(msg_id, f"Heym chat failed: {exc}", is_error=True)
+    return _mcp_tool_result_jsonrpc_response(msg_id, mcp_chat_service.format_chat_tool_text(result))
+
+
+async def validate_chat_tool_credential(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    credential_id: uuid.UUID | None,
+) -> None:
+    """Reject a chat-tool credential the user cannot use for chat."""
+    if credential_id is None:
+        return
+    credential = await get_accessible_credential(db, credential_id, user_id)
+    if credential is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Credential not found")
+    if credential.type not in (
+        CredentialType.openai,
+        CredentialType.google,
+        CredentialType.custom,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Credential must be an LLM type (OpenAI, Google, or Custom)",
+        )
+
+
 async def get_credentials_context_for_user(db: AsyncSession, user_id: uuid.UUID) -> dict[str, str]:
     from app.db.models import CredentialShare, CredentialTeamShare, TeamMember
 
@@ -720,6 +781,36 @@ async def get_mcp_config(
         mcp_api_key=current_user.mcp_api_key,
         mcp_endpoint_url=mcp_endpoint_url,
         workflows=workflow_items,
+        chat_tool=MCPChatToolConfig(
+            enabled=current_user.mcp_chat_enabled,
+            credential_id=current_user.mcp_chat_credential_id,
+            model=current_user.mcp_chat_model,
+        ),
+    )
+
+
+@router.patch("/chat-tool", response_model=MCPChatToolConfig)
+async def update_mcp_chat_tool(
+    body: MCPChatToolUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> MCPChatToolConfig:
+    """Enable/disable the `heym_chat` tool on the global MCP server and set its model."""
+    provided = body.model_fields_set
+    if "credential_id" in provided:
+        await validate_chat_tool_credential(db, current_user.id, body.credential_id)
+        current_user.mcp_chat_credential_id = body.credential_id
+    if "model" in provided:
+        current_user.mcp_chat_model = body.model
+    if body.enabled is not None:
+        current_user.mcp_chat_enabled = body.enabled
+
+    await db.flush()
+    await db.refresh(current_user)
+    return MCPChatToolConfig(
+        enabled=current_user.mcp_chat_enabled,
+        credential_id=current_user.mcp_chat_credential_id,
+        model=current_user.mcp_chat_model,
     )
 
 
@@ -802,8 +893,8 @@ async def list_mcp_tools(
     db: AsyncSession = Depends(get_db),
 ) -> MCPToolsListResponse:
     workflows = await get_user_mcp_workflows(db, mcp_user.id)
-    tools = [workflow_to_mcp_tool(w) for w in workflows]
-    return MCPToolsListResponse(tools=tools)
+    chat_settings = await mcp_chat_service.get_global_chat_settings(db, mcp_user.id)
+    return MCPToolsListResponse(tools=await build_tools_with_chat(workflows, chat_settings))
 
 
 # Server-side ceiling for the caller-supplied MCP connect timeout. The outer HTTP
@@ -886,6 +977,27 @@ async def call_mcp_tool(
     body = await request.json()
     tool_name = body.get("name", "")
     arguments = body.get("arguments", {})
+
+    if tool_name == mcp_chat_service.MCP_CHAT_TOOL_NAME:
+        chat_settings = await mcp_chat_service.get_global_chat_settings(db, mcp_user.id)
+        if not chat_settings.enabled:
+            return MCPToolResult(
+                content=[MCPTextContent(text=f"Tool not found: {tool_name}")],
+                isError=True,
+            )
+        response = await dispatch_chat_tool_call(
+            request=request,
+            db=db,
+            msg_id=0,
+            user_id=mcp_user.id,
+            chat_settings=chat_settings,
+            arguments=arguments,
+        )
+        result = response["result"]
+        return MCPToolResult(
+            content=[MCPTextContent(text=item["text"]) for item in result["content"]],
+            isError=bool(result["isError"]),
+        )
 
     workflows = await get_user_mcp_workflows(db, mcp_user.id)
     target_workflow = None
@@ -1063,7 +1175,8 @@ async def _dispatch_mcp_jsonrpc(
 
     if msg.method == "tools/list":
         workflows = await get_user_mcp_workflows(db, mcp_user.id)
-        tools = [workflow_to_mcp_tool(w) for w in workflows]
+        chat_settings = await mcp_chat_service.get_global_chat_settings(db, mcp_user.id)
+        tools = await build_tools_with_chat(workflows, chat_settings)
         return {
             "jsonrpc": "2.0",
             "id": msg.id,
@@ -1073,6 +1186,23 @@ async def _dispatch_mcp_jsonrpc(
     if msg.method == "tools/call":
         tool_name = msg.params.get("name", "")
         arguments = msg.params.get("arguments", {})
+
+        if tool_name == mcp_chat_service.MCP_CHAT_TOOL_NAME:
+            chat_settings = await mcp_chat_service.get_global_chat_settings(db, mcp_user.id)
+            if not chat_settings.enabled:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": msg.id,
+                    "error": {"code": -32601, "message": f"Tool not found: {tool_name}"},
+                }
+            return await dispatch_chat_tool_call(
+                request=request,
+                db=db,
+                msg_id=msg.id,
+                user_id=mcp_user.id,
+                chat_settings=chat_settings,
+                arguments=arguments,
+            )
 
         workflows = await get_user_mcp_workflows(db, mcp_user.id)
         target_workflow = None

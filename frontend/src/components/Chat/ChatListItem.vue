@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, ref } from "vue";
-import { Pin, PinOff, Pencil, Trash2, Check, X } from "lucide-vue-next";
+import { Pin, PinOff, Pencil, Plug, Trash2, Check, X } from "lucide-vue-next";
 
 import type { Conversation } from "@/types/chat";
 import { cn } from "@/lib/utils";
@@ -101,6 +101,13 @@ function handleSelect(): void {
     <Pin
       v-if="conversation.is_pinned"
       class="w-3 h-3 shrink-0 text-primary opacity-60"
+    />
+
+    <Plug
+      v-if="conversation.source === 'mcp'"
+      class="w-3 h-3 shrink-0 text-primary opacity-70"
+      aria-label="Started by an MCP client"
+      title="Started by an MCP client"
     />
 
     <div class="flex-1 min-w-0">

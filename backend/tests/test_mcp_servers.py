@@ -14,6 +14,7 @@ from app.api.mcp_servers import (
     toggle_server_workflow,
 )
 from app.models.schemas import MCPServerCreate, MCPServerWorkflowToggleRequest
+from app.services.mcp_chat_service import MCPChatSettings
 
 
 def _make_server(user_id: uuid.UUID) -> SimpleNamespace:
@@ -23,6 +24,9 @@ def _make_server(user_id: uuid.UUID) -> SimpleNamespace:
         name="Test Server",
         api_key=secrets.token_urlsafe(48),
         created_at=datetime.now(timezone.utc),
+        chat_enabled=False,
+        chat_credential_id=None,
+        chat_model=None,
     )
 
 
@@ -186,11 +190,40 @@ class MCPServerToolsListTests(unittest.IsolatedAsyncioTestCase):
 
         db = AsyncMock()
 
-        with patch("app.api.mcp_servers._get_server_workflows", AsyncMock(return_value=[workflow])):
+        with (
+            patch("app.api.mcp_servers._get_server_workflows", AsyncMock(return_value=[workflow])),
+            patch(
+                "app.api.mcp_servers.mcp_chat_service.get_server_chat_settings",
+                AsyncMock(
+                    return_value=MCPChatSettings(enabled=False, credential_id=None, model=None)
+                ),
+            ),
+        ):
             result = await list_named_server_tools(server=(user, server), db=db)
 
         self.assertEqual(len(result.tools), 1)
         self.assertEqual(result.tools[0].name, "crm_sync")
+
+    async def test_tools_list_includes_chat_tool_when_enabled(self) -> None:
+        user = SimpleNamespace(id=uuid.uuid4())
+        server = _make_server(user.id)
+
+        db = AsyncMock()
+
+        with (
+            patch("app.api.mcp_servers._get_server_workflows", AsyncMock(return_value=[])),
+            patch(
+                "app.api.mcp_servers.mcp_chat_service.get_server_chat_settings",
+                AsyncMock(
+                    return_value=MCPChatSettings(
+                        enabled=True, credential_id=uuid.uuid4(), model="gpt-5"
+                    )
+                ),
+            ),
+        ):
+            result = await list_named_server_tools(server=(user, server), db=db)
+
+        self.assertEqual([t.name for t in result.tools], ["heym_chat"])
 
 
 class MCPServerAuthTests(unittest.IsolatedAsyncioTestCase):

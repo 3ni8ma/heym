@@ -40,6 +40,8 @@ export interface ContextUsage {
 export interface Conversation {
   id: string
   title: string
+  /** Where the conversation started: the Chat tab, or the heym_chat MCP tool. */
+  source: 'chat' | 'mcp'
   is_pinned: boolean
   is_running: boolean
   has_unread: boolean
