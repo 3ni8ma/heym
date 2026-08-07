@@ -389,6 +389,12 @@ class LiveExecutionSnapshotTests(unittest.IsolatedAsyncioTestCase):
         select_result = MagicMock()
         select_result.scalars.return_value.all.return_value = []
         session.execute.return_value = select_result
+        # begin_nested() is a plain method returning an async context manager, so it
+        # must not be an AsyncMock coroutine.
+        savepoint = MagicMock()
+        savepoint.__aenter__ = AsyncMock(return_value=savepoint)
+        savepoint.__aexit__ = AsyncMock(return_value=False)
+        session.begin_nested = MagicMock(return_value=savepoint)
         session_context = MagicMock()
         session_context.__aenter__ = AsyncMock(return_value=session)
         session_context.__aexit__ = AsyncMock(return_value=None)

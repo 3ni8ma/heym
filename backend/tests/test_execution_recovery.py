@@ -84,6 +84,12 @@ class ClaimOrphanedExecutionsTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
         session.commit = AsyncMock()
+        # begin_nested() is a plain method returning an async context manager, so it
+        # must not be an AsyncMock coroutine.
+        savepoint = MagicMock()
+        savepoint.__aenter__ = AsyncMock(return_value=savepoint)
+        savepoint.__aexit__ = AsyncMock(return_value=False)
+        session.begin_nested = MagicMock(return_value=savepoint)
         cm = MagicMock()
         cm.__aenter__ = AsyncMock(return_value=session)
         cm.__aexit__ = AsyncMock(return_value=False)
