@@ -38,23 +38,35 @@ class TestEstimateTokens(unittest.TestCase):
 
 
 class TestGetContextLimit(unittest.TestCase):
-    def test_api_success_returns_api_value(self) -> None:
+    def test_known_model_skips_provider_api(self) -> None:
+        from app.services.context_compressor import get_context_limit
+
+        mock_client = MagicMock()
+        result = get_context_limit("gpt-3.5-turbo", mock_client)
+        self.assertEqual(result, 16_385)
+        mock_client.models.retrieve.assert_not_called()
+
+    def test_api_success_returns_api_value_for_unknown_model(self) -> None:
         from app.services.context_compressor import get_context_limit
 
         mock_model_info = MagicMock()
         mock_model_info.context_window = 200_000
         mock_client = MagicMock()
         mock_client.models.retrieve.return_value = mock_model_info
-        result = get_context_limit("claude-3-5-sonnet-20241022", mock_client)
+        result = get_context_limit("custom-provider-model-xyz", mock_client)
         self.assertEqual(result, 200_000)
+        mock_client.models.retrieve.assert_called_once_with("custom-provider-model-xyz")
 
-    def test_api_failure_falls_back_to_known_limits(self) -> None:
+    def test_known_model_prefers_table_over_provider(self) -> None:
         from app.services.context_compressor import get_context_limit
 
+        mock_model_info = MagicMock()
+        mock_model_info.context_window = 999_999
         mock_client = MagicMock()
-        mock_client.models.retrieve.side_effect = Exception("API error")
+        mock_client.models.retrieve.return_value = mock_model_info
         result = get_context_limit("gpt-4o-2024-11-20", mock_client)
         self.assertEqual(result, 128_000)
+        mock_client.models.retrieve.assert_not_called()
 
     def test_unknown_model_returns_default(self) -> None:
         from app.services.context_compressor import get_context_limit
@@ -64,23 +76,23 @@ class TestGetContextLimit(unittest.TestCase):
         result = get_context_limit("some-totally-unknown-model-xyz", mock_client)
         self.assertEqual(result, 128_000)
 
-    def test_api_returns_non_int_falls_back_to_known_limits(self) -> None:
+    def test_api_returns_non_int_falls_back_to_default(self) -> None:
         from app.services.context_compressor import get_context_limit
 
         mock_model_info = MagicMock()
         mock_model_info.context_window = None
         mock_client = MagicMock()
         mock_client.models.retrieve.return_value = mock_model_info
-        result = get_context_limit("gpt-4o", mock_client)
+        result = get_context_limit("custom-provider-model-xyz", mock_client)
         self.assertEqual(result, 128_000)
 
     def test_gemini_model_matched_by_substring(self) -> None:
         from app.services.context_compressor import get_context_limit
 
         mock_client = MagicMock()
-        mock_client.models.retrieve.side_effect = Exception("API error")
         result = get_context_limit("gemini-2.0-flash-001", mock_client)
         self.assertEqual(result, 1_048_576)
+        mock_client.models.retrieve.assert_not_called()
 
 
 class TestMaybeCompressMessages(unittest.IsolatedAsyncioTestCase):

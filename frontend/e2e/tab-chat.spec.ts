@@ -104,9 +104,30 @@ async function createConversation(page: import("@playwright/test").Page): Promis
   return conversationId as string;
 }
 
+/** Avoid real provider lookups while exercising chat CRUD flows. */
+async function mockIdleChatContextSummary(page: import("@playwright/test").Page): Promise<void> {
+  await page.route("**/api/chats/*/context-summary**", async (route) => {
+    await route.fulfill({
+      json: {
+        used: 0,
+        limit: 16_385,
+        breakdown: {
+          system: 0,
+          agents_md: 0,
+          workflows: 0,
+          user_rules: 0,
+          history: 0,
+          attachment: 0,
+        },
+      },
+    });
+  });
+}
+
 test("creates a conversation and renames it", async ({ page }) => {
   const renamedTitle = `Renamed Chat ${Date.now()}`;
 
+  await mockIdleChatContextSummary(page);
   await page.goto("/chats");
   await expect(page.getByText("Ask to run a workflow")).toBeVisible();
 
@@ -144,6 +165,7 @@ test("creates a conversation and renames it", async ({ page }) => {
 });
 
 test("creates and deletes a conversation", async ({ page }) => {
+  await mockIdleChatContextSummary(page);
   await page.goto("/chats");
   await expect(page.getByText("Ask to run a workflow")).toBeVisible();
 
@@ -151,9 +173,16 @@ test("creates and deletes a conversation", async ({ page }) => {
   const item = page.getByTestId(`chat-list-item-${conversationId}`);
   await expect(item).toBeVisible();
 
+  const deleteResponsePromise = page.waitForResponse(
+    (response) =>
+      response.url().includes(`/api/chats/${conversationId}`) &&
+      response.request().method() === "DELETE" &&
+      response.status() === 204,
+  );
   await item.hover();
   await item.getByTitle("Delete").click();
   await item.getByTitle("Confirm delete").click();
+  await deleteResponsePromise;
   await expect(page).toHaveURL(/\/chats$/);
   await expect(page.getByTestId(`chat-list-item-${conversationId}`)).toHaveCount(0);
 });

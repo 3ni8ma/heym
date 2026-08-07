@@ -204,9 +204,19 @@ async def _summarize_text_to_budget(
 def get_context_limit(model: str, client: Any) -> int:
     """Return the context window size for a model.
 
-    Tries the provider's /models API first; falls back to KNOWN_LIMITS
-    by substring match, then to _DEFAULT_LIMIT (128K) if unknown.
+    Prefer ``KNOWN_LIMITS`` for common models so idle chat pages never block the
+    asyncio event loop on a synchronous provider round-trip. Invalid API keys and
+    provider 5xx retries can take tens of seconds; holding the loop that long
+    stalls every other request on the worker (including conversation deletes).
+
+    Unknown models still consult the provider ``/models`` API; on failure fall
+    back to ``_DEFAULT_LIMIT`` (128K).
     """
+    model_lower = model.lower()
+    for key, limit in KNOWN_LIMITS.items():
+        if key in model_lower:
+            return limit
+
     try:
         model_info = client.models.retrieve(model)
         limit = getattr(model_info, "context_window", None)
@@ -214,11 +224,6 @@ def get_context_limit(model: str, client: Any) -> int:
             return limit
     except Exception:
         pass
-
-    model_lower = model.lower()
-    for key, limit in KNOWN_LIMITS.items():
-        if key in model_lower:
-            return limit
 
     return _DEFAULT_LIMIT
 

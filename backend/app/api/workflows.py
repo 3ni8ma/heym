@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import json
+import logging
 import uuid
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
@@ -11,6 +12,7 @@ from typing import Any
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import String, case, cast, func, literal, or_, select, text, union_all
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import flag_modified
@@ -337,6 +339,8 @@ async def _finalize_allow_downstream_history(
     except Exception:
         pass
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -1007,7 +1011,18 @@ async def list_active_workflow_executions(
     db: AsyncSession = Depends(get_db),
 ) -> list[ActiveExecutionItem]:
     """Return running and pending-review executions for the authenticated user."""
-    persisted = await list_persisted_active_executions_for_user(db, current_user.id)
+    # The cross-worker registry is a convenience layer, not the source of truth for
+    # whether a run is alive. If reading it fails, degrade to this worker's own
+    # handles instead of failing the whole request and blanking the badge.
+    try:
+        persisted = await list_persisted_active_executions_for_user(db, current_user.id)
+    except SQLAlchemyError:
+        logger.warning(
+            "Persisted active execution lookup failed; serving local handles only",
+            exc_info=True,
+        )
+        await db.rollback()
+        persisted = []
     items_by_execution_id = {
         record.execution_id: ActiveExecutionItem(
             execution_id=str(record.execution_id),

@@ -24,6 +24,13 @@ ACTIVE_EXECUTION_STALE_AFTER_SECONDS = 300
 RECOVERY_STALE_AFTER_SECONDS = 60
 _REGISTRY_POLL_SECONDS = 0.5
 _REGISTRY_CLEANUP_SECONDS = 30.0
+# The registry loop retries every 0.5s, so an unhealthy database would otherwise
+# emit two tracebacks a second. Report the first failure per scope immediately and
+# then at most once a minute, with the suppressed count.
+_REGISTRY_FAILURE_LOG_INTERVAL_SECONDS = 60.0
+# Start/finish commands are replayed until the database accepts them; cap the
+# backlog so a permanently unreachable database cannot grow it without bound.
+_MAX_PENDING_REGISTRY_COMMANDS = 2000
 # Live SSE events kept per execution so a canvas that attaches mid-run replays the
 # same stream the runner emitted (agent tool progress, sub-agent node lifecycle).
 # Bounded by both count and total bytes: the oldest events are dropped first.
@@ -348,16 +355,120 @@ def _handle_for_execution_id(execution_id: str) -> ExecutionCancellationHandle |
         return _ACTIVE_EXECUTIONS.get(parsed_execution_id)
 
 
+class _ThrottledFailureLog:
+    """Report the first failure per scope, then at most once a minute with a count.
+
+    The registry and the orphan sweep both retry on short timers, so an unhealthy
+    row would otherwise emit a traceback every tick. ``scope`` must come from a
+    fixed vocabulary (never an execution id) so the bookkeeping stays bounded.
+    """
+
+    def __init__(self, interval_seconds: float = _REGISTRY_FAILURE_LOG_INTERVAL_SECONDS) -> None:
+        self._interval_seconds = interval_seconds
+        self._counts: dict[str, int] = {}
+        self._logged_at: dict[str, float] = {}
+
+    def failure(self, scope: str, exc: BaseException, detail: str = "") -> None:
+        now = time.monotonic()
+        self._counts[scope] = self._counts.get(scope, 0) + 1
+        last_logged_at = self._logged_at.get(scope)
+        if last_logged_at is not None and now - last_logged_at < self._interval_seconds:
+            return
+        self._logged_at[scope] = now
+        occurrences = self._counts[scope]
+        self._counts[scope] = 0
+        logger.error(
+            "Active execution registry %s failed%s (%d occurrence(s) since last report)",
+            scope,
+            f" [{detail}]" if detail else "",
+            occurrences,
+            exc_info=exc,
+        )
+
+    def success(self, scope: str) -> None:
+        """Announce recovery once, so a healed database is visible in the log."""
+        if self._logged_at.pop(scope, None) is None:
+            self._counts.pop(scope, None)
+            return
+        suppressed = self._counts.pop(scope, 0)
+        logger.info(
+            "Active execution registry %s recovered (%d suppressed failure(s))",
+            scope,
+            suppressed,
+        )
+
+    def suppressed_count(self, scope: str) -> int:
+        return self._counts.get(scope, 0)
+
+    def reset(self) -> None:
+        self._counts.clear()
+        self._logged_at.clear()
+
+
+# The orphan sweep runs from execution_recovery on its own 15s timer, outside any
+# registry instance, so it keeps its own throttle state.
+_claim_failures = _ThrottledFailureLog()
+
+
+def _build_active_execution_upsert(
+    *,
+    execution_id: uuid.UUID,
+    workflow_id: uuid.UUID,
+    started_at: datetime,
+    heartbeat_at: datetime,
+    inputs: dict,
+    trigger_source: str | None,
+    actor_user_id: uuid.UUID | None,
+    recoverable: bool,
+    running_node_ids: list[str],
+    node_results: list[dict[str, Any]],
+) -> Any:
+    """Insert-or-refresh one active execution row.
+
+    ``set_`` intentionally omits ``attempt`` and ``recoverable`` so a recovery
+    re-run (re-registering the same execution_id) preserves the claimed attempt
+    count and recoverable flag.
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from app.db.models import ActiveWorkflowExecution
+
+    shared_values: dict[str, Any] = {
+        "workflow_id": workflow_id,
+        "worker_id": _WORKER_ID,
+        "started_at": started_at,
+        "heartbeat_at": heartbeat_at,
+        "cancel_requested_at": None,
+        "inputs": inputs,
+        "trigger_source": trigger_source,
+        "actor_user_id": actor_user_id,
+        "running_node_ids": running_node_ids,
+        "node_results": node_results,
+    }
+    return (
+        pg_insert(ActiveWorkflowExecution)
+        .values(
+            execution_id=execution_id,
+            attempt=0,
+            recoverable=recoverable,
+            **shared_values,
+        )
+        .on_conflict_do_update(index_elements=["execution_id"], set_=shared_values)
+    )
+
+
 class ActiveExecutionRegistry:
     """Persist local active execution state into Postgres for multi-worker visibility."""
 
     def __init__(self) -> None:
         self._commands: queue.Queue[_RegistryCommand] = queue.Queue()
+        self._pending: list[_RegistryCommand] = []
         self._task: asyncio.Task[None] | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._wakeup: asyncio.Event | None = None
         self._running = False
         self._next_cleanup_at = 0.0
+        self._failures = _ThrottledFailureLog()
 
     async def start(self) -> None:
         if self._task is not None and not self._task.done():
@@ -380,6 +491,7 @@ class ActiveExecutionRegistry:
         self._wakeup = None
         with contextlib.suppress(Exception):
             await self._drain_commands()
+        self._failures.reset()
         logger.info("Active execution registry stopped")
 
     def record_started(self, handle: ExecutionCancellationHandle) -> None:
@@ -420,8 +532,8 @@ class ActiveExecutionRegistry:
                 # of silently deleting, so this loop no longer blind-deletes.
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                logger.exception("Active execution registry sync failed")
+            except Exception as exc:
+                self._failures.failure("sync loop", exc)
             if self._wakeup is None:
                 await asyncio.sleep(_REGISTRY_POLL_SECONDS)
                 continue
@@ -429,74 +541,124 @@ class ActiveExecutionRegistry:
                 await asyncio.wait_for(self._wakeup.wait(), timeout=_REGISTRY_POLL_SECONDS)
             self._wakeup.clear()
 
-    async def _drain_commands(self) -> None:
-        commands: list[_RegistryCommand] = []
-        while True:
-            try:
-                commands.append(self._commands.get_nowait())
-            except queue.Empty:
-                break
-        if not commands:
-            return
-
+    async def _apply_command(self, session: Any, command: _RegistryCommand, now: datetime) -> None:
         from sqlalchemy import delete
-        from sqlalchemy.dialects.postgresql import insert as pg_insert
 
         from app.db.models import ActiveWorkflowExecution
+
+        if command.action == "finish":
+            await session.execute(
+                delete(ActiveWorkflowExecution).where(
+                    ActiveWorkflowExecution.execution_id == command.execution_id
+                )
+            )
+            return
+        if command.workflow_id is None:
+            return
+        await session.execute(
+            _build_active_execution_upsert(
+                execution_id=command.execution_id,
+                workflow_id=command.workflow_id,
+                started_at=command.started_at or now,
+                heartbeat_at=now,
+                inputs=command.inputs or {},
+                trigger_source=command.trigger_source,
+                actor_user_id=command.actor_user_id,
+                recoverable=command.recoverable,
+                running_node_ids=[],
+                node_results=[],
+            )
+        )
+
+    async def _drain_commands(self) -> None:
+        while True:
+            try:
+                self._pending.append(self._commands.get_nowait())
+            except queue.Empty:
+                break
+        if not self._pending:
+            return
+        if len(self._pending) > _MAX_PENDING_REGISTRY_COMMANDS:
+            overflow = len(self._pending) - _MAX_PENDING_REGISTRY_COMMANDS
+            self._pending = self._pending[overflow:]
+            logger.warning(
+                "Dropped %d buffered active execution registry command(s); database backlog too long",
+                overflow,
+            )
+
         from app.db.session import async_session_maker
 
+        # A command that cannot be written must not be lost: it is kept and replayed
+        # on the next tick, otherwise a single transient database error permanently
+        # hides a running execution (lost "start") or leaves a phantom row (lost
+        # "finish") until the stale-row sweep.
+        commands, self._pending = self._pending, []
+        deferred: list[_RegistryCommand] = []
+        deferred_execution_ids: set[uuid.UUID] = set()
         now = _utcnow()
-        async with async_session_maker() as session:
-            for command in commands:
-                if command.action == "finish":
-                    await session.execute(
-                        delete(ActiveWorkflowExecution).where(
-                            ActiveWorkflowExecution.execution_id == command.execution_id
+        try:
+            async with async_session_maker() as session:
+                for command in commands:
+                    # Ordering matters per execution: once one command is deferred,
+                    # every later command for the same execution must wait with it.
+                    if command.execution_id in deferred_execution_ids:
+                        deferred.append(command)
+                        continue
+                    try:
+                        async with session.begin_nested():
+                            await self._apply_command(session, command, now)
+                    except Exception as exc:
+                        deferred.append(command)
+                        deferred_execution_ids.add(command.execution_id)
+                        self._failures.failure(
+                            "command flush",
+                            exc,
+                            f"{command.action} {command.execution_id}",
                         )
-                    )
-                    continue
+                await session.commit()
+        except Exception:
+            self._pending = commands + self._pending
+            raise
+        self._pending = deferred + self._pending
+        if not deferred:
+            self._failures.success("command flush")
 
-                if command.workflow_id is None:
-                    continue
-                started_at = command.started_at or now
-                stmt = (
-                    pg_insert(ActiveWorkflowExecution)
-                    .values(
-                        execution_id=command.execution_id,
-                        workflow_id=command.workflow_id,
-                        worker_id=_WORKER_ID,
-                        started_at=started_at,
-                        heartbeat_at=now,
-                        cancel_requested_at=None,
-                        inputs=command.inputs or {},
-                        trigger_source=command.trigger_source,
-                        actor_user_id=command.actor_user_id,
-                        attempt=0,
-                        recoverable=command.recoverable,
-                        running_node_ids=[],
-                        node_results=[],
-                    )
-                    .on_conflict_do_update(
-                        index_elements=["execution_id"],
-                        # set_ intentionally omits `attempt` and `recoverable` so a
-                        # recovery re-run (re-registering the same execution_id)
-                        # preserves the claimed attempt count and recoverable flag.
-                        set_={
-                            "workflow_id": command.workflow_id,
-                            "worker_id": _WORKER_ID,
-                            "started_at": started_at,
-                            "heartbeat_at": now,
-                            "cancel_requested_at": None,
-                            "inputs": command.inputs or {},
-                            "trigger_source": command.trigger_source,
-                            "actor_user_id": command.actor_user_id,
-                            "running_node_ids": [],
-                            "node_results": [],
-                        },
-                    )
-                )
-                await session.execute(stmt)
-            await session.commit()
+    async def _reinsert_missing_row(
+        self,
+        session: Any,
+        execution_id: uuid.UUID,
+        handle: ExecutionCancellationHandle,
+        now: datetime,
+    ) -> int | None:
+        """Recreate a registry row that vanished while its execution is still running.
+
+        The stale-row sweep, a manual cleanup, or a repaired table all delete rows out
+        from under live runs. Without this the heartbeat UPDATE would silently match
+        nothing forever and the execution would stay invisible to every other worker.
+        Returns the progress version now persisted, or ``None`` if the run has ended.
+        """
+        with _LOCK:
+            if _ACTIVE_EXECUTIONS.get(execution_id) is not handle:
+                return None
+            running_node_ids = sorted(handle.running_node_ids)
+            node_results = list(handle.node_results)
+            version = handle.progress_version
+        await session.execute(
+            _build_active_execution_upsert(
+                execution_id=execution_id,
+                workflow_id=handle.workflow_id,
+                started_at=handle.started_at,
+                heartbeat_at=now,
+                inputs=dict(handle.inputs),
+                trigger_source=handle.trigger_source,
+                actor_user_id=handle.actor_user_id,
+                recoverable=handle.recoverable,
+                running_node_ids=running_node_ids,
+                node_results=node_results,
+            )
+        )
+        logger.info("Recreated missing active execution registry row for %s", execution_id)
+        return version
 
     async def _sync_local_handles(self) -> None:
         handles = list_active_executions()
@@ -530,16 +692,27 @@ class ActiveExecutionRegistry:
                     progress_changed,
                 )
         now = _utcnow()
+        cancelled_ids: list[uuid.UUID] = []
+        # (execution_id, handle, synced_version) for the rows this tick actually wrote.
+        synced: list[tuple[uuid.UUID, ExecutionCancellationHandle, int]] = []
+        heartbeat_failures = 0
         async with async_session_maker() as session:
-            cancel_result = await session.execute(
-                select(ActiveWorkflowExecution.execution_id).where(
-                    ActiveWorkflowExecution.execution_id.in_(execution_ids),
-                    ActiveWorkflowExecution.cancel_requested_at.is_not(None),
-                )
-            )
-            cancelled_ids = list(cancel_result.scalars().all())
+            try:
+                async with session.begin_nested():
+                    cancel_result = await session.execute(
+                        select(ActiveWorkflowExecution.execution_id).where(
+                            ActiveWorkflowExecution.execution_id.in_(execution_ids),
+                            ActiveWorkflowExecution.cancel_requested_at.is_not(None),
+                        )
+                    )
+                    cancelled_ids = list(cancel_result.scalars().all())
+            except Exception as exc:
+                self._failures.failure("cancel poll", exc)
+            else:
+                self._failures.success("cancel poll")
+
             for execution_id, snapshot in progress_snapshots.items():
-                _handle, running_node_ids, node_results, _version, progress_changed = snapshot
+                handle, running_node_ids, node_results, version, progress_changed = snapshot
                 update_values: dict[str, Any] = {
                     "heartbeat_at": now,
                     "worker_id": _WORKER_ID,
@@ -549,18 +722,37 @@ class ActiveExecutionRegistry:
                         running_node_ids=running_node_ids,
                         node_results=node_results,
                     )
-                await session.execute(
-                    update(ActiveWorkflowExecution)
-                    .where(ActiveWorkflowExecution.execution_id == execution_id)
-                    .values(**update_values)
-                )
-            await session.commit()
+                # Each row gets its own savepoint: a single unwritable row (a corrupt
+                # page, a lock timeout) must not abort the heartbeats of every other
+                # execution on this worker, which would make them all look orphaned.
+                try:
+                    async with session.begin_nested():
+                        result = await session.execute(
+                            update(ActiveWorkflowExecution)
+                            .where(ActiveWorkflowExecution.execution_id == execution_id)
+                            .values(**update_values)
+                        )
+                        if (result.rowcount or 0) == 0:
+                            version = await self._reinsert_missing_row(
+                                session, execution_id, handle, now
+                            )
+                            if version is None:
+                                continue
+                except Exception as exc:
+                    heartbeat_failures += 1
+                    self._failures.failure("heartbeat sync", exc, str(execution_id))
+                    continue
+                synced.append((execution_id, handle, version))
+            try:
+                await session.commit()
+            except Exception as exc:
+                self._failures.failure("heartbeat sync", exc, "commit")
+                return
+        if heartbeat_failures == 0:
+            self._failures.success("heartbeat sync")
 
         with _LOCK:
-            for execution_id, snapshot in progress_snapshots.items():
-                snapshotted_handle, _running, _results, version, progress_changed = snapshot
-                if not progress_changed:
-                    continue
+            for execution_id, snapshotted_handle, version in synced:
                 current_handle = _ACTIVE_EXECUTIONS.get(execution_id)
                 if current_handle is snapshotted_handle:
                     current_handle.synced_progress_version = max(
@@ -634,7 +826,12 @@ async def mark_own_executions_orphaned() -> int:
 
 
 async def claim_orphaned_executions(*, now: datetime | None = None) -> list["ClaimedOrphan"]:
-    """Atomically claim recoverable rows whose heartbeat is stale; return the winners."""
+    """Atomically claim recoverable rows whose heartbeat is stale; return the winners.
+
+    Every claim runs in its own savepoint. Without that, one unreadable or locked row
+    aborts the shared transaction and no orphan anywhere in the deployment can be
+    recovered for as long as the row stays broken.
+    """
     from sqlalchemy import select, update
 
     from app.db.models import ActiveWorkflowExecution
@@ -642,31 +839,48 @@ async def claim_orphaned_executions(*, now: datetime | None = None) -> list["Cla
     now = now or _utcnow()
     cutoff = now - timedelta(seconds=RECOVERY_STALE_AFTER_SECONDS)
     claimed: list[ClaimedOrphan] = []
+    skipped = 0
     async with async_session_maker() as session:
-        candidates = (
-            await session.execute(
-                select(
-                    ActiveWorkflowExecution.execution_id,
-                    ActiveWorkflowExecution.workflow_id,
-                    ActiveWorkflowExecution.inputs,
-                    ActiveWorkflowExecution.trigger_source,
-                    ActiveWorkflowExecution.actor_user_id,
-                    ActiveWorkflowExecution.attempt,
-                ).where(
-                    ActiveWorkflowExecution.recoverable.is_(True),
-                    ActiveWorkflowExecution.heartbeat_at < cutoff,
-                )
-            )
-        ).all()
+        try:
+            async with session.begin_nested():
+                candidates = (
+                    await session.execute(
+                        select(
+                            ActiveWorkflowExecution.execution_id,
+                            ActiveWorkflowExecution.workflow_id,
+                            ActiveWorkflowExecution.inputs,
+                            ActiveWorkflowExecution.trigger_source,
+                            ActiveWorkflowExecution.actor_user_id,
+                            ActiveWorkflowExecution.attempt,
+                        ).where(
+                            ActiveWorkflowExecution.recoverable.is_(True),
+                            ActiveWorkflowExecution.heartbeat_at < cutoff,
+                        )
+                    )
+                ).all()
+        except Exception as exc:
+            # Nothing can be enumerated, so nothing can be recovered this tick. This
+            # is the signature of an unreadable active_workflow_executions row: it
+            # matches the stale predicate forever and blinds every later sweep too.
+            _claim_failures.failure("orphan candidate scan", exc)
+            return []
+        _claim_failures.success("orphan candidate scan")
+
         for row in candidates:
-            result = await session.execute(
-                update(ActiveWorkflowExecution)
-                .where(
-                    ActiveWorkflowExecution.execution_id == row.execution_id,
-                    ActiveWorkflowExecution.heartbeat_at < cutoff,
-                )
-                .values(worker_id=_WORKER_ID, heartbeat_at=now, attempt=row.attempt + 1)
-            )
+            try:
+                async with session.begin_nested():
+                    result = await session.execute(
+                        update(ActiveWorkflowExecution)
+                        .where(
+                            ActiveWorkflowExecution.execution_id == row.execution_id,
+                            ActiveWorkflowExecution.heartbeat_at < cutoff,
+                        )
+                        .values(worker_id=_WORKER_ID, heartbeat_at=now, attempt=row.attempt + 1)
+                    )
+            except Exception as exc:
+                skipped += 1
+                _claim_failures.failure("orphan claim", exc, str(row.execution_id))
+                continue
             if (result.rowcount or 0) == 1:
                 claimed.append(
                     ClaimedOrphan(
@@ -679,6 +893,8 @@ async def claim_orphaned_executions(*, now: datetime | None = None) -> list["Cla
                     )
                 )
         await session.commit()
+    if skipped == 0:
+        _claim_failures.success("orphan claim")
     return claimed
 
 
