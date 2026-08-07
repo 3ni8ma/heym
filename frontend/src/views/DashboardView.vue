@@ -21,6 +21,7 @@ import {
   RotateCcw,
   Search,
   Settings,
+  Sparkles,
   Trash2,
   Workflow,
   X,
@@ -32,6 +33,7 @@ import type { CredentialListItem } from "@/types/credential";
 import type { FolderTree, NodeData, WorkflowEdge, WorkflowListItem, WorkflowNode } from "@/types/workflow";
 import AnalyticsDashboard from "@/components/Analytics/AnalyticsDashboard.vue";
 import BoardPanel from "@/components/Board/BoardPanel.vue";
+import DashboardChatComposer from "@/components/Chat/DashboardChatComposer.vue";
 import CredentialsPanel from "@/components/Credentials/CredentialsPanel.vue";
 import DashboardsPanel from "@/components/Dashboards/DashboardsPanel.vue";
 import DataTablePanel from "@/components/DataTable/DataTablePanel.vue";
@@ -110,6 +112,41 @@ type TabKey = "workflows" | "board" | "schedules" | "credentials" | "globalvaria
 const initialTab: TabKey = validTabs.has(parsedInitial.tab) ? (parsedInitial.tab as TabKey) : "workflows";
 const dataTableInitialId = ref<string | null>(parsedInitial.tab === "datatable" ? parsedInitial.subPath : null);
 const activeTab = ref<TabKey>(initialTab);
+
+const CHAT_COMPOSER_DISMISSED_KEY = "heym-dashboard-chat-composer-dismissed";
+
+function readChatComposerDismissed(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(CHAT_COMPOSER_DISMISSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+const chatComposerDismissed = ref(readChatComposerDismissed());
+
+function dismissChatComposer(): void {
+  chatComposerDismissed.value = true;
+  try {
+    window.localStorage.setItem(CHAT_COMPOSER_DISMISSED_KEY, "1");
+  } catch {
+    // Ignore storage failures; the composer still hides for this session.
+  }
+}
+
+function restoreChatComposer(): void {
+  chatComposerDismissed.value = false;
+  try {
+    window.localStorage.removeItem(CHAT_COMPOSER_DISMISSED_KEY);
+  } catch {
+    // Ignore storage failures; the composer still shows for this session.
+  }
+}
+
+function openCredentialsTab(): void {
+  activeTab.value = "credentials";
+}
 
 watch(activeTab, (newTab) => {
   const query: Record<string, string> = newTab === "workflows" ? {} : { tab: newTab };
@@ -990,8 +1027,18 @@ async function downloadFolderAsZip(folder: FolderTree): Promise<void> {
   }
 }
 
+/** The chat composer is its own drop target for attachments, so skip workflow import there. */
+function isEventInsideChatComposer(event: DragEvent): boolean {
+  const target = event.target as HTMLElement | null;
+  return Boolean(target?.closest?.("[data-testid='dashboard-chat-composer']"));
+}
+
 function handleJsonDragOver(event: DragEvent): void {
   event.preventDefault();
+  if (isEventInsideChatComposer(event)) {
+    isDraggingJsonFile.value = false;
+    return;
+  }
   if (event.dataTransfer) {
     const items = event.dataTransfer.items;
     if (items && items.length > 0 && items[0].kind === "file") {
@@ -1227,6 +1274,7 @@ async function importZipFile(file: File): Promise<void> {
 async function handleJsonDrop(event: DragEvent): Promise<void> {
   event.preventDefault();
   isDraggingJsonFile.value = false;
+  if (isEventInsideChatComposer(event)) return;
 
   const files = event.dataTransfer?.files;
   if (!files || files.length === 0) return;
@@ -1470,7 +1518,13 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
               </div>
             </Transition>
 
-            <div class="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-5">
+            <DashboardChatComposer
+              v-if="!chatComposerDismissed"
+              @dismiss="dismissChatComposer"
+              @open-credentials="openCredentialsTab"
+            />
+
+            <div class="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
               <div>
                 <div class="flex items-center gap-3">
                   <h2 class="text-xl md:text-2xl font-bold tracking-tight">
@@ -1488,10 +1542,21 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                   <span class="sm:hidden"> · Long press for move/delete</span>
                 </p>
               </div>
-              <div class="flex flex-wrap items-center justify-end gap-1.5 sm:flex-nowrap">
+              <div class="flex flex-wrap items-center justify-end gap-x-1.5 gap-y-2 sm:flex-nowrap sm:gap-y-1.5">
+                <Button
+                  v-if="chatComposerDismissed"
+                  variant="ghost"
+                  size="sm"
+                  class="order-1 mr-auto gap-1.5 sm:order-none sm:mr-0"
+                  data-testid="dashboard-chat-composer-restore"
+                  @click="restoreChatComposer"
+                >
+                  <Sparkles class="w-4 h-4" />
+                  Ask AI
+                </Button>
                 <div
                   v-if="!loading && (workflows.length > 0 || folderStore.folderTree.length > 0)"
-                  class="relative w-full min-w-[220px] sm:w-72 md:w-80"
+                  class="relative order-4 w-full min-w-[220px] sm:order-none sm:w-72 md:w-80"
                 >
                   <Search class="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                   <input
@@ -1517,7 +1582,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                 <Button
                   variant="outline"
                   size="sm"
-                  class="sm:hidden min-h-[36px] min-w-[36px]"
+                  class="order-2 sm:hidden min-h-[36px] min-w-[36px]"
                   @click="openCreateFolderDialog(null)"
                 >
                   <FolderPlus class="w-3.5 h-3.5" />
@@ -1525,7 +1590,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                 <Button
                   variant="outline"
                   size="sm"
-                  class="hidden sm:inline-flex"
+                  class="order-2 hidden sm:order-none sm:inline-flex"
                   @click="openCreateFolderDialog(null)"
                 >
                   <FolderPlus class="w-3.5 h-3.5" />
@@ -1534,6 +1599,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                 <Button
                   variant="gradient"
                   size="sm"
+                  class="order-3 sm:order-none"
                   data-testid="new-workflow-button"
                   @click="showCreateDialog = true; pushOverlayState()"
                 >
