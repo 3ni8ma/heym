@@ -21,7 +21,16 @@ async_session_maker = async_sessionmaker(
 )
 
 
-sync_database_url = settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+def libpq_dsn() -> str:
+    """Plain libpq URL for consumers that bypass SQLAlchemy's async driver prefix.
+
+    Used by the sync engine and by the raw asyncpg connections that hold
+    LISTEN/NOTIFY channels open.
+    """
+    return settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
+
+
+sync_database_url = libpq_dsn()
 sync_engine = create_engine(
     sync_database_url,
     echo=False,

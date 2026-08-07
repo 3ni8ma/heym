@@ -24,8 +24,7 @@ from typing import Any
 import asyncpg
 import sqlalchemy as sa
 
-from app.config import settings
-from app.db.session import async_session_maker
+from app.db.session import async_session_maker, libpq_dsn
 
 ChatEvent = str | dict[str, Any]
 logger = logging.getLogger(__name__)
@@ -38,10 +37,6 @@ def _channel_name(conv_id: str) -> str:
     UUID hex without hyphens (32) = 44 chars, well under the limit.
     """
     return f"chat_stream_{conv_id.replace('-', '_').replace('+', '_')}"
-
-
-def _asyncpg_dsn() -> str:
-    return settings.database_url.replace("postgresql+asyncpg://", "postgresql://")
 
 
 def _serialize_event(event: ChatEvent) -> str:
@@ -198,7 +193,7 @@ async def subscribe(
         notify_wakeup.set()
 
     try:
-        listen_conn = await asyncpg.connect(_asyncpg_dsn())
+        listen_conn = await asyncpg.connect(libpq_dsn())
         await listen_conn.add_listener(channel, on_notify)
         # Drain whatever already exists before yielding the queue so the consumer
         # never misses early events that arrived before LISTEN was attached.

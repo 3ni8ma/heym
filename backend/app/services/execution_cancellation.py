@@ -31,6 +31,11 @@ _REGISTRY_FAILURE_LOG_INTERVAL_SECONDS = 60.0
 # Start/finish commands are replayed until the database accepts them; cap the
 # backlog so a permanently unreachable database cannot grow it without bound.
 _MAX_PENDING_REGISTRY_COMMANDS = 2000
+# Replays happen every _REGISTRY_POLL_SECONDS, so this is ~60s of retrying: long
+# enough to ride out a database restart, short enough that a command which can
+# never be written (corrupt row, missing workflow) is dropped instead of spinning
+# forever and holding back the finish that follows it.
+_MAX_REGISTRY_COMMAND_ATTEMPTS = 120
 # Live SSE events kept per execution so a canvas that attaches mid-run replays the
 # same stream the runner emitted (agent tool progress, sub-agent node lifecycle).
 # Bounded by both count and total bytes: the oldest events are dropped first.
@@ -463,6 +468,7 @@ class ActiveExecutionRegistry:
     def __init__(self) -> None:
         self._commands: queue.Queue[_RegistryCommand] = queue.Queue()
         self._pending: list[_RegistryCommand] = []
+        self._command_attempts: dict[tuple[str, uuid.UUID], int] = {}
         self._task: asyncio.Task[None] | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
         self._wakeup: asyncio.Event | None = None
@@ -608,13 +614,31 @@ class ActiveExecutionRegistry:
                         async with session.begin_nested():
                             await self._apply_command(session, command, now)
                     except Exception as exc:
-                        deferred.append(command)
-                        deferred_execution_ids.add(command.execution_id)
+                        key = (command.action, command.execution_id)
+                        attempts = self._command_attempts.get(key, 0) + 1
                         self._failures.failure(
                             "command flush",
                             exc,
-                            f"{command.action} {command.execution_id}",
+                            f"{command.action} {command.execution_id} attempt {attempts}",
                         )
+                        if attempts >= _MAX_REGISTRY_COMMAND_ATTEMPTS:
+                            # Give up on this one rather than replaying it forever and
+                            # blocking every later command for the same execution.
+                            self._command_attempts.pop(key, None)
+                            logger.error(
+                                "Dropping active execution registry %s for %s after %d "
+                                "failed attempts; the row may be stale until the sweep "
+                                "clears it",
+                                command.action,
+                                command.execution_id,
+                                attempts,
+                            )
+                            continue
+                        self._command_attempts[key] = attempts
+                        deferred.append(command)
+                        deferred_execution_ids.add(command.execution_id)
+                    else:
+                        self._command_attempts.pop((command.action, command.execution_id), None)
                 await session.commit()
         except Exception:
             self._pending = commands + self._pending
@@ -772,21 +796,43 @@ async def request_persisted_execution_cancel(
     workflow_id: uuid.UUID,
     execution_id: uuid.UUID,
 ) -> bool:
-    """Mark a running execution as cancelled so its owning worker can stop it."""
+    """Mark a running execution as cancelled and broadcast the stop to every worker.
+
+    The row update is only the durable record (it drives the dashboard filter and
+    the registry's fallback poll). Delivery is the broadcast, so the update runs in
+    its own savepoint: an unwritable registry row must not swallow the cancel.
+
+    Returns False only when the row is provably absent, since that is the one case
+    where the caller can honestly report "not found". A failed update leaves the
+    state unknown, and the broadcast has gone out regardless.
+    """
     from sqlalchemy import update
 
     from app.db.models import ActiveWorkflowExecution
+    from app.services.execution_cancel_bus import publish_execution_cancel
 
-    result = await db.execute(
-        update(ActiveWorkflowExecution)
-        .where(
-            ActiveWorkflowExecution.workflow_id == workflow_id,
-            ActiveWorkflowExecution.execution_id == execution_id,
+    marked_rows: int | None = None
+    try:
+        async with db.begin_nested():
+            result = await db.execute(
+                update(ActiveWorkflowExecution)
+                .where(
+                    ActiveWorkflowExecution.workflow_id == workflow_id,
+                    ActiveWorkflowExecution.execution_id == execution_id,
+                )
+                .values(cancel_requested_at=_utcnow())
+            )
+            marked_rows = result.rowcount or 0
+    except Exception:
+        logger.warning(
+            "Could not record cancel for execution %s; broadcasting anyway",
+            execution_id,
+            exc_info=True,
         )
-        .values(cancel_requested_at=_utcnow())
-    )
+
+    await publish_execution_cancel(db, workflow_id=workflow_id, execution_id=execution_id)
     await db.commit()
-    return bool(result.rowcount or 0)
+    return marked_rows is None or marked_rows > 0
 
 
 async def cleanup_stale_persisted_executions() -> int:
@@ -818,6 +864,8 @@ async def mark_own_executions_orphaned() -> int:
             .where(
                 ActiveWorkflowExecution.worker_id == _WORKER_ID,
                 ActiveWorkflowExecution.recoverable.is_(True),
+                # Never hand a cancelled run to recovery on shutdown.
+                ActiveWorkflowExecution.cancel_requested_at.is_(None),
             )
             .values(heartbeat_at=epoch)
         )
@@ -855,6 +903,11 @@ async def claim_orphaned_executions(*, now: datetime | None = None) -> list["Cla
                         ).where(
                             ActiveWorkflowExecution.recoverable.is_(True),
                             ActiveWorkflowExecution.heartbeat_at < cutoff,
+                            # A cancelled run is not an orphan. Its row only survives
+                            # because the finish DELETE could not be written, and
+                            # re-running work the user explicitly stopped is worse
+                            # than leaving the row for the stale sweep to clear.
+                            ActiveWorkflowExecution.cancel_requested_at.is_(None),
                         )
                     )
                 ).all()

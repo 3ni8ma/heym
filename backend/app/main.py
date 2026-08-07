@@ -68,6 +68,7 @@ from app.services.clickhouse_pool import close_all_clients as close_clickhouse_c
 from app.services.clickhouse_pool import warm_up_pools as warm_up_clickhouse_pools
 from app.services.cron_scheduler import cron_scheduler
 from app.services.distributed_lock import lock_service
+from app.services.execution_cancel_bus import execution_cancel_listener
 from app.services.execution_cancellation import (
     active_execution_registry,
     mark_own_executions_orphaned,
@@ -187,6 +188,7 @@ async def lifespan(app: FastAPI):
         logger.info("ClickHouse pools warmed up: %d", clickhouse_count)
 
     await active_execution_registry.start()
+    await execution_cancel_listener.start()
     await execution_recovery_service.start()
     await cron_scheduler.start()
 
@@ -204,6 +206,7 @@ async def lifespan(app: FastAPI):
     await RabbitMQPool.close_all()
     await cron_scheduler.stop()
     await execution_recovery_service.stop()
+    await execution_cancel_listener.stop()
     await active_execution_registry.stop()
     with suppress(Exception):
         await mark_own_executions_orphaned()
