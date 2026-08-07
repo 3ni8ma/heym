@@ -73,6 +73,7 @@ class _FakeSession:
         self._handler = handler
         self._select_rows = select_rows or []
         self.statements: list[tuple[str, uuid.UUID | None]] = []
+        self.compiled_selects: list[str] = []
         self.committed = 0
         self.rolled_back_savepoints = 0
 
@@ -100,6 +101,7 @@ class _FakeSession:
         execution_id = _bound_execution_id(statement)
         self.statements.append((kind, execution_id))
         if kind == "select":
+            self.compiled_selects.append(str(statement))
             return _FakeResult(rows=self._select_rows)
         return self._handler(kind, execution_id)
 
@@ -280,6 +282,35 @@ class DrainCommandsRetryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(("insert", healthy_id), session.statements)
         self.assertEqual([broken_id], [command.execution_id for command in self.registry._pending])
 
+    async def test_permanently_failing_command_is_dropped_not_replayed_forever(self) -> None:
+        """A poison command must not hold back the finish queued behind it."""
+        from app.services.execution_cancellation import _MAX_REGISTRY_COMMAND_ATTEMPTS
+
+        execution_id = uuid.uuid4()
+        self._record_start(execution_id)
+
+        session = _FakeSession(self._raise)
+        with patch("app.db.session.async_session_maker", _session_maker(session)):
+            for _ in range(_MAX_REGISTRY_COMMAND_ATTEMPTS):
+                await self.registry._drain_commands()
+
+        self.assertEqual([], self.registry._pending)
+        self.assertEqual({}, self.registry._command_attempts)
+
+    async def test_attempt_counter_resets_once_a_command_succeeds(self) -> None:
+        execution_id = uuid.uuid4()
+        self._record_start(execution_id)
+
+        failing = _FakeSession(self._raise)
+        with patch("app.db.session.async_session_maker", _session_maker(failing)):
+            await self.registry._drain_commands()
+        self.assertEqual(1, self.registry._command_attempts[("start", execution_id)])
+
+        healthy = _FakeSession(lambda _kind, _eid: _FakeResult(rowcount=1))
+        with patch("app.db.session.async_session_maker", _session_maker(healthy)):
+            await self.registry._drain_commands()
+        self.assertEqual({}, self.registry._command_attempts)
+
     async def test_backlog_is_capped(self) -> None:
         for _ in range(2100):
             self._record_start(uuid.uuid4())
@@ -406,6 +437,24 @@ class ClaimOrphanedExecutionsIsolationTests(unittest.IsolatedAsyncioTestCase):
                 await claim_orphaned_executions()
 
         self.assertEqual(1, len(logs.records))
+
+    async def test_cancelled_rows_are_excluded_from_the_candidate_scan(self) -> None:
+        """A cancelled run whose finish DELETE failed must never be re-run."""
+        session = _FakeSession(lambda _kind, _eid: _FakeResult(rowcount=1))
+        with patch(
+            "app.services.execution_cancellation.async_session_maker",
+            _session_maker(session),
+        ):
+            await claim_orphaned_executions()
+
+        select_statements = [
+            stmt for stmt in session.compiled_selects if "cancel_requested_at" in stmt
+        ]
+        self.assertTrue(
+            select_statements,
+            "orphan candidate scan must filter on cancel_requested_at",
+        )
+        self.assertIn("cancel_requested_at IS NULL", select_statements[0])
 
     async def test_only_rows_the_update_actually_won_are_claimed(self) -> None:
         lost_race = _orphan_row(uuid.uuid4())
