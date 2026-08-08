@@ -1011,18 +1011,24 @@ async def list_active_workflow_executions(
     db: AsyncSession = Depends(get_db),
 ) -> list[ActiveExecutionItem]:
     """Return running and pending-review executions for the authenticated user."""
-    # The cross-worker registry is a convenience layer, not the source of truth for
-    # whether a run is alive. If reading it fails, degrade to this worker's own
-    # handles instead of failing the whole request and blanking the badge.
-    try:
-        persisted = await list_persisted_active_executions_for_user(db, current_user.id)
-    except SQLAlchemyError:
-        logger.warning(
-            "Persisted active execution lookup failed; serving local handles only",
-            exc_info=True,
+
+    # This endpoint stitches together three independent reads. Any one of them can
+    # fail on its own, and a partial list is far more useful to the badge than a
+    # 500: degrade section by section instead of failing the whole request.
+    async def _read(section: str, coroutine: Any) -> Any:
+        try:
+            return await coroutine
+        except SQLAlchemyError:
+            logger.warning("Active executions: %s lookup failed; skipping", section, exc_info=True)
+            await db.rollback()
+            return None
+
+    persisted = (
+        await _read(
+            "persisted registry", list_persisted_active_executions_for_user(db, current_user.id)
         )
-        await db.rollback()
-        persisted = []
+        or []
+    )
     items_by_execution_id = {
         record.execution_id: ActiveExecutionItem(
             execution_id=str(record.execution_id),
@@ -1044,20 +1050,25 @@ async def list_active_workflow_executions(
     ]
     if local_handles:
         workflow_ids = list({h.workflow_id for h in local_handles})
-        result = await db.execute(
-            select(Workflow).where(
-                Workflow.id.in_(workflow_ids),
-                or_(
-                    Workflow.owner_id == current_user.id,
-                    Workflow.id.in_(
-                        select(WorkflowShare.workflow_id).where(
-                            WorkflowShare.user_id == current_user.id
-                        )
+        result = await _read(
+            "local handle workflows",
+            db.execute(
+                select(Workflow).where(
+                    Workflow.id.in_(workflow_ids),
+                    or_(
+                        Workflow.owner_id == current_user.id,
+                        Workflow.id.in_(
+                            select(WorkflowShare.workflow_id).where(
+                                WorkflowShare.user_id == current_user.id
+                            )
+                        ),
                     ),
-                ),
-            )
+                )
+            ),
         )
-        accessible: dict[uuid.UUID, str] = {w.id: w.name for w in result.scalars().all()}
+        accessible: dict[uuid.UUID, str] = (
+            {w.id: w.name for w in result.scalars().all()} if result is not None else {}
+        )
         for handle in local_handles:
             if handle.workflow_id not in accessible:
                 continue
@@ -1079,7 +1090,10 @@ async def list_active_workflow_executions(
                 status="running",
             )
 
-    pending_reviews = await list_pending_review_executions_for_user(db, current_user.id)
+    pending_reviews = (
+        await _read("pending reviews", list_pending_review_executions_for_user(db, current_user.id))
+        or []
+    )
     for record in pending_reviews:
         if record.execution_id in items_by_execution_id:
             continue

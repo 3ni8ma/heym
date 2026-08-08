@@ -525,6 +525,42 @@ class ActiveExecutionsEndpointDegradationTests(unittest.IsolatedAsyncioTestCase)
         self.assertEqual([str(execution_id)], [item.execution_id for item in items])
         self.assertEqual("Orchestrator run", items[0].workflow_name)
 
+    async def test_pending_review_failure_does_not_500_the_endpoint(self) -> None:
+        """Every read degrades on its own; one bad section must not blank the badge."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from app.api.workflows import list_active_workflow_executions
+
+        user = MagicMock()
+        user.id = uuid.uuid4()
+        db = MagicMock()
+        db.execute = AsyncMock()
+        db.rollback = AsyncMock()
+
+        record = MagicMock()
+        record.execution_id = uuid.uuid4()
+        record.workflow_id = uuid.uuid4()
+        record.workflow_name = "Wait"
+        record.started_at = datetime(2026, 8, 8, 8, 26, tzinfo=timezone.utc)
+        record.inputs = {}
+        record.running_node_ids = []
+        record.node_results = []
+
+        with (
+            patch(
+                "app.api.workflows.list_persisted_active_executions_for_user",
+                AsyncMock(return_value=[record]),
+            ),
+            patch(
+                "app.api.workflows.list_pending_review_executions_for_user",
+                AsyncMock(side_effect=SQLAlchemyError("could not read block 189")),
+            ),
+        ):
+            items = await list_active_workflow_executions(current_user=user, db=db)
+
+        self.assertEqual([str(record.execution_id)], [item.execution_id for item in items])
+        db.rollback.assert_awaited_once()
+
 
 if __name__ == "__main__":
     unittest.main()
