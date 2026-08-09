@@ -148,22 +148,22 @@ Turn a workflow into a chat experience so users can invoke the orchestration wit
 <table>
   <tr>
     <td align="center" width="50%">
-      <img src="docs/screenshots/login.png" alt="Login Page" width="100%"/>
-      <br/><sub><b>Login</b> — Workflow canvas preview in the background</sub>
+      <img src="docs/screenshots/canvas.png" alt="Visual workflow canvas" width="100%"/>
+      <br/><sub><b>Visual Canvas</b> — Multi-agent orchestration, RAG and MCP nodes, human-in-the-loop checkpoints</sub>
     </td>
     <td align="center" width="50%">
-      <img src="docs/screenshots/dashboard_light.png" alt="Workflows Dashboard" width="100%"/>
-      <br/><sub><b>Dashboard</b> — Manage workflows, credentials, vector stores, and teams</sub>
+      <img src="docs/screenshots/mcp.png" alt="MCP server settings" width="100%"/>
+      <br/><sub><b>MCP Server</b> — Expose any workflow as a tool for Claude, ChatGPT, or Cursor</sub>
     </td>
   </tr>
   <tr>
     <td align="center" width="50%">
-      <img src="docs/screenshots/canvas_selected.png" alt="Workflow Canvas" width="100%"/>
-      <br/><sub><b>Workflow Canvas</b> — Nodes connected and selected, with the properties panel open</sub>
+      <img src="docs/screenshots/traces.png" alt="LLM traces" width="100%"/>
+      <br/><sub><b>Traces</b> — Every LLM call with request, response, tokens, latency, and cost</sub>
     </td>
     <td align="center" width="50%">
-      <img src="docs/screenshots/node_properties.png" alt="Node Configuration" width="100%"/>
-      <br/><sub><b>Node Config</b> — LLM node with model, prompt, and expression fields</sub>
+      <img src="docs/screenshots/analytics.png" alt="Analytics dashboard" width="100%"/>
+      <br/><sub><b>Analytics</b> — Execution volume, success rate, latency, and time saved per workflow</sub>
     </td>
   </tr>
 </table>
