@@ -312,6 +312,8 @@ cancels the production run.
 
 ## 🚀 Quick Start
 
+Prefer to watch it first? **[Set Up Heym Locally in Under 2 Minutes](https://www.youtube.com/watch?v=P6YvlupUboU)** walks the whole path: clone the repository, start PostgreSQL and create your account on a local instance.
+
 ```bash
 git clone https://github.com/heymrun/heym.git
 cd heym

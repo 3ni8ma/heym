@@ -2,6 +2,8 @@
 
 Heym provides two scripts for different environments: `run.sh` for local development and `deploy.sh` for production deployments using Docker Compose.
 
+> **Video walkthrough:** [Set Up Heym Locally in Under 2 Minutes](https://www.youtube.com/watch?v=P6YvlupUboU) — clone the repository, start PostgreSQL, fill in the required environment variables, and create your first account on a local instance.
+
 ## Prerequisites
 
 Both scripts require the following tools to be installed:
