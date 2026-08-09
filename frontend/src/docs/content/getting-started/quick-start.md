@@ -2,6 +2,8 @@
 
 Get your first Heym workflow running in minutes.
 
+Do not have Heym running yet? See [Running & Deployment](./running-and-deployment.md), or follow the video walkthrough: [Set Up Heym Locally in Under 2 Minutes](https://www.youtube.com/watch?v=P6YvlupUboU).
+
 ## 1. Create a Workflow
 
 1. Go to the [Workflows](../tabs/workflows-tab.md) tab
