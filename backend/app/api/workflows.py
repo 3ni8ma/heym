@@ -82,9 +82,13 @@ from app.services.execution_cancellation import (
     clear_execution as clear_active_execution,
 )
 from app.services.execution_cancellation import (
+    complete_execution as complete_active_execution,
+)
+from app.services.execution_cancellation import (
     get_active_execution_events,
     get_active_execution_inputs,
     get_active_execution_stream_snapshot,
+    get_completed_execution_result,
     register_execution,
     request_persisted_execution_cancel,
 )
@@ -1106,6 +1110,13 @@ async def stream_active_workflow_execution(
                 running_node_ids = snapshot.running_node_ids
                 node_results = snapshot.node_results
             else:
+                completed_result = get_completed_execution_result(
+                    execution_id,
+                    workflow_id=workflow_id,
+                )
+                if completed_result is not None:
+                    yield f"data: {json.dumps(completed_result)}\n\n"
+                    break
                 async with async_session_maker() as stream_db:
                     active_result = await stream_db.execute(
                         select(ActiveWorkflowExecution).where(
@@ -3373,7 +3384,16 @@ async def execute_workflow_stream(
             return
         finally:
             event_queue.put(None)
-            clear_active_execution(execution_id)
+            if test_run and final_result:
+                complete_active_execution(
+                    execution_id,
+                    workflow_id=workflow.id,
+                    result={
+                        key: value for key, value in final_result.items() if not key.startswith("_")
+                    },
+                )
+            else:
+                clear_active_execution(execution_id)
 
     async def event_generator():
         nonlocal final_result, was_cancelled
