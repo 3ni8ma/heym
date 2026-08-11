@@ -4,7 +4,7 @@ import { Clock, Copy, Settings, Trash2, Workflow } from "lucide-vue-next";
 import type { WorkflowListItem } from "@/types/workflow";
 import Button from "@/components/ui/Button.vue";
 import Card from "@/components/ui/Card.vue";
-import { nodeIcons } from "@/lib/nodeIcons";
+import { isTileFillingIcon, nodeIcons } from "@/lib/nodeIcons";
 import { cn, formatDate } from "@/lib/utils";
 
 interface Props {
@@ -71,7 +71,9 @@ function handleTouchMove(): void {
           <div class="absolute inset-0 rounded-lg ring-1 ring-inset ring-primary/20" />
           <component
             :is="workflow.first_node_type && nodeIcons[workflow.first_node_type] ? nodeIcons[workflow.first_node_type] : Workflow"
-            class="relative z-10 h-4 w-4"
+            :class="workflow.first_node_type && isTileFillingIcon(workflow.first_node_type)
+              ? 'relative z-10 w-full h-full'
+              : 'relative z-10 h-4 w-4'"
           />
         </div>
         <div class="min-w-0">

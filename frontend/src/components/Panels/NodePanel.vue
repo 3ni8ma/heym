@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, watch, nextTick, ref } from "vue";
 import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Database, FileJson, FileText, FolderOpen, GitBranch, GitMerge, Globe, Github, HardDrive, Inbox, LayoutTemplate, ListTodo, Mail, MessageSquare, MonitorPlay, Play, Plug, Puzzle, Rabbit, Radio, Repeat, Search, Send, Server, Settings2, Sheet, ShieldAlert, Shuffle, StickyNote, Table2, Terminal, Type, Upload, Variable, X, XCircle } from "lucide-vue-next";
+import HeymIcon from "@/components/Nodes/HeymIcon.vue";
 
 import type { NodeTemplate } from "@/features/templates/types/template.types";
 import type { NodeType, PluginSummary, WorkflowEdge, WorkflowNode } from "@/types/workflow";
@@ -17,7 +18,7 @@ import {
   isBlockedAsTool,
   isNoRegularInputNodeType,
 } from "@/lib/canvasConnectionRules";
-import { nodeIcons } from "@/lib/nodeIcons";
+import { isTileFillingIcon, nodeIcons } from "@/lib/nodeIcons";
 import { cn, generateId, replaceInputRefs } from "@/lib/utils";
 import { templatesApi } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
@@ -239,6 +240,8 @@ const icons = {
   discord: MessageSquare,
   discordTrigger: MessageSquare,
   imapTrigger: Inbox,
+  heym: HeymIcon,
+  heymTrigger: HeymIcon,
   sendEmail: Mail,
   errorHandler: AlertTriangle,
   variable: Variable,
@@ -286,6 +289,7 @@ const DASHBOARD_HIDDEN_NODE_TYPES = new Set<NodeType>([
   "slackTrigger",
   "discordTrigger",
   "imapTrigger",
+  "heymTrigger",
   "websocketTrigger",
   "fileUploadTrigger",
   "rabbitmq",
@@ -676,7 +680,7 @@ function handleDoubleClick(type: NodeType, extraData?: Record<string, unknown>):
           >
             <component
               :is="icons[node.type]"
-              class="w-5 h-5"
+              :class="isTileFillingIcon(node.type) ? 'w-full h-full' : 'w-5 h-5'"
             />
           </div>
           <div class="min-w-0 flex-1">

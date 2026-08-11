@@ -13,6 +13,7 @@ import {
 } from "vue";
 import { useRouter } from "vue-router";
 import { AlertTriangle, Ban, BarChart3, Bot, Braces, Brain, Bug, CalendarClock, Clock, Database, FileJson, FileText, FolderOpen, GitBranch, GitMerge, Github, Globe, HardDrive, Inbox, ListTodo, Mail, MessageSquare, MonitorPlay, Play, Plug, Puzzle, Rabbit, Radio, Repeat, Search, Send, Server, Settings2, Sheet, ShieldAlert, Shuffle, StickyNote, Table2, Terminal, Type, Upload, Variable, XCircle } from "lucide-vue-next";
+import HeymIcon from "@/components/Nodes/HeymIcon.vue";
 import type { ClickHouseColumn, CredentialListItem, LLMModel, NotionDataSourceItem, NotionPageItem } from "@/types/credential";
 import type { AgentMCPConnection, AgentSkill, AgentSkillFile, ExecuteInputMapping, GuardrailCategory, InputField, MappingField, MCPTransportType, OutputSchemaField, PlaywrightStep, PlaywrightStepAction, WorkflowListItem } from "@/types/workflow";
 import {
@@ -121,6 +122,8 @@ export function usePropertiesPanelController() {
     discord: MessageSquare,
     discordTrigger: MessageSquare,
     imapTrigger: Inbox,
+    heym: HeymIcon,
+    heymTrigger: HeymIcon,
     sendEmail: Mail,
     errorHandler: AlertTriangle,
     variable: Variable,
@@ -181,6 +184,8 @@ export function usePropertiesPanelController() {
     discord: "node-discord",
     discordTrigger: "node-discord",
     imapTrigger: "node-email",
+    heym: "node-heym",
+    heymTrigger: "node-heym",
     sendEmail: "node-email",
     errorHandler: "node-error",
     variable: "node-variable",
@@ -241,6 +246,8 @@ export function usePropertiesPanelController() {
     discord: "discord-node",
     discordTrigger: "discord-trigger-node",
     imapTrigger: "imap-trigger-node",
+    heym: "heym-node",
+    heymTrigger: "heym-trigger-node",
     sendEmail: "send-email-node",
     errorHandler: "error-handler-node",
     variable: "variable-node",
@@ -490,6 +497,22 @@ export function usePropertiesPanelController() {
     lastOutputJsonTreeKey.value += 1;
   }
   const workflowOptions = ref<{ value: string; label: string }[]>([]);
+  /**
+   * The Heym node's picker, which unlike `execute` includes the workflow you are
+   * editing. Calling yourself would recurse forever, but *reading* your own
+   * structure or run history is the node's most obvious use.
+   */
+  const heymWorkflowOptions = computed((): { value: string; label: string }[] => {
+    const current = workflowStore.currentWorkflow;
+    if (!current?.id) return workflowOptions.value;
+    if (workflowOptions.value.some((option) => option.value === current.id)) {
+      return workflowOptions.value;
+    }
+    return [
+      { value: current.id, label: `${current.name || "Untitled"} (this workflow)` },
+      ...workflowOptions.value,
+    ];
+  });
   const subWorkflowSearch = ref("");
   const filteredWorkflowOptionsForSubWorkflows = computed(() => {
     const q = subWorkflowSearch.value.trim().toLowerCase();
@@ -675,6 +698,15 @@ export function usePropertiesPanelController() {
     new Map(),
   );
   const currentConverterExpressionFieldIndex = ref(0);
+  type HeymExpressionFieldKey = "heymWorkflowId" | "heymLimit" | "heymStatus" | "heymSinceDays";
+
+  interface HeymExpressionField {
+    key: HeymExpressionFieldKey;
+    label: string;
+  }
+
+  const heymExpressionInputRefs = ref<Map<HeymExpressionFieldKey, ExpandableFieldRef>>(new Map());
+  const currentHeymExpressionFieldIndex = ref(0);
   const switchExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const loopArrayExpressionInputRef = ref<ExpandableFieldRef | null>(null);
   const executeTemplateExpressionInputRef = ref<ExpandableFieldRef | null>(null);
@@ -1004,7 +1036,7 @@ export function usePropertiesPanelController() {
     () => workflowStore.selectedNode?.type,
     async (type) => {
       if (type !== "agent") subWorkflowSearch.value = "";
-      if (type === "execute" || type === "agent") {
+      if (type === "execute" || type === "agent" || type === "heym") {
         await loadWorkflowOptions();
       }
 
@@ -1565,7 +1597,8 @@ export function usePropertiesPanelController() {
     async () => {
       if (
         workflowStore.selectedNode?.type === "execute" ||
-        workflowStore.selectedNode?.type === "agent"
+        workflowStore.selectedNode?.type === "agent" ||
+        workflowStore.selectedNode?.type === "heym"
       ) {
         if (workflowOptions.value.length === 0) await loadWorkflowOptions();
       }
@@ -1577,7 +1610,8 @@ export function usePropertiesPanelController() {
     async () => {
       if (
         workflowStore.selectedNode?.type === "execute" ||
-        workflowStore.selectedNode?.type === "agent"
+        workflowStore.selectedNode?.type === "agent" ||
+        workflowStore.selectedNode?.type === "heym"
       ) {
         await loadWorkflowOptions();
       }
@@ -2234,6 +2268,7 @@ export function usePropertiesPanelController() {
     crawlerUrlInputRef.value?.closeExpandDialog();
     consoleLogMessageInputRef.value?.closeExpandDialog();
     closeConverterExpressionDialogs();
+    closeHeymExpressionDialogs();
     switchExpressionInputRef.value?.closeExpandDialog();
     loopArrayExpressionInputRef.value?.closeExpandDialog();
     executeTemplateExpressionInputRef.value?.closeExpandDialog();
@@ -2843,6 +2878,18 @@ export function usePropertiesPanelController() {
         if (attempts > 20) return;
         if (consoleLogMessageInputRef.value) {
           nextTick(() => consoleLogMessageInputRef.value?.openExpandDialog());
+        } else {
+          setTimeout(() => tryOpenDialog(attempts + 1), 100);
+        }
+      };
+      nextTick(() => tryOpenDialog());
+    } else if (nodeType === "heym") {
+      currentHeymExpressionFieldIndex.value = 0;
+      const tryOpenDialog = (attempts = 0): void => {
+        if (attempts > 20) return;
+        const firstField = heymExpressionFields.value[0];
+        if (firstField && heymExpressionInputRefs.value.get(firstField.key)) {
+          nextTick(() => openHeymExpressionFieldAtIndex(0));
         } else {
           setTimeout(() => tryOpenDialog(attempts + 1), 100);
         }
@@ -5845,6 +5892,80 @@ export function usePropertiesPanelController() {
     nextTick(() => {
       openConverterExpressionFieldAtIndex(newIndex);
     });
+  }
+
+  const heymExpressionFields = computed<HeymExpressionField[]>(() => {
+    const n = workflowStore.selectedNode;
+    if (!n || n.type !== "heym") {
+      return [];
+    }
+    const operation = n.data.heymOperation || "listWorkflows";
+    if (operation === "listWorkflows") {
+      return [{ key: "heymLimit", label: "Limit" }];
+    }
+    if (operation === "getWorkflow") {
+      return [{ key: "heymWorkflowId", label: "Workflow" }];
+    }
+    return [
+      { key: "heymWorkflowId", label: "Workflow" },
+      { key: "heymStatus", label: "Status" },
+      { key: "heymSinceDays", label: "Since (days)" },
+      { key: "heymLimit", label: "Limit" },
+    ];
+  });
+
+  const heymExpressionFieldCount = computed((): number => heymExpressionFields.value.length);
+
+  function heymExpressionFieldIndex(key: HeymExpressionFieldKey): number {
+    const index = heymExpressionFields.value.findIndex((field) => field.key === key);
+    return index >= 0 ? index : 0;
+  }
+
+  function setHeymExpressionInputRef(key: HeymExpressionFieldKey, el: unknown): void {
+    if (el) {
+      heymExpressionInputRefs.value.set(key, el as ExpandableFieldRef);
+    } else {
+      heymExpressionInputRefs.value.delete(key);
+    }
+  }
+
+  function openHeymExpressionFieldAtIndex(index: number): void {
+    const n = selectedNode.value;
+    if (!n || n.type !== "heym") {
+      return;
+    }
+    const field = heymExpressionFields.value[index];
+    if (!field) {
+      return;
+    }
+    currentHeymExpressionFieldIndex.value = index;
+    heymExpressionInputRefs.value.get(field.key)?.openExpandDialog();
+  }
+
+  function closeHeymExpressionDialogs(): void {
+    for (const input of heymExpressionInputRefs.value.values()) {
+      input.closeExpandDialog();
+    }
+  }
+
+  function handleHeymExpressionFieldNavigate(direction: "prev" | "next"): void {
+    const total = heymExpressionFieldCount.value;
+    const newIndex =
+      direction === "prev"
+        ? currentHeymExpressionFieldIndex.value - 1
+        : currentHeymExpressionFieldIndex.value + 1;
+    if (newIndex < 0 || newIndex >= total) {
+      return;
+    }
+    closeHeymExpressionDialogs();
+    currentHeymExpressionFieldIndex.value = newIndex;
+    nextTick(() => {
+      openHeymExpressionFieldAtIndex(newIndex);
+    });
+  }
+
+  function onHeymRegisterExpressionFieldIndex(index: number): void {
+    currentHeymExpressionFieldIndex.value = index;
   }
 
   function onConverterRegisterExpressionFieldIndex(index: number): void {
@@ -8936,6 +9057,7 @@ export function usePropertiesPanelController() {
     expandAllLastOutputJson,
     collapseAllLastOutputJson,
     workflowOptions,
+    heymWorkflowOptions,
     subWorkflowSearch,
     filteredWorkflowOptionsForSubWorkflows,
     isEditingPinnedData,
@@ -9014,6 +9136,11 @@ export function usePropertiesPanelController() {
     setConverterExpressionInputRef,
     handleConverterExpressionFieldNavigate,
     onConverterRegisterExpressionFieldIndex,
+    heymExpressionFieldCount,
+    heymExpressionFieldIndex,
+    setHeymExpressionInputRef,
+    handleHeymExpressionFieldNavigate,
+    onHeymRegisterExpressionFieldIndex,
     switchExpressionInputRef,
     loopArrayExpressionInputRef,
     executeTemplateExpressionInputRef,

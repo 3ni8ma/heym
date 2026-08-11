@@ -12,7 +12,7 @@ import {
 } from "lucide-vue-next";
 
 import Dialog from "@/components/ui/Dialog.vue";
-import { nodeIcons } from "@/lib/nodeIcons";
+import { isTileFillingIcon, nodeIcons } from "@/lib/nodeIcons";
 import type { FolderTree, WorkflowListItem } from "@/types/workflow";
 
 interface Props {
@@ -122,7 +122,9 @@ function handleDelete(e: Event): void {
         >
           <component
             :is="workflow.first_node_type && nodeIcons[workflow.first_node_type] ? nodeIcons[workflow.first_node_type] : Workflow"
-            class="w-5 h-5"
+            :class="workflow.first_node_type && isTileFillingIcon(workflow.first_node_type)
+              ? 'w-full h-full'
+              : 'w-5 h-5'"
           />
         </div>
         <div class="min-w-0 flex-1">

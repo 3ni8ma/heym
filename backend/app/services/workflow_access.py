@@ -1,9 +1,36 @@
+"""The single definition of which workflows a user can reach.
+
+Both the async API layer and the synchronous node handlers need this answer, so
+it is expressed as a SQLAlchemy clause rather than an executed query - the caller
+supplies the session and the engine.
+"""
+
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.db.models import TeamMember, Workflow, WorkflowShare, WorkflowTeamShare
+
+
+def workflow_access_clause(user_id: UUID) -> ColumnElement[bool]:
+    """Return the WHERE clause matching every workflow ``user_id`` can reach.
+
+    A user reaches a workflow by owning it, by holding a direct share, or by
+    belonging to a team the workflow is shared with.
+    """
+    return or_(
+        Workflow.owner_id == user_id,
+        Workflow.id.in_(select(WorkflowShare.workflow_id).where(WorkflowShare.user_id == user_id)),
+        Workflow.id.in_(
+            select(WorkflowTeamShare.workflow_id).where(
+                WorkflowTeamShare.team_id.in_(
+                    select(TeamMember.team_id).where(TeamMember.user_id == user_id)
+                )
+            )
+        ),
+    )
 
 
 async def get_accessible_workflow(
@@ -15,32 +42,7 @@ async def get_accessible_workflow(
     result = await db.execute(
         select(Workflow).where(
             Workflow.id == workflow_id,
-            Workflow.owner_id == user_id,
+            workflow_access_clause(user_id),
         )
     )
-    workflow = result.scalar_one_or_none()
-    if workflow is not None:
-        return workflow
-
-    shared_result = await db.execute(
-        select(Workflow)
-        .join(WorkflowShare, WorkflowShare.workflow_id == Workflow.id)
-        .where(
-            Workflow.id == workflow_id,
-            WorkflowShare.user_id == user_id,
-        )
-    )
-    workflow = shared_result.scalar_one_or_none()
-    if workflow is not None:
-        return workflow
-
-    team_result = await db.execute(
-        select(Workflow)
-        .join(WorkflowTeamShare, WorkflowTeamShare.workflow_id == Workflow.id)
-        .join(TeamMember, TeamMember.team_id == WorkflowTeamShare.team_id)
-        .where(
-            Workflow.id == workflow_id,
-            TeamMember.user_id == user_id,
-        )
-    )
-    return team_result.scalar_one_or_none()
+    return result.scalar_one_or_none()

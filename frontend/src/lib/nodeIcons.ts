@@ -44,6 +44,7 @@ import {
   XCircle,
 } from "lucide-vue-next";
 
+import HeymIcon from "@/components/Nodes/HeymIcon.vue";
 import type { NodeType } from "@/types/workflow";
 
 export const nodeIcons: Record<NodeType, ReturnType<typeof Type>> = {
@@ -96,6 +97,8 @@ export const nodeIcons: Record<NodeType, ReturnType<typeof Type>> = {
   throwError: XCircle,
   rabbitmq: Rabbit,
   imapTrigger: Inbox,
+  heym: HeymIcon,
+  heymTrigger: HeymIcon,
   crawler: Bug,
   consoleLog: Terminal,
   playwright: MonitorPlay,
@@ -157,6 +160,8 @@ export const nodeIconColorClass: Record<NodeType, string> = {
   throwError: "text-node-throw-error",
   rabbitmq: "text-node-rabbitmq",
   imapTrigger: "text-node-email",
+  heym: "text-node-heym",
+  heymTrigger: "text-node-heym",
   crawler: "text-node-crawler",
   consoleLog: "text-node-console-log",
   playwright: "text-node-playwright",
@@ -166,3 +171,14 @@ export const nodeIconColorClass: Record<NodeType, string> = {
   plugin: "text-node-action",
   pluginTrigger: "text-node-trigger",
 };
+
+/**
+ * Node types whose icon is a filled brand tile rather than a line glyph, so it
+ * should take the whole icon container instead of sitting inside it at glyph size.
+ * Only tile-shaped containers should honour this; inline icon rows must not.
+ */
+const TILE_FILLING_NODE_TYPES: ReadonlySet<NodeType> = new Set<NodeType>(["heym", "heymTrigger"]);
+
+export function isTileFillingIcon(type: NodeType): boolean {
+  return TILE_FILLING_NODE_TYPES.has(type);
+}

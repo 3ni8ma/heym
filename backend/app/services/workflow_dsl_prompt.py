@@ -423,6 +423,31 @@ In workflow expressions:
 - LLM user message: `"Summarize this inbound email from $supportInbox.email.from: $supportInbox.email.text"`
 - Condition: `$supportInbox.email.subject.contains("urgent")`
 
+### 3f. heymTrigger (Heym Platform Event Trigger)
+- **Purpose**: Start the workflow when Heym itself publishes a platform event
+- **Inputs**: 0 | **Outputs**: 1
+- **WHEN TO USE**: When the workflow should react to Heym lifecycle activity - the platform starting, or a workflow being created, updated, or deleted
+- **DO NOT use** `cron` polling as a workaround for reacting to workflow changes
+- **Data fields**:
+  - `label`: Node identifier (e.g., "platformEvents")
+  - `eventNames`: Array of event names to subscribe to. Valid values: `heym.started`, `workflow.created`, `workflow.updated`, `workflow.deleted`. An empty array subscribes to every event.
+- **Delivery**: Events are **batched**. Every event published inside the same five-second dispatch window arrives in ONE run as an array. A single event still arrives as a one-element array.
+- **Output fields available downstream**:
+  - `$<label>.events` - array of event objects (always an array)
+  - `$<label>.events[0].id` - event UUID
+  - `$<label>.events[0].name` - event name
+  - `$<label>.events[0].payload` - event body (`workflow_id`, `name`, `owner_id`, `actor_user_id`, `updated_at` for `workflow.*`; `version`, `started_at` for `heym.started`)
+  - `$<label>.events[0].workflow_id` - subject workflow id, or null
+  - `$<label>.events[0].created_at` - ISO timestamp
+  - `$<label>.count` - number of events in this batch
+  - `$<label>.triggered_at` - ISO timestamp for the workflow run
+- **Use a `loop` node over `$<label>.events` when the workflow must act once per event.**
+
+**Example node JSON:**
+```json
+{"id": "n1", "type": "heymTrigger", "position": {"x": 100, "y": 100}, "data": {"label": "platformEvents", "eventNames": ["workflow.created", "workflow.deleted"]}}
+```
+
 ### 4. llm (Language Model)
 - **Purpose**: Process text with AI language model or generate images
 - **Inputs**: 1 | **Outputs**: 1
@@ -4581,6 +4606,28 @@ The credential requests the full `https://www.googleapis.com/auth/drive` scope, 
     "gdFilename": "$BackupLoop.item.name"
   }
 }
+```
+
+### 43. heym (Heym Platform Data)
+- **Purpose**: Read Heym's own data - the workflows the owner can reach, one workflow's structure, and its execution history
+- **Inputs**: 1 | **Outputs**: 1
+- **WHEN TO USE**: Meta-workflows that report on the Heym instance itself - inventories, health digests, execution summaries
+- **No credential required.** Results are scoped to the owner of the workflow this node lives in: workflows they own plus workflows shared with them directly or through a team.
+- **Data fields**:
+  - `label`: Node identifier (e.g., "heymData")
+  - `heymOperation`: One of `listWorkflows`, `getWorkflow`, `getExecutionHistory`
+  - `heymWorkflowId`: Target workflow UUID. Required for `getWorkflow` and `getExecutionHistory`. Expression-capable.
+  - `heymLimit`: Maximum rows for `listWorkflows` and `getExecutionHistory`. **Empty or `0` returns everything** - that is the default. Expression-capable.
+  - `heymStatus`: Optional status filter for `getExecutionHistory` (e.g. `success`, `error`). Expression-capable.
+  - `heymSinceDays`: Optional lookback in days for `getExecutionHistory`. Empty covers the full history. Expression-capable.
+- **Output fields available downstream**:
+  - `listWorkflows` -> `$<label>.workflows` (array of `id`, `name`, `description`, `active`, `folder_id`, `updated_at`, `node_count`), `$<label>.total`
+  - `getWorkflow` -> `$<label>.id`, `$<label>.name`, `$<label>.nodes` (array of `id`, `type`, `label`, `position`, `data` - the full node configuration), `$<label>.edges` (with `sourceHandle` / `targetHandle`), `$<label>.updated_at`. Use it to audit workflows, e.g. scanning `data` for hardcoded API keys or tokens.
+  - `getExecutionHistory` -> `$<label>.executions` (array of `id`, `status`, `started_at`, `execution_time_ms`, `trigger_source`, `recovered`, `inputs`, `outputs`), `$<label>.workflow_id`, `$<label>.workflow_name`, `$<label>.total`, `$<label>.by_status`, `$<label>.since`. `total` and `by_status` always describe the full history, even when `heymLimit` caps the returned entries.
+
+**Example node JSON:**
+```json
+{"id": "n2", "type": "heym", "position": {"x": 400, "y": 100}, "data": {"label": "heymData", "heymOperation": "getExecutionHistory", "heymWorkflowId": "$platformEvents.events[0].workflow_id", "heymSinceDays": "7"}}
 ```
 
 ## Edge Connections

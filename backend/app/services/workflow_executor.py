@@ -7792,6 +7792,9 @@ class WorkflowExecutor:
             elif node.get("type") == "telegramTrigger":
                 node["data"] = node.get("data", {})
                 node["data"]["_initial_inputs"] = initial_inputs
+            elif node.get("type") == "heymTrigger":
+                node["data"] = node.get("data", {})
+                node["data"]["_initial_inputs"] = initial_inputs
 
         pending_count: dict[str, int] = {}
         for node_id in active_nodes:
@@ -9536,6 +9539,9 @@ def _execute_workflow_streaming_impl(
             node["data"] = node.get("data", {})
             node["data"]["_initial_inputs"] = inputs
         elif node.get("type") == "telegramTrigger":
+            node["data"] = node.get("data", {})
+            node["data"]["_initial_inputs"] = inputs
+        elif node.get("type") == "heymTrigger":
             node["data"] = node.get("data", {})
             node["data"]["_initial_inputs"] = inputs
 

@@ -13,6 +13,7 @@ Start nodes (no incoming edges) that initiate execution:
 | [Telegram Trigger](../nodes/telegram-trigger-node.md) | Starts when Telegram sends a bot webhook update to the node-specific webhook URL. |
 | [Discord Trigger](../nodes/discord-trigger-node.md) | Starts when Discord sends an Interactions API webhook to the node-specific endpoint. |
 | [IMAP Trigger](../nodes/imap-trigger-node.md) | Polls an IMAP mailbox and starts once for each newly detected email. |
+| [Heym Trigger](../nodes/heym-trigger-node.md) | Starts when Heym publishes a platform event. Events in one dispatch window arrive together as an array. |
 | [WebSocket Trigger](../nodes/websocket-trigger-node.md) | Opens an outbound client connection to an external socket and starts on selected socket events. |
 | [File Upload Trigger](../nodes/file-upload-trigger-node.md) | Mints a single-use upload URL and starts when a caller posts a large multipart file. |
 | [RabbitMQ](../nodes/rabbitmq-node.md) (receive) | Starts when a message is consumed from a RabbitMQ queue. |
@@ -60,6 +61,10 @@ The cron scheduler runs every 60 seconds, finds workflows with active `cron` nod
 ### IMAP
 
 The IMAP trigger manager runs in the leader worker and checks active `imapTrigger` nodes on their configured `pollIntervalMinutes`. Each node stores an IMAP cursor (`UIDVALIDITY` + last seen UID). Input includes `email`, `triggered_by: "imap"`, `trigger_node_id`, and `triggered_at`.
+
+### Heym Platform Events
+
+The Heym event dispatcher polls the `heym_events` log every 5 seconds and delivers matching events to active `heymTrigger` nodes. Delivery is claimed per (event, workflow, node) through a unique constraint, so an event fires exactly once per subscribing node across every worker, container, and machine. Every event claimed in one pass is delivered in a single run: input includes `events` (always an array, oldest first), `count`, `triggered_by: "heym_event"`, `trigger_node_id`, and `triggered_at`. Only events published in the last 5 minutes are dispatched, which stops an outage from replaying a backlog; events are retained for 7 days.
 
 ### WebSocket
 
@@ -125,7 +130,7 @@ Execution history records `trigger_source` for every entry point:
 
 - [Webhooks](./webhooks.md) – Webhook TTL, cache, rate limit, auth
 - [Workflow Structure](./workflow-structure.md) – Nodes and edges
-- [Node Types](./node-types.md) – [Input](../nodes/input-node.md), [Cron](../nodes/cron-node.md), [Telegram Trigger](../nodes/telegram-trigger-node.md), [IMAP Trigger](../nodes/imap-trigger-node.md), [WebSocket Trigger](../nodes/websocket-trigger-node.md), [File Upload Trigger](../nodes/file-upload-trigger-node.md), [RabbitMQ](../nodes/rabbitmq-node.md)
+- [Node Types](./node-types.md) – [Input](../nodes/input-node.md), [Cron](../nodes/cron-node.md), [Telegram Trigger](../nodes/telegram-trigger-node.md), [IMAP Trigger](../nodes/imap-trigger-node.md), [Heym Trigger](../nodes/heym-trigger-node.md), [WebSocket Trigger](../nodes/websocket-trigger-node.md), [File Upload Trigger](../nodes/file-upload-trigger-node.md), [RabbitMQ](../nodes/rabbitmq-node.md)
 - [Discord Trigger](../nodes/discord-trigger-node.md) – Discord interactions webhook trigger
 - [Quick Start](../getting-started/quick-start.md) – Build a workflow with Input
 - [Portal](./portal.md) – Portal trigger and chat UI

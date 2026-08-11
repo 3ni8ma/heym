@@ -174,6 +174,8 @@ export type NodeType =
   | "throwError"
   | "rabbitmq"
   | "imapTrigger"
+  | "heym"
+  | "heymTrigger"
   | "crawler"
   | "consoleLog"
   | "playwright"
@@ -400,6 +402,14 @@ export interface NodeData {
   duration?: number;
   cronExpression?: string;
   pollIntervalMinutes?: number;
+  /** heymTrigger: platform events to subscribe to; empty means every event. */
+  eventNames?: string[];
+  /** heym: which Heym read to perform. */
+  heymOperation?: string;
+  heymWorkflowId?: string;
+  heymLimit?: string;
+  heymStatus?: string;
+  heymSinceDays?: string;
   ttlMinutes?: number;
   maxSizeMb?: number;
   allowedTypes?: string;

@@ -32,7 +32,7 @@ import type { WorkflowListItem } from "@/types/workflow";
 import { usePluginDocCategories } from "@/composables/usePluginDocCategories";
 import { getAllDocItems } from "@/docs/manifest";
 import { cn, formatDate } from "@/lib/utils";
-import { nodeIcons } from "@/lib/nodeIcons";
+import { isTileFillingIcon, nodeIcons } from "@/lib/nodeIcons";
 import { useRecentWorkflows } from "@/composables/useRecentWorkflows";
 import { useFolderStore } from "@/stores/folder";
 import { templatesApi } from "@/services/api";
@@ -79,6 +79,8 @@ interface PaletteItem {
     | typeof LayoutTemplate
     | typeof LifeBuoy
     | typeof Play;
+  /** True only when `icon` is a brand tile that should take the whole icon box. */
+  iconFillsTile?: boolean;
   workflow?: WorkflowListItem;
   folderPath?: string;
   categoryId?: string;
@@ -258,6 +260,7 @@ const categoryGroups = computed((): CategoryGroup[] => {
         icon: (w.first_node_type && nodeIcons[w.first_node_type]
           ? nodeIcons[w.first_node_type]
           : Workflow) as (typeof TABS)[number]["icon"],
+        iconFillsTile: Boolean(w.first_node_type && isTileFillingIcon(w.first_node_type)),
         workflow: w,
         folderPath: getFolderPath(w),
       });
@@ -632,7 +635,9 @@ onUnmounted(() => {
                     />
                     <component
                       :is="item.icon"
-                      class="w-5 h-5 relative z-10"
+                      :class="item.iconFillsTile
+                        ? 'w-full h-full relative z-10'
+                        : 'w-5 h-5 relative z-10'"
                     />
                   </div>
                   <div class="flex-1 min-w-0">

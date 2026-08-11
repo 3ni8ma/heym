@@ -1698,6 +1698,61 @@ class CronSlotClaim(Base):
     )
 
 
+class HeymEvent(Base):
+    """Append-only log of platform events that workflows can subscribe to.
+
+    ``workflow_id`` deliberately carries no foreign key: a ``workflow.deleted``
+    event names a row that no longer exists, and a cascade would delete the very
+    event that reports the deletion.
+    """
+
+    __tablename__ = "heym_events"
+    __table_args__ = (UniqueConstraint("dedupe_key", name="uq_heym_event_dedupe_key"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
+    workflow_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True, index=True
+    )
+    dedupe_key: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+
+
+class HeymEventClaim(Base):
+    """One row per (event, subscribing node) pair that has already been delivered.
+
+    Same contract as ``CronSlotClaim``: in-memory state is per worker, so the only
+    place that can answer "has anyone delivered this yet?" is Postgres. The unique
+    constraint makes the first inserter the sole deliverer, across workers,
+    containers, and machines.
+    """
+
+    __tablename__ = "heym_event_claims"
+    __table_args__ = (
+        UniqueConstraint("event_id", "workflow_id", "node_id", name="uq_heym_event_claim"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("heym_events.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    workflow_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, index=True)
+    node_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    claimed_by: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    claimed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+
+
 class AgentMemoryNode(Base):
     """Knowledge-graph entity for an agent node (canvas) within a workflow."""
 
