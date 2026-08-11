@@ -1,6 +1,6 @@
 # Converter
 
-The **Converter** node converts data and files between formats without writing code. It is technology-neutral so more formats can be added over time. It converts CSV text and JSON rows in both directions, runs Tesseract OCR to pull text out of images and PDFs, and rewrites a stored file in another format.
+The **Converter** node converts data and files between formats without writing code. It is technology-neutral so more formats can be added over time. It converts CSV, JSON, and XML data in both directions, runs Tesseract OCR to pull text out of images and PDFs, and rewrites a stored file in another format.
 
 ## Overview
 
@@ -8,14 +8,14 @@ The **Converter** node converts data and files between formats without writing c
 |----------|-------|
 | Inputs | 1 |
 | Outputs | 1 |
-| Output | `$nodeLabel.result` (parsed rows for `csvToJson`, CSV text for `jsonToCsv`, extracted text for `imageToText` / `pdfToText`, new file metadata for `fileConvert`) |
+| Output | `$nodeLabel.result` (parsed data for `csvToJson` / `xmlToJson`, text for `jsonToCsv` / `jsonToXml`, extracted text for `imageToText` / `pdfToText`, new file metadata for `fileConvert`) |
 
 ## Parameters
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `label` | string | Node identifier (camelCase) |
-| `conversion` | string | `csvToJson` (CSV text → array of row objects), `jsonToCsv` (array of objects/rows → CSV text), `imageToText` (OCR an image), `pdfToText` (OCR every selected PDF page), or `fileConvert` (rewrite a stored file in another format) |
+| `conversion` | string | `csvToJson` (CSV text → array of row objects), `jsonToCsv` (array of objects/rows → CSV text), `xmlToJson` (XML text → object), `jsonToXml` (object → XML text), `imageToText` (OCR an image), `pdfToText` (OCR every selected PDF page), or `fileConvert` (rewrite a stored file in another format) |
 | `source` | expression | The data to convert. Leave empty to use the node's first input |
 | `delimiter` | string | Single-character field separator (default `,`) |
 | `hasHeader` | boolean | `csvToJson` only — treat the first row as the header (default `true`) |
@@ -37,6 +37,8 @@ The **Converter** node converts data and files between formats without writing c
 - **`csvToJson`** parses the source CSV text. With `hasHeader: true` each row becomes an object keyed by the header values; with `hasHeader: false` each row becomes an array of cell values. Quoted fields, embedded delimiters, and embedded newlines are handled per RFC 4180. A leading UTF-8 BOM (common in Excel exports) is stripped, and duplicate header names are made unique without overwriting a real column (`a, a, a_2` → `a`, `a_3`, `a_2`). Set `delimiter` to `\t` to parse tab-separated values.
 - **`trimValues`** (default `true`) strips surrounding whitespace from header names and cell values, **including inside quoted fields** (`" padded "` → `padded`). RFC 4180 treats quoted whitespace as data, so set `trimValues: false` to preserve it exactly.
 - **`jsonToCsv`** builds CSV text from an array of objects (or arrays). Column order is taken from `converterColumns` when provided, otherwise inferred from the first object's keys. Values containing the delimiter, quotes, or newlines are quoted automatically.
+- **`xmlToJson`** parses XML into an object. Attributes use `@` prefixes and text mixed with attributes uses `#text`; repeated sibling elements become arrays. XML entity expansion is disabled.
+- **`jsonToXml`** serializes an object to an XML document. The object must have exactly one top-level key, which becomes the XML root element. Use the same `@attribute` and `#text` convention as `xmlToJson` to produce attributes and text alongside child elements.
 - **`imageToText`** runs Tesseract over a single image (PNG, JPEG, TIFF, WebP, BMP).
 - **`pdfToText`** rasterizes each selected page at `ocrDpi` and recognizes it. Every page goes through OCR, so a digital PDF with a perfectly good text layer is still re-read from pixels. That keeps scanned and digital documents behaving identically, at the cost of speed, so narrow `ocrPageRange` on long files.
 - **`fileConvert`** rewrites the source file in another format and stores the result as a **new** Drive file. The original is never modified. Documents go through pandoc, images through Pillow, and JSON to CSV through the Python csv writer. An image cannot become a document and a document cannot become an image; to read text out of an image use `imageToText`.
@@ -67,7 +69,7 @@ Recognized text is UTF-8 and keeps every character Tesseract produced. `ocrNorma
 
 ## Output
 
-`csvToJson` and `jsonToCsv` return `$label.result` and `$label.conversion`. OCR conversions add:
+`csvToJson`, `jsonToCsv`, `xmlToJson`, and `jsonToXml` return `$label.result` and `$label.conversion`. OCR conversions add:
 
 | Field | Description |
 |-------|-------------|
@@ -105,6 +107,21 @@ Recognized text is UTF-8 and keeps every character Tesseract produced. `ocrNorma
 ```
 
 For input `name,age\nAda,36`, downstream nodes access the parsed rows via `$toRows.result` (`[{ "name": "Ada", "age": "36" }]`).
+
+Converting XML to JSON:
+
+```json
+{
+  "type": "converter",
+  "data": {
+    "label": "xmlToObject",
+    "conversion": "xmlToJson",
+    "source": "$webhook.body"
+  }
+}
+```
+
+For `<person id="1"><name>Ada</name></person>`, `$xmlToObject.result` is `{ "person": { "@id": "1", "name": "Ada" } }`. To create XML, pass that object to a second Converter node with `conversion: "jsonToXml"`.
 
 Reading a scanned invoice uploaded through a file upload trigger:
 

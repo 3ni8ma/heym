@@ -44,6 +44,7 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.48b0",
     "opentelemetry-instrumentation-httpx>=0.48b0",
     "boto3>=1.40.0",
+    "xmltodict>=0.14.2",
 ]
 
 [build-system]

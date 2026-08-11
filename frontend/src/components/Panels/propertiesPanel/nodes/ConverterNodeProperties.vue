@@ -22,6 +22,8 @@ const {
 const conversionOptions = [
   { value: "csvToJson", label: "CSV → JSON" },
   { value: "jsonToCsv", label: "JSON → CSV" },
+  { value: "xmlToJson", label: "XML → JSON" },
+  { value: "jsonToXml", label: "JSON → XML" },
   { value: "imageToText", label: "Image → Text (OCR)" },
   { value: "pdfToText", label: "PDF → Text (OCR)" },
   { value: "fileConvert", label: "File → Another format" },
@@ -74,6 +76,9 @@ const isOcr = computed(
 );
 const isFileConvert = computed((): boolean => conversion.value === "fileConvert");
 const usesFile = computed((): boolean => isOcr.value || isFileConvert.value);
+const usesDelimiter = computed(
+  (): boolean => conversion.value === "csvToJson" || conversion.value === "jsonToCsv",
+);
 </script>
 
 <template>
@@ -156,7 +161,7 @@ const usesFile = computed((): boolean => isOcr.value || isFileConvert.value);
     </div>
 
     <div
-      v-if="!usesFile"
+      v-if="usesDelimiter"
       class="space-y-2"
       data-testid="converter-delimiter-field"
     >

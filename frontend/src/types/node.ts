@@ -346,7 +346,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
   converter: {
     type: "converter",
     label: "Converter",
-    description: "Convert data and files between formats (CSV, JSON, documents, images) and OCR images or PDFs to text",
+    description: "Convert data and files between formats (CSV, JSON, XML, documents, images) and OCR images or PDFs to text",
     color: "node-set",
     icon: "Repeat",
     inputs: 1,
