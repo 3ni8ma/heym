@@ -1315,17 +1315,18 @@ The http node ALWAYS returns a structured response object:
 4. For modulo/math on set node output: `$generateRandom.randomNumber % 2 == 0` (use the key name, e.g., "randomNumber")
 
 ### 13b. converter (Data Format Conversion)
-- **Purpose**: Convert data between formats without writing code. CSV text <-> JSON rows, Tesseract OCR from an image or PDF to plain text, and file format conversion of a stored Drive file.
+- **Purpose**: Convert data between formats without writing code. CSV text <-> JSON rows, XML text <-> JSON objects, Tesseract OCR from an image or PDF to plain text, and file format conversion of a stored Drive file.
 - **Inputs**: 1 | **Outputs**: 1
 - **Data fields**:
   - `label`: Node identifier
-  - `conversion`: `"csvToJson"` (CSV text -> array of row objects), `"jsonToCsv"` (array of objects/rows -> CSV text), `"imageToText"` (OCR an image file), `"pdfToText"` (OCR every selected PDF page), or `"fileConvert"` (rewrite a stored file in another format)
+  - `conversion`: `"csvToJson"` (CSV text -> array of row objects), `"jsonToCsv"` (array of objects/rows -> CSV text), `"xmlToJson"` (XML text -> object), `"jsonToXml"` (object -> XML text), `"imageToText"` (OCR an image file), `"pdfToText"` (OCR every selected PDF page), or `"fileConvert"` (rewrite a stored file in another format)
   - `source`: Expression for the input to convert (e.g. `"$previousNode.body"` or `"$userInput.body.text"`). If empty, the first input is used. Text conversions only.
   - `delimiter`: Single-character field delimiter (default `,`). Use `"\\t"` for tab-separated values.
   - `hasHeader`: Boolean, `csvToJson` only — first row is the header (default true). When false each row is an array of cell values instead of an object.
   - `trimValues`: Boolean, `csvToJson` only — strip whitespace around header names and cell values (default true). Set false to keep whitespace inside quoted fields exactly as written.
   - `includeHeader`: Boolean, `jsonToCsv` only — write a header row (default true)
   - `converterColumns`: Optional explicit column order for `jsonToCsv` (comma-separated string). When omitted, columns are inferred from the row keys.
+  - XML object convention: `xmlToJson` maps attributes to keys prefixed with `@`, text alongside attributes/children to `#text`, and repeated elements to arrays. `jsonToXml` accepts that same object shape and requires exactly one top-level key for the XML root. Entity expansion is disabled.
   - `converterFileId`: File conversions (`imageToText`, `pdfToText`, `fileConvert`) — expression pointing at a Heym Drive file, e.g. `"$Upload.file.id"`. A file object such as `"$Upload.file"`, an agent file (`"$reportAgent._generated_files[0].id"`), or a Heym download URL works too. The file must already be in Heym Drive (upload it with a `fileUploadTrigger`, or fetch it with a `drive` node `downloadUrl` operation first). Falls back to `source`/the first input when empty.
   - `converterTargetFormat`: `fileConvert` only — output format. Document outputs `"pdf"` | `"docx"` | `"html"` | `"md"` | `"txt"` | `"epub"` go through pandoc; `"csv"` is only valid when the input is a JSON array of objects; image outputs `"jpg"` | `"png"` | `"bmp"` | `"webp"` are for image inputs. Document inputs are docx/html/md/txt/csv/pdf plus json. Images cannot become documents and documents cannot become images.
   - `ocrLanguage`: `"auto"` (default) detects the script and picks the matching model. Otherwise a Tesseract code such as `"tur"`, `"eng"`, `"deu"`, `"chi_sim"`, or several joined with `+` (`"eng+tur"`). Use `"custom"` together with `ocrLanguageCustom` when the UI select cannot express the codes.
@@ -1335,7 +1336,7 @@ The http node ALWAYS returns a structured response object:
   - `ocrPsm`: Tesseract page segmentation mode — `"3"` (default, automatic), `"1"`, `"4"`, `"6"` (single block), `"7"` (single line), `"11"`, `"12"`, `"13"`.
   - `ocrDpi`: `pdfToText` only — rasterization DPI (default 300, min 72). Raise it for small print, lower it for speed.
   - `ocrPageRange`: `pdfToText` only — `"3"` or `"2-5"`. Empty means every page.
-- **Output**: `$label.result` — parsed rows for `csvToJson`, CSV string for `jsonToCsv`, extracted text for `imageToText`/`pdfToText`, new file metadata for `fileConvert`. `$label.conversion` echoes the conversion that ran. OCR conversions also expose `$label.language` (the model actually used), `$label.encoding`, `$label.page_count`, `$label.pages` (array of `{page, text}`), and `$label.file` (id, filename, mime_type, size_bytes). `fileConvert` stores the output as a new Drive file and exposes `$label.id`, `$label.filename`, `$label.mime_type`, `$label.size_bytes`, `$label.download_url`, and `$label.source_file`; the original file is left untouched.
+- **Output**: `$label.result` — parsed rows for `csvToJson`, CSV string for `jsonToCsv`, parsed object for `xmlToJson`, XML string for `jsonToXml`, extracted text for `imageToText`/`pdfToText`, new file metadata for `fileConvert`. `$label.conversion` echoes the conversion that ran. OCR conversions also expose `$label.language` (the model actually used), `$label.encoding`, `$label.page_count`, `$label.pages` (array of `{page, text}`), and `$label.file` (id, filename, mime_type, size_bytes). `fileConvert` stores the output as a new Drive file and exposes `$label.id`, `$label.filename`, `$label.mime_type`, `$label.size_bytes`, `$label.download_url`, and `$label.source_file`; the original file is left untouched.
 
 **Example** (CSV text -> rows):
 ```json
@@ -1371,6 +1372,8 @@ For `name,age\\nAda,36` downstream nodes read `$toRows.result` -> `[{ "name": "A
 Downstream nodes read `$readInvoice.result` for the whole document or `$readInvoice.pages` for per-page text.
 
 **⚠️ USE `converter` INSTEAD OF `execute`/`llm` FOR CSV**: When the user asks to parse, read, or build CSV/TSV, use a `converter` node. Do NOT write Python in an `execute` node and do NOT ask an LLM to reformat the rows — quoting, embedded newlines, and BOM handling are already correct here. Loop over `$label.result` with a `loop` node to process rows one by one.
+
+**⚠️ USE `converter` FOR XML**: When the user asks to parse XML or create XML from an object, use `xmlToJson` or `jsonToXml`. Do NOT write XML parsing code in an `execute` node. XML results preserve repeated elements as arrays and attributes as `@attribute` keys.
 
 **Example** (agent report -> PDF):
 ```json

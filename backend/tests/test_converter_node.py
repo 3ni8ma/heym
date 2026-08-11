@@ -206,6 +206,72 @@ class JsonToCsvTests(unittest.TestCase):
         self.assertEqual(output["result"], "")
 
 
+class XmlToJsonTests(unittest.TestCase):
+    def test_xml_with_attributes_and_repeated_elements_becomes_an_object(self) -> None:
+        output = converter_node.execute(
+            _ctx(
+                {"conversion": "xmlToJson"},
+                '<catalog><book id="1"><title>Ada</title></book>'
+                '<book id="2"><title>Grace</title></book></catalog>',
+            )
+        )
+
+        self.assertEqual(output["conversion"], "xmlToJson")
+        self.assertEqual(
+            output["result"],
+            {
+                "catalog": {
+                    "book": [
+                        {"@id": "1", "title": "Ada"},
+                        {"@id": "2", "title": "Grace"},
+                    ]
+                }
+            },
+        )
+
+    def test_malformed_xml_raises_a_clear_error(self) -> None:
+        with self.assertRaisesRegex(ValueError, "invalid XML input"):
+            converter_node.execute(_ctx({"conversion": "xmlToJson"}, "<catalog><book></catalog>"))
+
+    def test_empty_xml_raises_a_clear_error(self) -> None:
+        with self.assertRaisesRegex(ValueError, "XML input cannot be empty"):
+            converter_node.execute(_ctx({"conversion": "xmlToJson"}, "  \n  "))
+
+
+class JsonToXmlTests(unittest.TestCase):
+    def test_object_becomes_xml(self) -> None:
+        value = {
+            "catalog": {
+                "book": [
+                    {"@id": "1", "title": "Ada"},
+                    {"@id": "2", "title": "Grace"},
+                ]
+            }
+        }
+
+        output = converter_node.execute(_ctx({"conversion": "jsonToXml"}, value))
+        parsed = converter_node.execute(_ctx({"conversion": "xmlToJson"}, output["result"]))
+
+        self.assertEqual(output["conversion"], "jsonToXml")
+        self.assertTrue(output["result"].startswith('<?xml version="1.0" encoding="utf-8"?>'))
+        self.assertEqual(parsed["result"], value)
+
+    def test_json_string_input_is_parsed(self) -> None:
+        output = converter_node.execute(
+            _ctx({"conversion": "jsonToXml"}, '{"person": {"name": "Ada"}}')
+        )
+
+        self.assertIn("<person><name>Ada</name></person>", output["result"])
+
+    def test_malformed_json_raises_a_clear_error(self) -> None:
+        with self.assertRaisesRegex(ValueError, "invalid JSON input"):
+            converter_node.execute(_ctx({"conversion": "jsonToXml"}, '{"person":'))
+
+    def test_json_without_one_root_element_is_rejected(self) -> None:
+        with self.assertRaisesRegex(ValueError, "exactly one root element"):
+            converter_node.execute(_ctx({"conversion": "jsonToXml"}, {"first": {}, "second": {}}))
+
+
 class ConverterRoundTripTests(unittest.TestCase):
     def test_build_then_parse_round_trip(self) -> None:
         rows = [{"name": "Ada", "age": "36"}, {"name": "Grace", "age": "45"}]

@@ -5,6 +5,9 @@ import io
 import json
 import re
 import uuid
+from xml.parsers.expat import ExpatError
+
+import xmltodict
 
 from app.services.node_execution.base import NodeExecutionContext
 
@@ -145,6 +148,44 @@ def _json_to_csv(
         for row in rows:
             writer.writerow(row if isinstance(row, list) else [row])
     return buffer.getvalue().rstrip("\n")
+
+
+def _xml_to_json(value: object) -> dict[str, object]:
+    """Parse XML text into a JSON-compatible object without expanding entities."""
+    if isinstance(value, (str, bytes)):
+        text = value
+    else:
+        text = str(value)
+    if not text.strip():
+        raise ValueError("Converter node: XML input cannot be empty")
+
+    try:
+        parsed = xmltodict.parse(text, disable_entities=True)
+    except (ExpatError, TypeError, UnicodeDecodeError, ValueError) as exc:
+        raise ValueError(f"Converter node: invalid XML input: {exc}") from exc
+
+    if not isinstance(parsed, dict):
+        raise ValueError("Converter node: XML input must contain a root element")
+    return parsed
+
+
+def _json_to_xml(value: object) -> str:
+    """Serialize a JSON object with one top-level key as a complete XML document."""
+    if isinstance(value, (str, bytes, bytearray)):
+        try:
+            value = json.loads(value)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ValueError(f"Converter node: invalid JSON input: {exc}") from exc
+
+    if not isinstance(value, dict) or len(value) != 1:
+        raise ValueError(
+            "Converter node: JSON to XML requires an object with exactly one root element"
+        )
+
+    try:
+        return xmltodict.unparse(value, full_document=True)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"Converter node: invalid JSON input for XML conversion: {exc}") from exc
 
 
 def _extract_file_id(value: object, depth: int = 0) -> uuid.UUID | None:
@@ -375,8 +416,9 @@ def execute(ctx: NodeExecutionContext) -> object:
     """Execute the converter node.
 
     A technology-neutral data converter. Text conversions are ``csvToJson``
-    (CSV text -> list of row objects) and ``jsonToCsv`` (a list of objects/rows
-    -> CSV text). File conversions read a stored Drive file: ``imageToText`` and
+    (CSV text -> list of row objects), ``jsonToCsv`` (a list of objects/rows ->
+    CSV text), ``xmlToJson`` (XML text -> object), and ``jsonToXml`` (an object
+    -> XML text). File conversions read a stored Drive file: ``imageToText`` and
     ``pdfToText`` run Tesseract OCR, and ``fileConvert`` writes the file back out
     in another format. The ``conversion`` field leaves room for more formats
     later without changing the node's contract.
@@ -407,6 +449,10 @@ def execute(ctx: NodeExecutionContext) -> object:
         include_header = node_data.get("includeHeader", True)
         columns = _normalize_columns(node_data.get("converterColumns"))
         result: object = _json_to_csv(source_value, delimiter, include_header, columns)
+    elif conversion == "xmlToJson":
+        result = _xml_to_json(source_value)
+    elif conversion == "jsonToXml":
+        result = _json_to_xml(source_value)
     else:
         has_header = node_data.get("hasHeader", True)
         trim_values = node_data.get("trimValues", True)
