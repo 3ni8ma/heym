@@ -18,6 +18,7 @@ from app.services.execution_cancellation import (
     ExecutionCancellationHandle,
     active_execution_registry,
     clear_execution,
+    complete_execution,
     get_active_execution_events,
     get_active_execution_inputs,
     get_active_execution_progress,
@@ -679,6 +680,66 @@ class LiveExecutionSnapshotTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(gone["type"], "error")
         self.assertEqual(gone["code"], "execution_gone")
+
+    async def test_stream_returns_cached_test_run_completion_after_active_state_clears(
+        self,
+    ) -> None:
+        """A second canvas can receive the final result of a test run from another tab."""
+        workflow_id = uuid.uuid4()
+        execution_id = uuid.uuid4()
+        complete_execution(
+            execution_id,
+            workflow_id=workflow_id,
+            result={
+                "type": "execution_complete",
+                "workflow_id": str(workflow_id),
+                "status": "success",
+                "outputs": {"result": "done"},
+                "node_results": [],
+                "execution_time_ms": 12.5,
+                "highlight": {"records": []},
+            },
+        )
+
+        workflow = MagicMock()
+        workflow.id = workflow_id
+        workflow.nodes = []
+        user = MagicMock()
+        user.id = uuid.uuid4()
+        request = MagicMock()
+        request.is_disconnected = AsyncMock(return_value=False)
+        stream_db = AsyncMock()
+        stream_db.execute.return_value = MagicMock(scalar_one_or_none=MagicMock(return_value=None))
+        session_context = MagicMock()
+        session_context.__aenter__ = AsyncMock(return_value=stream_db)
+        session_context.__aexit__ = AsyncMock(return_value=None)
+
+        try:
+            with (
+                patch(
+                    "app.api.workflows.get_workflow_for_user",
+                    AsyncMock(return_value=workflow),
+                ),
+                patch("app.api.workflows.async_session_maker", return_value=session_context),
+            ):
+                response = await stream_active_workflow_execution(
+                    workflow_id=workflow_id,
+                    execution_id=execution_id,
+                    request=request,
+                    current_user=user,
+                    db=AsyncMock(),
+                )
+
+                iterator = response.body_iterator
+                self.assertIn('"type": "execution_started"', await anext(iterator))
+                completed = json.loads((await anext(iterator)).removeprefix("data: "))
+                with self.assertRaises(StopAsyncIteration):
+                    await anext(iterator)
+        finally:
+            clear_execution(execution_id)
+
+        self.assertEqual(completed["type"], "execution_complete")
+        self.assertEqual(completed["outputs"], {"result": "done"})
 
     async def test_stream_sends_heartbeat_while_active_node_is_idle(self) -> None:
         workflow_id = uuid.uuid4()

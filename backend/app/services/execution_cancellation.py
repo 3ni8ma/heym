@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+import copy
 import json
 import logging
 import os
@@ -44,6 +45,10 @@ MAX_PROGRESS_EVENT_BYTES = 8 * 1024 * 1024
 # A single oversized payload (large node output) is buffered without its payload
 # fields; the full value still reaches the canvas with the final history entry.
 MAX_PROGRESS_EVENT_PAYLOAD_BYTES = 256 * 1024
+# Canvas test runs deliberately do not create persistent ExecutionHistory rows. Keep their final
+# SSE payload briefly so another tab already observing the run can still receive its result.
+TERMINAL_EXECUTION_RESULT_TTL_SECONDS = 60.0
+MAX_TERMINAL_EXECUTION_RESULTS = 500
 # Events the observer synthesizes itself, plus executor-internal plumbing that is
 # not JSON serializable.
 _UNBUFFERED_EVENT_TYPES = frozenset({"execution_started", "execution_complete"})
@@ -92,6 +97,15 @@ class ActiveExecutionStreamSnapshot:
 
 
 @dataclass(frozen=True)
+class CompletedExecutionResult:
+    """Short-lived terminal result for a non-persisted execution."""
+
+    workflow_id: uuid.UUID
+    result: dict[str, Any]
+    completed_at: float
+
+
+@dataclass(frozen=True)
 class ActiveExecutionRecord:
     """Persisted active execution visible across API workers."""
 
@@ -129,6 +143,7 @@ class _RegistryCommand:
 
 
 _ACTIVE_EXECUTIONS: dict[uuid.UUID, ExecutionCancellationHandle] = {}
+_COMPLETED_EXECUTIONS: dict[uuid.UUID, CompletedExecutionResult] = {}
 _LOCK = threading.Lock()
 
 
@@ -158,6 +173,7 @@ def register_execution(
     )
     with _LOCK:
         _ACTIVE_EXECUTIONS[execution_id] = handle
+        _COMPLETED_EXECUTIONS.pop(execution_id, None)
     active_execution_registry.record_started(handle)
     return event
 
@@ -174,7 +190,56 @@ def cancel_execution(*, workflow_id: uuid.UUID, execution_id: uuid.UUID) -> bool
 def clear_execution(execution_id: uuid.UUID) -> None:
     with _LOCK:
         _ACTIVE_EXECUTIONS.pop(execution_id, None)
+        _COMPLETED_EXECUTIONS.pop(execution_id, None)
     active_execution_registry.record_finished(execution_id)
+
+
+def complete_execution(
+    execution_id: uuid.UUID,
+    *,
+    workflow_id: uuid.UUID,
+    result: dict[str, Any],
+) -> None:
+    """Finish a non-persisted run while retaining its final SSE payload briefly."""
+
+    now = time.monotonic()
+    with _LOCK:
+        _ACTIVE_EXECUTIONS.pop(execution_id, None)
+        _purge_expired_completed_executions(now)
+        _COMPLETED_EXECUTIONS[execution_id] = CompletedExecutionResult(
+            workflow_id=workflow_id,
+            result=copy.deepcopy(result),
+            completed_at=now,
+        )
+        while len(_COMPLETED_EXECUTIONS) > MAX_TERMINAL_EXECUTION_RESULTS:
+            oldest_execution_id = next(iter(_COMPLETED_EXECUTIONS))
+            _COMPLETED_EXECUTIONS.pop(oldest_execution_id, None)
+    active_execution_registry.record_finished(execution_id)
+
+
+def get_completed_execution_result(
+    execution_id: uuid.UUID,
+    *,
+    workflow_id: uuid.UUID,
+) -> dict[str, Any] | None:
+    """Return a terminal payload while its short cross-tab handoff window is open."""
+
+    with _LOCK:
+        _purge_expired_completed_executions(time.monotonic())
+        completed = _COMPLETED_EXECUTIONS.get(execution_id)
+        if completed is None or completed.workflow_id != workflow_id:
+            return None
+        return copy.deepcopy(completed.result)
+
+
+def _purge_expired_completed_executions(now: float) -> None:
+    expired_ids = [
+        execution_id
+        for execution_id, completed in _COMPLETED_EXECUTIONS.items()
+        if now - completed.completed_at >= TERMINAL_EXECUTION_RESULT_TTL_SECONDS
+    ]
+    for execution_id in expired_ids:
+        _COMPLETED_EXECUTIONS.pop(execution_id, None)
 
 
 def list_active_executions() -> list[ExecutionCancellationHandle]:

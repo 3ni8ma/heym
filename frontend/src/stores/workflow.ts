@@ -83,8 +83,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
   // "reload": this tab has no edits, so it is simply showing an outdated workflow.
   const staleSaveMode = ref<"overwrite" | "reload">("overwrite");
   // Every node currently in flight. A set, not a single id: parallel branches and
-  // orchestrator fan-out run several nodes at once. It outlives `clearWorkflow`, so
-  // leaving and re-entering the editor mid-run restores the running highlights.
+  // orchestrator fan-out run several nodes at once.
   const runningNodeIds = ref<Set<string>>(new Set());
   const propertiesPanelOpen = ref(false);
   const propertiesPanelVisible = ref(false);
@@ -117,6 +116,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
   /** When true, the next `propertiesPanelOpen` pulse skips `openPrimaryExpandDialogForSelectedNode`. */
   const skipPrimaryExpandOnNextPropertiesOpen = ref(false);
   const abortController = ref<AbortController | null>(null);
+  const fileUploadPollAbortController = ref<AbortController | null>(null);
   const debugPanelHeight = ref(192);
   const nodeSearchQuery = ref("");
   const runInputText = ref("");
@@ -441,26 +441,31 @@ export const useWorkflowStore = defineStore("workflow", () => {
       search,
     }: { keepDetails?: boolean; search?: string } = {},
   ): Promise<void> {
-    if (!currentWorkflow.value) return;
+    const workflowId = currentWorkflow.value?.id;
+    if (!workflowId) return;
     isHistoryLoading.value = true;
     try {
       const { total, items } = await workflowApi.getHistory(
-        currentWorkflow.value.id,
+        workflowId,
         50,
         0,
         search,
         triggerSource,
       );
+      if (currentWorkflow.value?.id !== workflowId) return;
       executionHistoryList.value = items;
       executionHistoryTotal.value = total;
       if (!keepDetails) {
         executionHistoryDetails.value = new Map();
       }
     } catch {
+      if (currentWorkflow.value?.id !== workflowId) return;
       executionHistoryList.value = [];
       executionHistoryTotal.value = 0;
     } finally {
-      isHistoryLoading.value = false;
+      if (currentWorkflow.value?.id === workflowId) {
+        isHistoryLoading.value = false;
+      }
     }
   }
 
@@ -468,24 +473,28 @@ export const useWorkflowStore = defineStore("workflow", () => {
     triggerSource?: string,
     { search }: { search?: string } = {},
   ): Promise<void> {
-    if (!currentWorkflow.value) return;
+    const workflowId = currentWorkflow.value?.id;
+    if (!workflowId) return;
     if (isHistoryLoadingMore.value) return;
     if (executionHistoryList.value.length >= executionHistoryTotal.value) return;
     isHistoryLoadingMore.value = true;
     try {
       const { total, items } = await workflowApi.getHistory(
-        currentWorkflow.value.id,
+        workflowId,
         50,
         executionHistoryList.value.length,
         search,
         triggerSource,
       );
+      if (currentWorkflow.value?.id !== workflowId) return;
       executionHistoryList.value = [...executionHistoryList.value, ...items];
       executionHistoryTotal.value = total;
     } catch {
       // silently ignore — next scroll will retry
     } finally {
-      isHistoryLoadingMore.value = false;
+      if (currentWorkflow.value?.id === workflowId) {
+        isHistoryLoadingMore.value = false;
+      }
     }
   }
 
@@ -493,22 +502,26 @@ export const useWorkflowStore = defineStore("workflow", () => {
     entryId: string,
     force = false,
   ): Promise<ExecutionHistoryEntry | null> {
-    if (!currentWorkflow.value) return null;
+    const workflowId = currentWorkflow.value?.id;
+    if (!workflowId) return null;
     const cached = !force ? executionHistoryDetails.value.get(entryId) : undefined;
     if (cached) return cached;
     isHistoryDetailLoading.value = true;
     try {
       const serverHistory = await workflowApi.getWorkflowHistoryEntry(
-        currentWorkflow.value.id,
+        workflowId,
         entryId,
       );
+      if (currentWorkflow.value?.id !== workflowId) return null;
       const entry = convertServerHistoryToEntry(serverHistory);
       upsertExecutionHistoryEntry(entry);
       return entry;
     } catch {
       return null;
     } finally {
-      isHistoryDetailLoading.value = false;
+      if (currentWorkflow.value?.id === workflowId) {
+        isHistoryDetailLoading.value = false;
+      }
     }
   }
 
@@ -516,6 +529,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     result: ExecutionResult,
     options?: { preserveSelection?: boolean },
   ): void {
+    if (!isWorkflowOpen(result.workflow_id)) return;
     executionResult.value = result;
     timelinePickedNodeResultIndex.value = null;
     nodeResults.value = result.node_results || [];
@@ -552,7 +566,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
   }
 
   function applyExecutionHistoryEntry(entry: ExecutionHistoryEntry): void {
-    if (!entry.result) return;
+    if (!entry.result || !isWorkflowOpen(entry.result.workflow_id)) return;
     upsertExecutionHistoryEntry(entry);
     const result: ExecutionResult = {
       ...entry.result,
@@ -563,6 +577,16 @@ export const useWorkflowStore = defineStore("workflow", () => {
   }
 
   async function loadWorkflow(id: string): Promise<void> {
+    if (currentExecutionWorkflowId.value && currentExecutionWorkflowId.value !== id) {
+      // The backend keeps the run alive, but this canvas must stop consuming its stream before
+      // another workflow is loaded. Otherwise late events from the old run mutate the new canvas.
+      abortController.value?.abort();
+      abortController.value = null;
+      isExecuting.value = false;
+      isObservingExecution.value = false;
+      currentExecutionId.value = null;
+      currentExecutionWorkflowId.value = null;
+    }
     const activeExecutionId =
       isExecuting.value && currentExecutionWorkflowId.value === id
         ? currentExecutionId.value
@@ -607,16 +631,23 @@ export const useWorkflowStore = defineStore("workflow", () => {
     executionHistoryList.value = [];
     executionHistoryDetails.value = new Map();
     executionHistoryTotal.value = 0;
+    isHistoryLoading.value = false;
+    isHistoryLoadingMore.value = false;
+    isHistoryDetailLoading.value = false;
     if (!preserveActiveExecution) {
       clearRunInputs();
       executionResult.value = null;
       nodeResults.value = [];
+      agentProgressLogs.value = new Map();
+      llmBatchProgressLogs.value = new Map();
+      isExecuting.value = false;
+      isObservingExecution.value = false;
+      abortController.value = null;
       currentExecutionId.value = null;
+      currentExecutionWorkflowId.value = null;
       clearNodeStatuses();
     } else {
       // Taken before the reset below, which clears the set as it marks nodes pending.
-      // The store tracks these across `clearWorkflow`, so they survive leaving and
-      // re-entering the editor while the run continues in the background.
       const stillRunningNodeIds = [...runningNodeIds.value];
       nodes.value.forEach((node) => setNodeStatus(node.id, "pending"));
       for (const nodeResult of nodeResults.value) {
@@ -1265,6 +1296,22 @@ export const useWorkflowStore = defineStore("workflow", () => {
     runningNodeIds.value.clear();
   }
 
+  function isWorkflowOpen(workflowId: string): boolean {
+    return currentWorkflow.value?.id === workflowId;
+  }
+
+  function isActiveExecutionStream(
+    workflowId: string,
+    streamAbort: AbortController,
+  ): boolean {
+    return (
+      !streamAbort.signal.aborted &&
+      isWorkflowOpen(workflowId) &&
+      currentExecutionWorkflowId.value === workflowId &&
+      abortController.value === streamAbort
+    );
+  }
+
   /**
    * After a fileUploadTrigger workflow mints an upload link, the canvas run ends
    * with status "awaiting_file_upload". The actual file upload happens out of band
@@ -1280,6 +1327,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     while (!signal.aborted && Date.now() < deadlineMs) {
       await new Promise((r) => setTimeout(r, 2500));
       if (signal.aborted) return;
+      if (!isWorkflowOpen(workflowId)) return;
       // Stop if the user started another run or cleared the result.
       if (executionResult.value?.status !== "awaiting_file_upload") return;
 
@@ -1291,6 +1339,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
       }
 
       if (slot.run) {
+        if (!isWorkflowOpen(workflowId)) return;
         const finalRows = (slot.run.node_results || []) as NodeResult[];
         nodeResults.value = finalRows;
         executionResult.value = {
@@ -1317,6 +1366,8 @@ export const useWorkflowStore = defineStore("workflow", () => {
   ): Promise<void> {
     const wf = currentWorkflow.value;
     if (!wf) return;
+    fileUploadPollAbortController.value?.abort();
+    fileUploadPollAbortController.value = null;
 
     // Check freshness before touching any execution state, so cancelling leaves the editor
     // exactly as it was. The dialog resumes the run through `forceSaveWorkflow` /
@@ -1377,12 +1428,15 @@ export const useWorkflowStore = defineStore("workflow", () => {
           wf.id,
           body,
           (data) => {
+            if (!isActiveExecutionStream(wf.id, streamAbort)) return;
             currentExecutionId.value = data.execution_id;
           },
           (nodeId) => {
+            if (!isActiveExecutionStream(wf.id, streamAbort)) return;
             setNodeStatus(nodeId, "running");
           },
           (data) => {
+            if (!isActiveExecutionStream(wf.id, streamAbort)) return;
             setNodeStatus(
               data.node_id,
               data.status as "success" | "error" | "pending" | "skipped",
@@ -1424,6 +1478,10 @@ export const useWorkflowStore = defineStore("workflow", () => {
             }
           },
           (result) => {
+            if (!isActiveExecutionStream(wf.id, streamAbort)) {
+              settle(resolve);
+              return;
+            }
             if (result.status === "awaiting_file_upload") {
               // The run minted an upload link; reset node states and poll for the
               // upload-triggered run so the canvas advances once the file arrives.
@@ -1438,7 +1496,13 @@ export const useWorkflowStore = defineStore("workflow", () => {
               currentExecutionWorkflowId.value = null;
               const slotId = (result.outputs as Record<string, unknown>)?.slot_id;
               if (typeof slotId === "string") {
-                void pollFileUploadSlot(slotId, streamAbort.signal, wf.id);
+                const pollAbort = new AbortController();
+                fileUploadPollAbortController.value = pollAbort;
+                void pollFileUploadSlot(slotId, pollAbort.signal, wf.id).finally(() => {
+                  if (fileUploadPollAbortController.value === pollAbort) {
+                    fileUploadPollAbortController.value = null;
+                  }
+                });
               }
               settle(() => resolve());
               return;
@@ -1492,6 +1556,10 @@ export const useWorkflowStore = defineStore("workflow", () => {
             settle(() => resolve());
           },
           (error: Error) => {
+            if (!isActiveExecutionStream(wf.id, streamAbort)) {
+              settle(resolve);
+              return;
+            }
             clearNodeStatuses();
             isExecuting.value = false;
             runningNodeIds.value.clear();
@@ -1503,6 +1571,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
           true,
           streamAbort.signal,
         (data) => {
+          if (!isActiveExecutionStream(wf.id, streamAbort)) return;
           receivedFinalOutput = true;
           const mapperNode = nodes.value.find((n) => n.id === data.node_id);
           const unwrappedJsonMapper =
@@ -1522,6 +1591,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
           };
         },
         (data) => {
+          if (!isActiveExecutionStream(wf.id, streamAbort)) return;
           const node = nodes.value.find((n) => n.id === data.node_id);
           if (node) {
             node.data = {
@@ -1550,6 +1620,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
           nodeResults.value = [...nodeResults.value, row];
         },
         (data) => {
+          if (!isActiveExecutionStream(wf.id, streamAbort)) return;
           const m = new Map(agentProgressLogs.value);
           const arr = m.get(data.node_id) ?? [];
           const entry = data.entry;
@@ -1572,6 +1643,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
           agentProgressLogs.value = m;
         },
         (data) => {
+          if (!isActiveExecutionStream(wf.id, streamAbort)) return;
           const m = new Map(llmBatchProgressLogs.value);
           const arr = m.get(data.node_id) ?? [];
           arr.push(data.entry);
@@ -1862,6 +1934,8 @@ export const useWorkflowStore = defineStore("workflow", () => {
       abortController.value.abort();
       abortController.value = null;
     }
+    fileUploadPollAbortController.value?.abort();
+    fileUploadPollAbortController.value = null;
     isExecuting.value = false;
     isObservingExecution.value = false;
     runningNodeIds.value.clear();
@@ -1872,8 +1946,10 @@ export const useWorkflowStore = defineStore("workflow", () => {
   }
 
   function clearWorkflow(): void {
-    const preserveActiveExecution =
-      isExecuting.value && currentExecutionId.value !== null;
+    abortController.value?.abort();
+    abortController.value = null;
+    fileUploadPollAbortController.value?.abort();
+    fileUploadPollAbortController.value = null;
     currentWorkflow.value = null;
     nodes.value = [];
     edges.value = [];
@@ -1882,13 +1958,16 @@ export const useWorkflowStore = defineStore("workflow", () => {
     executionHistoryList.value = [];
     executionHistoryDetails.value = new Map();
     executionHistoryTotal.value = 0;
-    if (!preserveActiveExecution) {
-      clearRunInputs();
-      executionResult.value = null;
-      nodeResults.value = [];
-      currentExecutionId.value = null;
-      currentExecutionWorkflowId.value = null;
-    }
+    clearRunInputs();
+    executionResult.value = null;
+    nodeResults.value = [];
+    agentProgressLogs.value = new Map();
+    llmBatchProgressLogs.value = new Map();
+    isExecuting.value = false;
+    isObservingExecution.value = false;
+    currentExecutionId.value = null;
+    currentExecutionWorkflowId.value = null;
+    runningNodeIds.value.clear();
     hasUnsavedChanges.value = false;
     workflowLoadedAt.value = null;
     staleSaveDialogOpen.value = false;
