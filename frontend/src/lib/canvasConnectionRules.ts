@@ -24,6 +24,7 @@ export const BLOCKED_AS_TOOL_NODE_TYPES: ReadonlySet<NodeType> = new Set<NodeTyp
   "slackTrigger",
   "discordTrigger",
   "imapTrigger",
+  "heymTrigger",
   "mcpCall",
 ]);
 
@@ -39,6 +40,7 @@ export const NO_REGULAR_INPUT_NODE_TYPES: ReadonlySet<NodeType> = new Set<NodeTy
   "slackTrigger",
   "discordTrigger",
   "imapTrigger",
+  "heymTrigger",
 ]);
 
 export function isBlockedAsTool(nodeType: NodeType): boolean {

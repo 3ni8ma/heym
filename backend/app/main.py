@@ -2,6 +2,7 @@ import logging
 import os
 import time
 from contextlib import asynccontextmanager, suppress
+from datetime import datetime, timezone
 
 import sqlalchemy as sa
 from fastapi import FastAPI, HTTPException
@@ -76,6 +77,12 @@ from app.services.execution_cancellation import (
 from app.services.execution_recovery import execution_recovery_service
 from app.services.grist_pool import close_all_clients as close_grist_clients
 from app.services.grist_pool import warm_up_pools as warm_up_grist_pools
+from app.services.heym_event_dispatcher import heym_event_dispatcher
+from app.services.heym_event_service import (
+    EVENT_HEYM_STARTED,
+    publish_event,
+    started_dedupe_key,
+)
 from app.services.hitl_service import build_public_base_url, build_review_url
 from app.services.imap_trigger_service import imap_trigger_manager
 from app.services.notion_service import NotionService
@@ -192,14 +199,26 @@ async def lifespan(app: FastAPI):
     await execution_recovery_service.start()
     await cron_scheduler.start()
 
+    _started_at = datetime.now(timezone.utc)
+    await publish_event(
+        name=EVENT_HEYM_STARTED,
+        payload={
+            "version": settings.resolved_version,
+            "started_at": _started_at.isoformat(),
+        },
+        dedupe_key=started_dedupe_key(_started_at),
+    )
+
     from app.services.board_run_service import reconcile_orphaned_board_runs
 
     await reconcile_orphaned_board_runs()
     await imap_trigger_manager.start()
     await rabbitmq_consumer_manager.start()
     await websocket_trigger_manager.start()
+    await heym_event_dispatcher.start()
     yield
     shutdown_tracing()
+    await heym_event_dispatcher.stop()
     await websocket_trigger_manager.stop()
     await rabbitmq_consumer_manager.stop()
     await imap_trigger_manager.stop()

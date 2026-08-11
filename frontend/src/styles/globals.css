@@ -48,6 +48,7 @@
     --node-condition: 25 95% 53%;
     --node-switch: 189 94% 43%;
     --node-execute: 217 91% 60%;
+    --node-heym: 258 90% 66%;
     --node-output: 240 5% 26%;
     --node-http: 162 94% 35%;
     --node-websocket: 198 93% 44%;
@@ -124,6 +125,7 @@
     --node-condition: 25 95% 58%;
     --node-switch: 189 94% 48%;
     --node-execute: 217 91% 65%;
+    --node-heym: 258 90% 70%;
     --node-output: 220 9% 46%;
     --node-http: 162 94% 40%;
     --node-websocket: 198 88% 54%;

@@ -2,11 +2,12 @@
 import { computed } from "vue";
 import { Handle, Position, useVueFlow } from "@vue-flow/core";
 import { AlertTriangle, Ban, BarChart3, Bot, Brain, Braces, Bug, CalendarClock, Clock, Database, FileJson, FileText, FolderOpen, GitBranch, GitMerge, Globe, Github, HardDrive, Inbox, ListTodo, Loader2, Mail, MessageSquare, MonitorPlay, Pin, Play, Plug, Puzzle, Rabbit, Radio, RefreshCw, Repeat, Search, Send, Server, Settings2, Sheet, ShieldAlert, Shuffle, Sparkles, StickyNote, Table2, Terminal, Type, Upload, Variable, XCircle } from "lucide-vue-next";
+import HeymIcon from "@/components/Nodes/HeymIcon.vue";
 
 import type { NodeData, NodeType } from "@/types/workflow";
 
 import PluginIcon from "@/components/Panels/PluginIcon.vue";
-import { nodeIconColorClass } from "@/lib/nodeIcons";
+import { isTileFillingIcon, nodeIconColorClass } from "@/lib/nodeIcons";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -51,6 +52,8 @@ const icons = {
   discord: MessageSquare,
   discordTrigger: MessageSquare,
   imapTrigger: Inbox,
+  heym: HeymIcon,
+  heymTrigger: HeymIcon,
   sendEmail: Mail,
   errorHandler: AlertTriangle,
   variable: Variable,
@@ -111,6 +114,8 @@ const nodeColorMap = {
   discord: "node-discord",
   discordTrigger: "node-discord",
   imapTrigger: "node-email",
+  heym: "node-heym",
+  heymTrigger: "node-heym",
   sendEmail: "node-email",
   errorHandler: "node-error",
   variable: "node-variable",
@@ -165,6 +170,7 @@ const hasInput = computed(
     && props.type !== "slackTrigger"
     && props.type !== "discordTrigger"
     && props.type !== "imapTrigger"
+    && props.type !== "heymTrigger"
     && !(props.type === "rabbitmq" && props.data.rabbitmqOperation === "receive")
 );
 const hasOutput = computed(() => {
@@ -520,7 +526,10 @@ const hasThrowErrorWarning = computed(() => {
         <component
           :is="Icon"
           v-else
-          :class="cn('w-4.5 h-4.5', isInactive ? 'text-muted-foreground/70' : nodeIconColorClass[type])"
+          :class="cn(
+            isTileFillingIcon(type) ? 'w-full h-full' : 'w-4.5 h-4.5',
+            isInactive ? 'text-muted-foreground/70' : nodeIconColorClass[type],
+          )"
         />
       </div>
       <div class="min-w-0">

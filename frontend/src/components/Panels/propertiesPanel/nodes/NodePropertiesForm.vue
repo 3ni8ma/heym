@@ -52,6 +52,8 @@ import RabbitmqNodeProperties from "./RabbitmqNodeProperties.vue";
 import CrawlerNodeProperties from "./CrawlerNodeProperties.vue";
 import PlaywrightNodeProperties from "./PlaywrightNodeProperties.vue";
 import McpCallNodeProperties from "./McpCallNodeProperties.vue";
+import HeymNodeProperties from "./HeymNodeProperties.vue";
+import HeymTriggerNodeProperties from "./HeymTriggerNodeProperties.vue";
 import PluginNodeProperties from "./PluginNodeProperties.vue";
 import HighlightNodeOutputToggle from "./HighlightNodeOutputToggle.vue";
 import { usePropertiesPanelContext } from "../usePropertiesPanelController";
@@ -67,6 +69,7 @@ const { selectedNode } = usePropertiesPanelContext();
   <SlackTriggerNodeProperties v-else-if="selectedNode?.type === 'slackTrigger'" />
   <DiscordTriggerNodeProperties v-else-if="selectedNode?.type === 'discordTrigger'" />
   <ImapTriggerNodeProperties v-else-if="selectedNode?.type === 'imapTrigger'" />
+  <HeymTriggerNodeProperties v-else-if="selectedNode?.type === 'heymTrigger'" />
   <WebsocketTriggerNodeProperties v-else-if="selectedNode?.type === 'websocketTrigger'" />
   <LlmNodeProperties v-else-if="selectedNode?.type === 'llm'" />
   <AgentNodeProperties v-else-if="selectedNode?.type === 'agent'" />
@@ -75,6 +78,7 @@ const { selectedNode } = usePropertiesPanelContext();
   <ConditionNodeProperties v-else-if="selectedNode?.type === 'condition'" />
   <SwitchNodeProperties v-else-if="selectedNode?.type === 'switch'" />
   <ExecuteNodeProperties v-else-if="selectedNode?.type === 'execute'" />
+  <HeymNodeProperties v-else-if="selectedNode?.type === 'heym'" />
   <HttpNodeProperties v-else-if="selectedNode?.type === 'http'" />
   <WebsocketSendNodeProperties v-else-if="selectedNode?.type === 'websocketSend'" />
   <OutputNodeProperties v-else-if="selectedNode?.type === 'output'" />

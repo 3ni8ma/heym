@@ -31,6 +31,8 @@ _HANDLER_MODULES: dict[str, str] = {
     "googleDrive": "google_drive_node",
     "googleSheets": "google_sheets_node",
     "grist": "grist_node",
+    "heym": "heym_node",
+    "heymTrigger": "heym_trigger_node",
     "http": "http_node",
     "imapTrigger": "imap_trigger_node",
     "jsonOutputMapper": "json_output_mapper_node",

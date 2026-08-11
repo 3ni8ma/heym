@@ -6,7 +6,7 @@ import type { NodeType, WorkflowEdge, WorkflowNode } from "@/types/workflow";
 import type { ReadonlyPreviewDisplayField } from "@/components/Canvas/readonlyPreviewFields";
 import ReadonlyCanvasSurface from "@/components/Canvas/ReadonlyCanvasSurface.vue";
 import { getReadonlyPreviewFields } from "@/components/Canvas/readonlyPreviewFields";
-import { nodeIcons } from "@/lib/nodeIcons";
+import { isTileFillingIcon, nodeIcons } from "@/lib/nodeIcons";
 import { NODE_DEFINITIONS } from "@/types/node";
 
 interface Props {
@@ -105,8 +105,10 @@ function clearSelection(): void {
               >
                 <component
                   :is="activeNodeIcon"
-                  class="h-4 w-4"
-                  :style="{ color: activeNodeColor }"
+                  :class="activeNodeType && isTileFillingIcon(activeNodeType) ? 'h-full w-full' : 'h-4 w-4'"
+                  :style="activeNodeType && isTileFillingIcon(activeNodeType)
+                    ? undefined
+                    : { color: activeNodeColor }"
                 />
               </div>
               <div class="min-w-0">

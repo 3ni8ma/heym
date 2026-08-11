@@ -2,6 +2,7 @@
 import { BookOpen, Power, Trash2 } from "lucide-vue-next";
 import Button from "@/components/ui/Button.vue";
 import { usePropertiesPanelContext } from "./usePropertiesPanelController";
+import { isTileFillingIcon } from "@/lib/nodeIcons";
 
 const {
   nodeIcons,
@@ -35,7 +36,7 @@ const {
         >
           <component
             :is="nodeIcons[selectedNode.type]"
-            class="w-5 h-5"
+            :class="isTileFillingIcon(selectedNode.type) ? 'w-full h-full' : 'w-5 h-5'"
           />
         </div>
         <div class="flex flex-col min-w-0">

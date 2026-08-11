@@ -2313,6 +2313,18 @@ export const useWorkflowStore = defineStore("workflow", () => {
         }
       }
 
+      if (node.type === "heym") {
+        const operation = node.data.heymOperation || "listWorkflows";
+        if (operation !== "listWorkflows" && !node.data.heymWorkflowId) {
+          errors.push({
+            nodeId: node.id,
+            nodeLabel: node.data.label,
+            nodeType: "Heym",
+            message: "Workflow is not selected",
+          });
+        }
+      }
+
       if (node.type === "websocketTrigger") {
         if (!node.data.websocketUrl || node.data.websocketUrl.trim() === "") {
           errors.push({

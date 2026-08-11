@@ -432,3 +432,16 @@ export const rabbitmqOperationOptions: OperationOption[] = [
   { value: "send", label: "Send Message" },
   { value: "receive", label: "Receive Message (Trigger)" },
 ];
+
+export const heymOperationOptions: OperationOption[] = [
+  { value: "listWorkflows", label: "List Workflows" },
+  { value: "getWorkflow", label: "Get Workflow" },
+  { value: "getExecutionHistory", label: "Get Execution History" },
+];
+
+export const heymEventNameOptions: OperationOption[] = [
+  { value: "heym.started", label: "Heym Started" },
+  { value: "workflow.created", label: "Workflow Created" },
+  { value: "workflow.updated", label: "Workflow Updated" },
+  { value: "workflow.deleted", label: "Workflow Deleted" },
+];

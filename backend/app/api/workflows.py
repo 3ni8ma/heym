@@ -92,11 +92,19 @@ from app.services.global_variables_service import (
     get_global_variables_context,
     upsert_global_variable,
 )
+from app.services.heym_event_service import (
+    EVENT_WORKFLOW_CREATED,
+    EVENT_WORKFLOW_DELETED,
+    EVENT_WORKFLOW_UPDATED,
+    publish_event,
+    workflow_event_payload,
+)
 from app.services.highlight.highlight_builder import build_highlight_payload
 from app.services.hitl_service import (
     build_public_base_url,
     persist_pending_hitl_execution,
 )
+from app.services.workflow_access import workflow_access_clause
 from app.services.workflow_executor import (
     ExecutionResult,
     WorkflowCancelledError,
@@ -347,19 +355,7 @@ async def get_workflow_for_user(
     result = await db.execute(
         select(Workflow).where(
             Workflow.id == workflow_id,
-            or_(
-                Workflow.owner_id == user_id,
-                Workflow.id.in_(
-                    select(WorkflowShare.workflow_id).where(WorkflowShare.user_id == user_id)
-                ),
-                Workflow.id.in_(
-                    select(WorkflowTeamShare.workflow_id).where(
-                        WorkflowTeamShare.team_id.in_(
-                            select(TeamMember.team_id).where(TeamMember.user_id == user_id)
-                        )
-                    )
-                ),
-            ),
+            workflow_access_clause(user_id),
         )
     )
     return result.scalar_one_or_none()
@@ -564,23 +560,7 @@ async def list_workflows(
 ) -> list[WorkflowListResponse]:
     result = await db.execute(
         select(Workflow)
-        .where(
-            or_(
-                Workflow.owner_id == current_user.id,
-                Workflow.id.in_(
-                    select(WorkflowShare.workflow_id).where(
-                        WorkflowShare.user_id == current_user.id
-                    )
-                ),
-                Workflow.id.in_(
-                    select(WorkflowTeamShare.workflow_id).where(
-                        WorkflowTeamShare.team_id.in_(
-                            select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
-                        )
-                    )
-                ),
-            )
-        )
+        .where(workflow_access_clause(current_user.id))
         .where(Workflow.kind == "workflow")
         .order_by(Workflow.updated_at.desc())
     )
@@ -623,23 +603,7 @@ async def list_workflows_with_inputs(
 ) -> list[WorkflowListWithInputsResponse]:
     result = await db.execute(
         select(Workflow)
-        .where(
-            or_(
-                Workflow.owner_id == current_user.id,
-                Workflow.id.in_(
-                    select(WorkflowShare.workflow_id).where(
-                        WorkflowShare.user_id == current_user.id
-                    )
-                ),
-                Workflow.id.in_(
-                    select(WorkflowTeamShare.workflow_id).where(
-                        WorkflowTeamShare.team_id.in_(
-                            select(TeamMember.team_id).where(TeamMember.user_id == current_user.id)
-                        )
-                    )
-                ),
-            )
-        )
+        .where(workflow_access_clause(current_user.id))
         .where(Workflow.kind == "workflow")
         .order_by(Workflow.updated_at.desc())
     )
@@ -1248,6 +1212,13 @@ async def create_workflow(
     # which would otherwise race the get_db() teardown commit and 404 on the update.
     await db.commit()
     await db.refresh(workflow)
+    await publish_event(
+        name=EVENT_WORKFLOW_CREATED,
+        payload=workflow_event_payload(workflow, actor_user_id=current_user.id),
+        owner_id=workflow.owner_id,
+        workflow_id=workflow.id,
+        dedupe_key=f"{EVENT_WORKFLOW_CREATED}:{workflow.id}",
+    )
     return _build_workflow_response(workflow)
 
 
@@ -1480,6 +1451,19 @@ async def update_workflow(
     from app.services.websocket_trigger_service import websocket_trigger_manager
 
     websocket_trigger_manager.request_sync()
+    # Dashboard widgets are Workflow rows too, but they are not workflows a user
+    # subscribes to - only real workflows produce platform events.
+    if getattr(workflow, "kind", "workflow") == "workflow":
+        updated_payload = workflow_event_payload(workflow, actor_user_id=current_user.id)
+        # Key on the saved revision so a retried or duplicated save collapses onto
+        # one event instead of waking every subscriber twice.
+        await publish_event(
+            name=EVENT_WORKFLOW_UPDATED,
+            payload=updated_payload,
+            owner_id=workflow.owner_id,
+            workflow_id=workflow.id,
+            dedupe_key=f"{EVENT_WORKFLOW_UPDATED}:{workflow.id}:{updated_payload['updated_at']}",
+        )
     return _build_workflow_response(workflow)
 
 
@@ -1520,6 +1504,13 @@ async def delete_workflow(
             detail="Only the owner can delete this workflow",
         )
 
+    # Capture the identity before the row goes away; the event reports a workflow
+    # that no longer exists by the time anyone reads it.
+    deleted_payload = workflow_event_payload(workflow, actor_user_id=current_user.id)
+    deleted_owner_id = workflow.owner_id
+    deleted_workflow_id = workflow.id
+    deleted_kind = getattr(workflow, "kind", "workflow")
+
     # Delete only the snapshots that would violate the unique constraint when
     # workflow_id is set to NULL by the FK (i.e. a null-workflow row already
     # exists for the same owner_id + bucket_start). The rest keep their row
@@ -1540,6 +1531,19 @@ async def delete_workflow(
         {"workflow_id": str(workflow_id)},
     )
     await db.delete(workflow)
+
+    # The event is written from its own session, so it lands before this request's
+    # transaction commits at teardown. A rollback after this point would leave an
+    # event for a workflow that still exists - a narrow window we accept, because
+    # the alternative is letting a failed publish roll back a successful delete.
+    if deleted_kind == "workflow":
+        await publish_event(
+            name=EVENT_WORKFLOW_DELETED,
+            payload=deleted_payload,
+            owner_id=deleted_owner_id,
+            workflow_id=deleted_workflow_id,
+            dedupe_key=f"{EVENT_WORKFLOW_DELETED}:{deleted_workflow_id}",
+        )
 
 
 @router.put("/{workflow_id}/schedule-deletion", response_model=WorkflowListResponse)
