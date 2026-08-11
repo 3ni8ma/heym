@@ -5,6 +5,10 @@ export interface ShowcaseIntroContent {
   description: string;
 }
 
+/**
+ * Every context has a recording, and the exhaustive Record keeps it that way:
+ * adding a context without one is a compile error rather than a 404 at runtime.
+ */
 export const SHOWCASE_INTRO_VIDEO_BY_CONTEXT: Record<ShowcaseContext, string> = {
   "dashboard:workflows": "/features/showcase/workflows.webm",
   "dashboard:board": "/features/showcase/board.webm",
@@ -18,6 +22,7 @@ export const SHOWCASE_INTRO_VIDEO_BY_CONTEXT: Record<ShowcaseContext, string> = 
   "dashboard:vectorstores": "/features/showcase/vectorstores.webm",
   "dashboard:mcp": "/features/showcase/mcp.webm",
   "dashboard:traces": "/features/showcase/traces.webm",
+  "dashboard:alerts": "/features/showcase/alerts.webm",
   "dashboard:analytics": "/features/showcase/analytics.webm",
   "dashboard:dashboard": "/features/showcase/dashboard.webm",
   evals: "/features/showcase/evals.webm",
@@ -64,6 +69,10 @@ export const SHOWCASE_INTRO_CONTENT_BY_CONTEXT: Record<ShowcaseContext, Showcase
   "dashboard:traces": {
     title: "Understand execution behavior",
     description: "Inspect trace-level details to debug outcomes, compare runs, and improve workflow reliability.",
+  },
+  "dashboard:alerts": {
+    title: "Get told before someone asks",
+    description: "Set thresholds on errors, duration, cost, and run count, then let Heym tell you when a window crosses them.",
   },
   "dashboard:analytics": {
     title: "Track platform performance",
