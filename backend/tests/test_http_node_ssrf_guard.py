@@ -33,6 +33,13 @@ def _addrinfo(*ips: str) -> list:
 class GuardIpLiteralTests(unittest.TestCase):
     """IP-literal hosts are validated without a DNS lookup."""
 
+    def setUp(self) -> None:
+        # Pin the opt-out so these assertions do not depend on the ambient
+        # HEYM_HTTP_ALLOW_PRIVATE_URLS value on the machine running the suite.
+        patcher = patch.object(ssrf_guard.settings, "http_allow_private_urls", False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_cloud_metadata_ip_blocked(self) -> None:
         with self.assertRaises(SsrfBlockedError):
             guard_http_url("http://169.254.169.254/latest/meta-data/")
@@ -74,6 +81,11 @@ class GuardIpLiteralTests(unittest.TestCase):
 
 class GuardDnsTests(unittest.TestCase):
     """DNS names are resolved and every returned address must be public."""
+
+    def setUp(self) -> None:
+        patcher = patch.object(ssrf_guard.settings, "http_allow_private_urls", False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_dns_resolving_to_private_blocked(self) -> None:
         with patch.object(ssrf_guard.socket, "getaddrinfo", return_value=_addrinfo("10.0.0.9")):
@@ -215,6 +227,11 @@ class GuardedClientTests(unittest.TestCase):
 
 class HttpNodeIntegrationTests(unittest.TestCase):
     """The HTTP node handler refuses an internal target before dialing."""
+
+    def setUp(self) -> None:
+        patcher = patch.object(ssrf_guard.settings, "http_allow_private_urls", False)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def _ctx(self, curl: str):
         executor = MagicMock()

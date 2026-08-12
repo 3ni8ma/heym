@@ -25,6 +25,7 @@ from app.services.agent_tool_observability import (
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
 from app.services.openai_client import create_openai_client
+from app.services.ssrf_guard import get_guarded_http_client, guard_http_url
 
 logger = logging.getLogger(__name__)
 
@@ -336,7 +337,11 @@ def _load_image_bytes(image_input: str) -> tuple[bytes, str]:
 
     parsed = urlparse(image_input)
     if parsed.scheme in ("http", "https"):
-        response = httpx.get(
+        # The URL can be caller-controlled (e.g. "$userInput.body.imageUrl"), so
+        # fetch through the same SSRF guard the HTTP node uses: scheme allowlist,
+        # public-IP-only resolution, and dial-time egress pinning.
+        guard_http_url(image_input, subject="LLM image input URL")
+        response = get_guarded_http_client().get(
             image_input,
             timeout=30.0,
             headers={"User-Agent": HEYM_USER_AGENT},

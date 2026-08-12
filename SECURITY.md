@@ -96,4 +96,10 @@ vulnerabilities in Heym:
   forgery (SSRF) in the HTTP workflow node, where a workflow author could point
   the node at internal or cloud-metadata addresses that were guarded on the MCP
   transports but not on the HTTP node (GHSA-8wj7-v2w6-wfcx).
-- [@SashaMIT](https://github.com/SashaMIT) for reporting an authenticated expression-engine sandbox escape via DotList map/filter item expressions and the simpleeval fallback resolver (GHSA-87x2-9jwx-7gh4).
+- [@SashaMIT](https://github.com/SashaMIT) for reporting an authenticated
+  expression-engine sandbox escape via DotList map/filter item expressions and
+  the simpleeval fallback resolver (GHSA-87x2-9jwx-7gh4), and for reporting a
+  server-side request forgery (SSRF) in the LLM image-edit input loader, where
+  the backend fetched a caller-controlled image URL with a scheme-only check
+  instead of the egress guard applied to the HTTP node, and contributing the fix
+  (GHSA-6rph-qqcv-jqh4).
