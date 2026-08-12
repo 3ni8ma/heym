@@ -1,3 +1,4 @@
+import json
 import unittest
 import uuid
 from datetime import datetime, timezone
@@ -1295,6 +1296,73 @@ class TestExpressionEvaluatorServiceEvaluate(unittest.TestCase):
 
         self.assertIn("requires a string", encoded.error or "")
         self.assertIn("requires a string", decoded.error or "")
+
+    def test_string_method_to_json_parses_object(self) -> None:
+        payload = json.dumps({"repoUrl": "https://github.com/heymrun/heym", "isCodex": False})
+        response = self._service().evaluate("$data.text.toJson()", {"data": {"text": payload}})
+        self.assertEqual(
+            response.result,
+            {"repoUrl": "https://github.com/heymrun/heym", "isCodex": False},
+        )
+        self.assertEqual(response.result_type, "object")
+        self.assertTrue(response.preserved_type)
+        self.assertIsNone(response.error)
+
+    def test_string_method_to_json_chains_object_field(self) -> None:
+        payload = json.dumps({"repoUrl": "https://github.com/heymrun/heym"})
+        response = self._service().evaluate(
+            "$data.text.toJson().repoUrl",
+            {"data": {"text": payload}},
+        )
+        self.assertEqual(response.result, "https://github.com/heymrun/heym")
+        self.assertEqual(response.result_type, "string")
+        self.assertIsNone(response.error)
+
+    def test_to_json_parses_multiline_json_with_nested_quotes(self) -> None:
+        payload = {
+            "repoUrl": "https://github.com/heymrun/heym",
+            "taskPrompt": 'Use the "Fill the form" button. Ctrl+Enter sends.',
+            "branchName": "opencode/alerts-dialog-improvements",
+            "isCodex": False,
+        }
+        text = json.dumps(payload, indent=2)
+        response = self._service().evaluate("$data.text.toJson()", {"data": {"text": text}})
+        self.assertEqual(response.result["repoUrl"], "https://github.com/heymrun/heym")
+        self.assertEqual(response.result["branchName"], "opencode/alerts-dialog-improvements")
+        self.assertFalse(response.result["isCodex"])
+        self.assertIn("Fill the form", response.result["taskPrompt"])
+        self.assertEqual(response.result_type, "object")
+        self.assertIsNone(response.error)
+
+    def test_to_json_function_form(self) -> None:
+        response = self._service().evaluate("$toJson($data.text)", {"data": {"text": '{"a": 1}'}})
+        self.assertEqual(response.result, {"a": 1})
+        self.assertEqual(response.result_type, "object")
+        self.assertIsNone(response.error)
+
+    def test_to_json_parses_array(self) -> None:
+        response = self._service().evaluate("$data.text.toJson()", {"data": {"text": "[1, 2, 3]"}})
+        self.assertEqual(response.result, [1, 2, 3])
+        self.assertEqual(response.result_type, "array")
+        self.assertIsNone(response.error)
+
+    def test_to_json_round_trip_with_to_string(self) -> None:
+        response = self._service().evaluate(
+            "$data.meta.toString().toJson()",
+            {"data": {"meta": {"key": "val"}}},
+        )
+        self.assertEqual(response.result, {"key": "val"})
+        self.assertEqual(response.result_type, "object")
+        self.assertIsNone(response.error)
+
+    def test_to_json_rejects_invalid_json(self) -> None:
+        response = self._service().evaluate("$data.text.toJson()", {"data": {"text": "{not json"}})
+        self.assertIsNone(response.result)
+        self.assertIn("valid JSON", response.error or "")
+
+    def test_to_json_requires_string(self) -> None:
+        response = self._service().evaluate("$toJson(123)", {})
+        self.assertIn("requires a string", response.error or "")
 
     def test_string_method_or_empty_preserves_string(self) -> None:
         response = self._service().evaluate("$data.text.orEmpty()", {"data": {"text": "hello"}})

@@ -247,6 +247,17 @@ def _base64_decode_text(value: object) -> str:
         ) from exc
 
 
+def _parse_json_text(value: object) -> object:
+    """Parse a JSON string into wrapped Dot* values for expression chaining."""
+    if not isinstance(value, str):
+        raise ExpressionFunctionError("$toJson(text) requires a string")
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ExpressionFunctionError("$toJson(text) requires valid JSON") from exc
+    return _wrap_value(parsed)
+
+
 class NodeTraceableExecutionError(ValueError):
     """Raised when a node error has a trace entry that should stay linked."""
 
@@ -1298,6 +1309,12 @@ class DotStr(str):
 
     def url_decode(self) -> "DotStr":
         return self.urlDecode()
+
+    def toJson(self) -> object:  # noqa: N802
+        return _parse_json_text(self)
+
+    def to_json(self) -> object:
+        return self.toJson()
 
 
 class DotDateTime:
@@ -6093,6 +6110,7 @@ class WorkflowExecutor:
             "title": lambda s: s.title() if isinstance(s, str) else s,
             "base64Encode": lambda s: DotStr(_base64_encode_text(s)),
             "base64Decode": lambda s: DotStr(_base64_decode_text(s)),
+            "toJson": _parse_json_text,
             "split": lambda s, sep=None: (
                 DotList(list(s) if sep == "" else s.split(sep)) if isinstance(s, str) else s
             ),
@@ -6350,6 +6368,7 @@ class WorkflowExecutor:
                     ),
                     "base64Encode": lambda value: DotStr(_base64_encode_text(value)),
                     "base64Decode": lambda value: DotStr(_base64_decode_text(value)),
+                    "toJson": _parse_json_text,
                 }
                 if func_name in functions:
                     args = []
@@ -6380,6 +6399,8 @@ class WorkflowExecutor:
                 "urlDecode": lambda s: unquote(s),
                 "escape": lambda s: json.dumps(s),
                 "unescape": lambda s: self._safe_json_parse(s),
+                "toJson": _parse_json_text,
+                "to_json": _parse_json_text,
             }
 
             for index, part in enumerate(parts):

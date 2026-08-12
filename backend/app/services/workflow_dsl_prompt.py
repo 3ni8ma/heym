@@ -122,7 +122,7 @@ A workflow consists of nodes (operations) and edges (connections between nodes).
 - **⛔ ABSOLUTE BAN:** The following names (and all their case variations, including uppercase/lowercase/mixed-case) are STRICTLY FORBIDDEN as either node names or parameter names:
   - **"result" and "results"** (e.g., `result`, `results`, `Result`, `Results`, `RESULT`, `RESULTS`). These cause critical system conflicts and must never be used anywhere.
   - System fields: `headers`, `query`, `value`, `list`, `array`, `vars`, `items`, `name`, `type`, `input`, `now`, `date`, `workflowName`, `workflowDescription`, `workflowUrl`, `workflowPath`, `executionId`
-  - String methods: `length`, `orEmpty`, `toString`, `toUpperCase`, `toLowerCase`, `substring`, `indexOf`, `contains`, `startsWith`, `endsWith`, `replace`, `replaceAll`, `regexReplace`, `hash`, `base64Encode`, `base64Decode`
+  - String methods: `length`, `orEmpty`, `toString`, `toUpperCase`, `toLowerCase`, `substring`, `indexOf`, `contains`, `startsWith`, `endsWith`, `replace`, `replaceAll`, `regexReplace`, `hash`, `base64Encode`, `base64Decode`, `toJson`
   - Array methods: `first`, `last`, `random`, `reverse`, `distinct`, `notNull`, `filter`, `map`, `sort`, `join`
   - HTTP fields: `status`, `body`
   - Execution/Workflow fields: `outputs`, `result`, `status`, `workflow_id` (and when `executeDoNotWait: true`, specifically `status`, `workflow_id`)
@@ -1640,7 +1640,7 @@ Notes:
 **⚠️ RESERVED VARIABLE NAMES**: The following names are RESERVED and CANNOT be used as `variableName`:
 - **⛔ ABSOLUTE BAN**: `result` and `results` are reserved and CANNOT be used as variable names!
 - System fields: `headers`, `query`, `value`, `list`, `array`, `vars`, `items`, `name`, `type`, `length`, `input`, `now`, `date`, `workflowName`, `workflowDescription`, `workflowUrl`, `workflowPath`, `executionId`
-- String methods: `orEmpty`, `toString`, `toUpperCase`, `toLowerCase`, `substring`, `indexOf`, `contains`, `startswith`, `endswith`, `replace`, `replaceAll`, `regexReplace`, `hash`, `base64Encode`, `base64Decode`
+- String methods: `orEmpty`, `toString`, `toUpperCase`, `toLowerCase`, `substring`, `indexOf`, `contains`, `startswith`, `endswith`, `replace`, `replaceAll`, `regexReplace`, `hash`, `base64Encode`, `base64Decode`, `toJson`
 - Array methods: `first`, `last`, `random`, `reverse`, `distinct`, `notNull`, `join`
 - HTTP response fields: `status`, `body`
 - Execute node fields: `outputs`, `result`, `status`, `workflow_id`
@@ -3789,6 +3789,7 @@ Create objects/dictionaries directly using curly brace syntax with any string ke
 - `regexReplace(text, pattern, replacement)` - Replace with regex pattern
 - `base64Encode(text)` - Encode UTF-8 text as standard Base64
 - `base64Decode(text)` - Decode standard Base64 as UTF-8 text
+- `toJson(text)` - Parse a JSON string into an object, array, or value
 
 ### String Methods (on string values)
 - `.orEmpty()` - Return the string value, or `""` when the value is null/missing
@@ -3809,6 +3810,7 @@ Create objects/dictionaries directly using curly brace syntax with any string ke
 - `.base64Decode()` - Decode standard Base64 as UTF-8 text
 - `.urlEncode()` - URL encode the string
 - `.urlDecode()` - URL decode the string
+- `.toJson()` - Parse a JSON string into an object, array, or value (then chain `.repoUrl`, `.keys()`, etc.)
 
 **Nested references in method parameters are allowed:**
 - ✅ `$userInput.body.sentence.contains($userInput.body.keyword)` - CORRECT
@@ -3914,7 +3916,7 @@ For boolean values, use them directly without `== true`:
 
 ### ⚠️ ONLY USE THESE FUNCTIONS - CRITICAL!
 **DO NOT use ANY function that is NOT listed above!**
-- ❌ NO `JSON.parse()`, `JSON.stringify()`
+- ❌ NO `JSON.parse()`, `JSON.stringify()` — use `$text.toJson()` to parse a JSON string and `.toString()` on objects/arrays to serialize
 - ❌ NO `parseInt()`, `parseFloat()`, `Number()`, `String()`
 - ❌ NO `Object.keys()`, `Object.values()` — use `$obj.keys()` / `$obj.values()` / `$obj.entries()` instead
 - ❌ NO `.reduce()`, `.forEach()`, `.find()` - These array methods DO NOT EXIST!
@@ -3928,7 +3930,7 @@ For boolean values, use them directly without `== true`:
 **For complex iteration logic, use the `loop` node!**
 
 **If a function is NOT in the documentation above, it DOES NOT EXIST!**
-Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `len()`, `abs()`, `min()`, `max()`, `round()`, `sum()`, `sorted()`, `randomInt()`, `range()`, `array()`, `notNull()`, `upper()`, `lower()`, `strip()`, `capitalize()`, `title()`, `split()`, `join()`, `replace()`, `regexReplace()`, `hash()`, `base64Encode()`, `base64Decode()`, and the documented string/array/object methods.
+Use ONLY: `str()`, `int()`, `float()`, `bool()`, `list()`, `dict(key=value)`, `len()`, `abs()`, `min()`, `max()`, `round()`, `sum()`, `sorted()`, `randomInt()`, `range()`, `array()`, `notNull()`, `upper()`, `lower()`, `strip()`, `capitalize()`, `title()`, `split()`, `join()`, `replace()`, `regexReplace()`, `hash()`, `base64Encode()`, `base64Decode()`, `toJson()`, and the documented string/array/object methods.
 
 ### 35. s3 (Amazon S3 Operations)
 - **Type**: `s3`
@@ -4759,7 +4761,7 @@ Always include:
 10. **USE `set` NODE FOR TRANSFORMATIONS** - uppercase, lowercase, substring, concatenation, etc. The `execute` node is ONLY for calling other workflows!
 11. **OUTPUT NODE MUST REFERENCE BY LABEL** - Never use `$input` in output message. Always use `$previousNodeLabel.field`.
 12. **DON'T USE MERGE BY DEFAULT** - For parallel operations, use separate output nodes. Only use merge when user explicitly asks to "merge", "combine", or "join" results together.
-13. **ONLY USE LISTED FUNCTIONS** - Only use functions documented above. No JSON.parse, no made-up functions.
+13. **ONLY USE LISTED FUNCTIONS** - Only use functions documented above. No `JSON.parse()` (use `.toJson()` / `$toJson(text)`), no made-up functions.
 14. **BOOLEAN CONDITIONS** - For booleans, write `$node.isValid` not `$node.isValid == true`. Use `not $node.isValid` for negation.
 15. **ERROR HANDLER** - ONLY add errorHandler when user explicitly requests error handling. It auto-triggers on any error without incoming connections. Do NOT auto-add to workflows.
 16. **ASYNC AFTER OUTPUT** - Set `"allowDownstream": true` in output node data to enable async processing. Connected nodes run asynchronously after response is sent.
@@ -4775,7 +4777,7 @@ Always include:
 25. **EXECUTE NODE MULTIPLE INPUTS** - When calling a workflow that expects multiple input fields: (1) Add matching `inputFields` to your textInput node to collect all required data, (2) Use `executeInputMappings` array to map each field. Example: If target needs `text` and `imageUrl`, your textInput should have `inputFields: [{"key": "prompt"}, {"key": "image"}]`, then execute node uses `"executeInputMappings": [{"key": "text", "value": "$userInput.body.prompt"}, {"key": "imageUrl", "value": "$userInput.body.image"}]`
 26. **REQUEST BODY, HEADERS & QUERY** - When workflow is executed via API, textInput nodes receive `body`, `headers` and `query` objects. Access via `$textInputLabel.body.fieldName`, `$textInputLabel.headers.headerName` and `$textInputLabel.query.paramName`. Useful for accessing raw request data, authentication, and dynamic behavior.
 27. **LOOP BACK-CONNECTION** - Loop nodes REQUIRE a back-connection from the last iteration body node. The last node in the loop body MUST connect back to the loop node using `targetHandle: "loop"`. Without this, the loop executes only once! Pattern: `loop --sourceHandle:loop--> body nodes --> last_body_node --targetHandle:loop--> loop`
-28. **⚠️ NO UNDOCUMENTED FUNCTIONS** - ONLY use functions documented in the Expression Syntax section. Functions like `JSON.parse()`, `parseInt()`, `Object.keys()`, `Array.map()`, `console.log()` DO NOT EXIST in this system. If a function is not in the documentation, it will cause errors!
+28. **⚠️ NO UNDOCUMENTED FUNCTIONS** - ONLY use functions documented in the Expression Syntax section. Functions like `JSON.parse()`, `parseInt()`, `Object.keys()`, `Array.map()`, `console.log()` DO NOT EXIST in this system. If a function is not in the documentation, it will cause errors! Parse a JSON string with `$text.toJson()` or `$toJson($text)`, not `JSON.parse()`.
     - **`.map()` / `.filter()` on arrays and objects ARE supported** (see Array/Object method sections). `.reduce()`, `.forEach()`, and `.find()` still DO NOT EXIST — use the `loop` node when you need per-iteration side effects or accumulation.
 29. **⛔⛔⛔ ABSOLUTE VIOLATION: OUTPUT NODES IN LOOP BODY ⛔⛔⛔** - This is a HARD RULE! NEVER use output nodes ANYWHERE inside a loop's iteration body! The workflow validator will IMMEDIATELY REJECT any workflow that violates this rule!
     - ⛔ FORBIDDEN: ANY output node connected (directly or indirectly) from `sourceHandle: "loop"`
