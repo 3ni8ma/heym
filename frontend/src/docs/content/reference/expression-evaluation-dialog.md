@@ -66,8 +66,9 @@ When the backend result is an object or array, the Output area can show an inter
 When you continue a `$…` reference with a dot, each suggestion row shows the answer that suggestion would produce, in bold on the right of the row.
 
 - Typing `$set.listItems.first().toString().u` lists `upper`, `urlEncode`, `urlDecode`, and `unescape`, each with its evaluated result — so you can pick by outcome instead of by name.
+- Typing `$node.text.toJson()` parses a JSON string into an object or array. After `.toJson()`, autocomplete can offer the parsed keys (for example `repoUrl`) when last-run or pinned output is available.
 - Results are evaluated on the backend against the same pinned data and last-run outputs the dialog preview uses, so they match what the field will produce.
-- Only suggestions that stand on their own are evaluated: zero-argument methods (`upper()`, `first()`, `keys()`) and plain properties (`length`, `year`). Suggestions that need arguments first — `map`, `filter`, `sort`, `replace` — are left blank.
+- Only suggestions that stand on their own are evaluated: zero-argument methods (`upper()`, `first()`, `keys()`, `toJson()`) and plain properties (`length`, `year`). Suggestions that need arguments first — `map`, `filter`, `sort`, `replace` — are left blank.
 - A row stays blank when the candidate produces no answer: an error, a `null`, or a method that does not apply to that value.
 - Answers are shortened to one line. Hover a shortened answer to see more of it.
 

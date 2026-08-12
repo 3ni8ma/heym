@@ -145,6 +145,7 @@ const METHOD_RETURN_TYPES: Record<string, PropertyType> = {
   endOfDay: "object",
   startOfMonth: "object",
   endOfMonth: "object",
+  toJson: "unknown",
 };
 METHOD_RETURN_TYPES["toString"] = "string";
 METHOD_RETURN_TYPES["get"] = "unknown";
@@ -217,6 +218,14 @@ export function useExpressionCompletion(
       return undefined;
     }
     const methodName = funcMatch[1];
+
+    if (methodName === "toJson" && typeof current === "string") {
+      try {
+        return JSON.parse(current) as unknown;
+      } catch {
+        return undefined;
+      }
+    }
 
     // Object iteration methods synthesize a sample so downstream `.first()`,
     // `[0]`, `.key`, `.value`, and method chaining all see the correct shape.

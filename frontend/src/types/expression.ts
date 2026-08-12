@@ -583,6 +583,13 @@ export const BUILTIN_FUNCTIONS: CompletionSuggestion[] = [
     description: "base64Decode($text)",
   },
   {
+    label: "toJson",
+    insertText: "toJson()",
+    type: "function",
+    detail: "Parse JSON string",
+    description: "toJson($text)",
+  },
+  {
     label: "split",
     insertText: "split()",
     type: "function",
@@ -808,6 +815,14 @@ export const STRING_METHODS: CompletionSuggestion[] = [
     type: "function",
     detail: "JSON unescape string",
     propertyType: "string",
+  },
+  {
+    label: "toJson",
+    insertText: "toJson()",
+    type: "function",
+    detail: "Parse JSON string",
+    description: "Parse a JSON string into an object, array, or value",
+    propertyType: "object",
   },
   {
     label: "length",

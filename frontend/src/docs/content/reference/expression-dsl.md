@@ -215,6 +215,7 @@ Create objects/dictionaries using curly brace syntax with any string keys:
 - `regexReplace(text, pattern, replacement)` - Replace with regex pattern
 - `base64Encode(text)` - Encode UTF-8 text as standard Base64
 - `base64Decode(text)` - Decode standard Base64 into UTF-8 text
+- `toJson(text)` - Parse a JSON string into an object, array, or value
 
 ## String Methods (on string values)
 - `.orEmpty()` - Return the string value, or `""` when the value is null/missing
@@ -237,6 +238,7 @@ Create objects/dictionaries using curly brace syntax with any string keys:
 - `.urlDecode()` - URL decode string
 - `.escape()` - JSON escape string (convert special characters to JSON format)
 - `.unescape()` - JSON unescape string (convert JSON format to original string)
+- `.toJson()` - Parse a JSON string into an object, array, or value
 
 ### String Method Examples
 - `$profile.nickname.orEmpty()` - Convert nullable/missing text to an empty string
@@ -248,6 +250,8 @@ Create objects/dictionaries using curly brace syntax with any string keys:
 - `$text.length` - Get string length
 - `$text.escape()` - Escape special JSON characters (e.g., quotes, newlines)
 - `$escapedText.unescape()` - Unescape JSON formatted string back to original
+- `$text.toJson()` - Parse a JSON object/array string (then `$text.toJson().repoUrl`)
+- `$toJson($text)` - Same parse as a function
 - `$base64Encode("Héym 🌍")` - Return `SMOpeW0g8J+MjQ==`
 - `$encodedText.base64Decode()` - Decode Base64 into UTF-8 text
 - `$text.urlEncode()` - URL encode for API parameters
@@ -344,7 +348,7 @@ Use ONLY:
 - `randomInt()`, `range()`, `array()`, `notNull()`
 - `upper()`, `lower()`, `strip()`, `capitalize()`, `title()`
 - `split()`, `join()`, `replace()`, `regexReplace()`, `hash()`
-- `base64Encode()`, `base64Decode()`
+- `base64Encode()`, `base64Decode()`, `toJson()`
 - documented string/array/object methods
 
 If a function is not listed above, it does not exist.
@@ -354,7 +358,7 @@ If a function is not listed above, it does not exist.
 - Objects/Dicts can ONLY use: `.get(key)`, `.get(key, default)`, `.keys()`, `.values()`, `.entries()`, `.filter(expr)`, `.map(expr)`, `.toString()`
 
 ### Reserved Node Label Names
-Do not use these names as node labels: `length`, `orEmpty`, `toString`, `toUpperCase`, `toLowerCase`, `substring`, `indexOf`, `contains`, `startsWith`, `endsWith`, `replace`, `replaceAll`, `regexReplace`, `hash`, `first`, `last`, `random`, `reverse`, `distinct`, `notNull`, `filter`, `map`, `entries`, `keys`, `values`, `sort`, `join`, `headers`, `query`, `value`, `list`, `result`, `array`, `vars`, `items`, `name`, `type`, `status`, `body`, `outputs`, `result`, `item`, `index`, `total`, `isFirst`, `isLast`, `branch`, `results`, `merged`, `error`, `errorNode`, `errorNodeType`, `timestamp`, `input`, `now`, `date`.
+Do not use these names as node labels: `length`, `orEmpty`, `toString`, `toUpperCase`, `toLowerCase`, `substring`, `indexOf`, `contains`, `startsWith`, `endsWith`, `replace`, `replaceAll`, `regexReplace`, `hash`, `toJson`, `first`, `last`, `random`, `reverse`, `distinct`, `notNull`, `filter`, `map`, `entries`, `keys`, `values`, `sort`, `join`, `headers`, `query`, `value`, `list`, `result`, `array`, `vars`, `items`, `name`, `type`, `status`, `body`, `outputs`, `result`, `item`, `index`, `total`, `isFirst`, `isLast`, `branch`, `results`, `merged`, `error`, `errorNode`, `errorNodeType`, `timestamp`, `input`, `now`, `date`.
 
 ## Examples
 
