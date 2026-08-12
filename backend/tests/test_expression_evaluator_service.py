@@ -1,4 +1,6 @@
 import json
+import os
+import tempfile
 import unittest
 import uuid
 from datetime import datetime, timezone
@@ -1644,6 +1646,73 @@ class TestConditionEvalRejectsDunderTraversalService(unittest.TestCase):
         self.assertIsNone(response_undefined.error)
         self.assertEqual(response_undefined.result_type, "boolean")
         self.assertTrue(response_undefined.result)
+
+
+class TestExpressionEvalRejectsDotListAndFallbackSandboxEscapeService(unittest.TestCase):
+    """Service-path coverage for GHSA-87x2-9jwx-7gh4."""
+
+    def _service(self) -> ExpressionEvaluatorService:
+        return ExpressionEvaluatorService()
+
+    def test_map_dunder_path_does_not_execute(self) -> None:
+        response = self._service().evaluate(
+            '$arr.map("item.__class__.__base__.__subclasses__")',
+            {"arr": ["x"]},
+        )
+        result = response.result
+        self.assertNotIsInstance(result, type)
+        if isinstance(result, list):
+            for item in result:
+                self.assertFalse(callable(item))
+                self.assertNotIsInstance(item, type)
+        elif isinstance(result, str):
+            self.assertIn("__class__", result)
+
+    def test_calling_mapped_dunder_method_does_not_list_subclasses(self) -> None:
+        service = self._service()
+        mapped = service.evaluate(
+            '$arr.map("item.__class__.__base__.__subclasses__")[0]',
+            {"arr": ["x"]},
+        ).result
+        response = service.evaluate("$m()", {"m": mapped})
+        result = response.result
+        if isinstance(result, (list, tuple)) and result:
+            self.assertFalse(
+                all(isinstance(item, type) for item in result),
+                f"Bound-method call returned loaded classes: {result!r}",
+            )
+
+    def test_init_globals_os_system_does_not_execute(self) -> None:
+        class _Probe:
+            def __init__(self) -> None:
+                pass
+
+        fd, marker = tempfile.mkstemp(prefix="heym_expr_rce_svc_")
+        os.close(fd)
+        os.unlink(marker)
+        try:
+            payload = f'$p.__init__.__globals__["os"].system("touch {marker}")'
+            response = self._service().evaluate(payload, {"p": _Probe})
+            self.assertFalse(
+                os.path.exists(marker),
+                f"PoC executed; marker created, result={response.result!r}",
+            )
+            self.assertNotEqual(response.result, 0)
+        finally:
+            if os.path.exists(marker):
+                os.unlink(marker)
+
+    def test_underscore_prefixed_dict_keys_still_resolve(self) -> None:
+        service = self._service()
+        response = service.evaluate("$item._id", {"item": {"_id": "abc-123"}})
+        self.assertIsNone(response.error)
+        self.assertEqual(response.result, "abc-123")
+        mapped = service.evaluate(
+            '$arr.map("item._id")',
+            {"arr": [{"_id": "a"}, {"_id": "b"}]},
+        )
+        self.assertIsNone(mapped.error)
+        self.assertEqual(mapped.result, ["a", "b"])
 
 
 class TestWorkflowMetadataVariables(unittest.TestCase):

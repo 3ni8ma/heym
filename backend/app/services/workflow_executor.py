@@ -28,7 +28,7 @@ from typing import Any
 from urllib.parse import quote, unquote, urljoin, urlparse
 
 import httpx
-from simpleeval import DEFAULT_FUNCTIONS, EvalWithCompoundTypes, SimpleEval
+from simpleeval import DEFAULT_FUNCTIONS, EvalWithCompoundTypes, FeatureNotAvailable, SimpleEval
 
 from app.api.data_tables import (
     _coerce_row_data,  # noqa: F401 - public patch alias for node handlers
@@ -78,6 +78,52 @@ _DOTDICT_BUILTIN_METHOD_NAMES: frozenset[str] = frozenset(
 )
 _ITEM_DOT_PATH_RE = re.compile(r"^item(?:\.[a-zA-Z_][a-zA-Z0-9_]*)+$")
 _ITEM_REF_IN_TEMPLATE_RE = re.compile(r"item\.[a-zA-Z_][a-zA-Z0-9_]*\b(?!\()")
+
+
+def _is_private_python_attr(name: str) -> bool:
+    """True for Python private/dunder names. Dictionary keys like ``_id`` are not this check."""
+    return bool(name) and name.startswith("_")
+
+
+def _guarded_lookup(value: object, part: str) -> object | None:
+    """Resolve one dotted path segment without private Python attribute access.
+
+    Dictionary keys (including ``_id``) are read with ``.get``. Attribute lookup
+    on non-dict objects rejects any name that starts with ``_``.
+    """
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return value.get(part)
+    if _is_private_python_attr(part):
+        return None
+    if hasattr(value, part):
+        return getattr(value, part)
+    return None
+
+
+def _resolve_guarded_dot_path(value: object, parts: list[str]) -> object | None:
+    """Walk ``parts`` with :func:`_guarded_lookup`. Shared by all DotList item-expression paths."""
+    current = value
+    for part in parts:
+        if not part:
+            return None
+        current = _guarded_lookup(current, part)
+        if current is None:
+            return None
+    return current
+
+
+def _sandbox_rejected_private_access(exc: BaseException, expr: str) -> bool:
+    """True when simpleeval refused a dunder attribute or disallowed call.
+
+    Single-underscore dict keys such as ``_id`` still go through the guarded fallback.
+    """
+    if "__" not in expr:
+        return False
+    return isinstance(exc, FeatureNotAvailable) or type(exc).__name__ == "FeatureNotAvailable"
+
+
 _DOLLAR_NAME_RE = re.compile(r"\$([a-zA-Z_][a-zA-Z0-9_]*)")
 _ITEM_EXPRESSION_STRING_START_RE = re.compile(r"\.(?:distinctBy|distinct_by|filter|map|sort)\(\s*$")
 _POSTGRES_UNSAFE_JSON_STRING_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\ud800-\udfff]")
@@ -910,18 +956,7 @@ class DotList(list):
         if expr == "item":
             return item
         if expr.startswith("item."):
-            path = expr[5:].split(".")
-            value = item
-            for part in path:
-                if value is None:
-                    return None
-                if isinstance(value, dict):
-                    value = value.get(part)
-                elif hasattr(value, part):
-                    value = getattr(value, part)
-                else:
-                    return None
-            return value
+            return _resolve_guarded_dot_path(item, expr[5:].split("."))
         return item
 
     def flat(self, depth: int = 1) -> "DotList":
@@ -979,16 +1014,7 @@ class DotList(list):
         has_operator = any(op in expr for op in operators)
 
         if not has_operator and _ITEM_DOT_PATH_RE.fullmatch(expr):
-            path = expr[5:].split(".")
-            value = item
-            for part in path:
-                if isinstance(value, dict):
-                    value = value.get(part)
-                elif hasattr(value, part):
-                    value = getattr(value, part)
-                else:
-                    return None
-            return value
+            return _resolve_guarded_dot_path(item, expr[5:].split("."))
 
         try:
             wrapped_item = _wrap_value(item)
@@ -1006,16 +1032,7 @@ class DotList(list):
                     return arg
                 arg_str = arg.strip()
                 if _ITEM_DOT_PATH_RE.fullmatch(arg_str):
-                    path = arg_str[5:].split(".")
-                    value = wrapped_item
-                    for part in path:
-                        if isinstance(value, dict):
-                            value = value.get(part)
-                        elif hasattr(value, part):
-                            value = getattr(value, part)
-                        else:
-                            return None
-                    return value
+                    return _resolve_guarded_dot_path(wrapped_item, arg_str[5:].split("."))
                 if arg_str.startswith("item["):
                     import re as _re
 
@@ -1034,6 +1051,8 @@ class DotList(list):
             def get_func(obj, key, default=None):
                 if isinstance(obj, dict):
                     return obj.get(key, default)
+                if isinstance(key, str) and _is_private_python_attr(key):
+                    return default
                 return getattr(obj, key, default) if hasattr(obj, key) else default
 
             inherited_names.update(
@@ -5803,9 +5822,7 @@ class WorkflowExecutor:
             )
             return evaluator.eval(expr, previously_parsed=_parse_expression_tree(expr))
         except Exception as e:
-            if isinstance(e, ExpressionFunctionError):
-                raise
-            return self._resolve_simple_expression(expr, combined)
+            return self._fallback_after_eval_error(e, expr, combined)
 
     def _string_concat_leaf_nodes(self, node: ast.AST) -> list[ast.AST] | None:
         """Flatten a safe string-concat ``+`` chain into leaf nodes for one-shot joining."""
@@ -6279,9 +6296,7 @@ class WorkflowExecutor:
             return self._serialize_result(result)
         except Exception as e:
             # Critical: expression functions that indicate workflow-breaking failures must propagate.
-            if isinstance(e, ExpressionFunctionError):
-                raise
-            result = self._resolve_simple_expression(expr, combined)
+            result = self._fallback_after_eval_error(e, expr, combined)
             if raw:
                 return result
             if preserve_type:
@@ -6312,8 +6327,8 @@ class WorkflowExecutor:
                 if isinstance(result, str):
                     return f'"{result}"'
                 return str(result)
-            except Exception:
-                result = self._resolve_simple_expression(expr, combined)
+            except Exception as e:
+                result = self._fallback_after_eval_error(e, expr, combined)
                 if result is None:
                     return "None"
                 if isinstance(result, str):
@@ -6339,6 +6354,14 @@ class WorkflowExecutor:
             if isinstance(e, ExpressionFunctionError):
                 raise
             return processed
+
+    def _fallback_after_eval_error(self, exc: BaseException, expr: str, combined: dict) -> object:
+        """Use the simple-expression fallback only when the sandbox did not reject private access."""
+        if isinstance(exc, ExpressionFunctionError):
+            raise
+        if _sandbox_rejected_private_access(exc, expr):
+            return None
+        return self._resolve_simple_expression(expr, combined)
 
     def _resolve_simple_expression(self, expr: str, combined: dict) -> object:
         try:
@@ -6416,6 +6439,8 @@ class WorkflowExecutor:
                 elif method_name == "length" and isinstance(value, (str, list)):
                     value = len(value)
                 elif method_args is not None:
+                    if _is_private_python_attr(method_name):
+                        return None
                     if isinstance(value, dict) and method_name == "get":
                         parsed_args = []
                         for arg in method_args:
@@ -6430,26 +6455,6 @@ class WorkflowExecutor:
                             else:
                                 parsed_args.append(self._resolve_simple_expression(arg, combined))
                         value = value.get(*parsed_args) if parsed_args else None
-                    elif hasattr(value, method_name):
-                        attr = getattr(value, method_name)
-                        if callable(attr) and method_args is not None:
-                            parsed_args = []
-                            for arg in method_args:
-                                if (arg.startswith('"') and arg.endswith('"')) or (
-                                    arg.startswith("'") and arg.endswith("'")
-                                ):
-                                    parsed_args.append(arg[1:-1])
-                                elif arg.isdigit() or (arg.startswith("-") and arg[1:].isdigit()):
-                                    parsed_args.append(int(arg))
-                                elif arg.replace(".", "", 1).isdigit():
-                                    parsed_args.append(float(arg))
-                                else:
-                                    parsed_args.append(
-                                        self._resolve_simple_expression(arg, combined)
-                                    )
-                            value = attr(*parsed_args)
-                        else:
-                            value = attr
                     else:
                         return None
                 else:
@@ -6875,12 +6880,7 @@ class WorkflowExecutor:
         self, value: object, splitp: tuple[str, list[str]]
     ) -> object | None:
         base, inners = splitp
-        if isinstance(value, dict):
-            cur = value.get(base)
-        elif hasattr(value, base):
-            cur = getattr(value, base, None)
-        else:
-            return None
+        cur = _guarded_lookup(value, base)
         for inner in inners:
             key = self._coerce_subscript_key(inner)
             if cur is None:

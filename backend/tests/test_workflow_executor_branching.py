@@ -1,3 +1,5 @@
+import os
+import tempfile
 import unittest
 import uuid
 from unittest.mock import patch
@@ -625,6 +627,107 @@ class TestConditionEvalRejectsDunderTraversal(unittest.TestCase):
                 None,
             )
         )
+
+
+class TestExpressionEvalRejectsDotListAndFallbackSandboxEscape(unittest.TestCase):
+    """Regression for GHSA-87x2-9jwx-7gh4.
+
+    simpleeval hardening from GHSA-pm6h covers condition/substitution, but DotList
+    item expressions and the simpleeval fallback resolver walked dunders with raw
+    getattr. These tests pin the three PoC expressions and keep ``_id`` dict keys
+    working.
+    """
+
+    def _executor(self) -> WorkflowExecutor:
+        return WorkflowExecutor(nodes=[], edges=[])
+
+    def test_map_dunder_path_does_not_return_bound_method(self) -> None:
+        executor = self._executor()
+        result = executor.resolve_expression(
+            '$arr.map("item.__class__.__base__.__subclasses__")',
+            {"arr": ["x"]},
+            preserve_type=True,
+        )
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 1)
+        self.assertFalse(callable(result[0]))
+        self.assertNotIsInstance(result[0], type)
+        self.assertIsNone(result[0])
+
+    def test_calling_mapped_dunder_method_does_not_list_subclasses(self) -> None:
+        executor = self._executor()
+        mapped = executor.resolve_expression(
+            '$arr.map("item.__class__.__base__.__subclasses__")[0]',
+            {"arr": ["x"]},
+            preserve_type=True,
+        )
+        result = executor.resolve_expression("$m()", {"m": mapped}, preserve_type=True)
+        if isinstance(result, (list, tuple)) and result:
+            self.assertFalse(
+                all(isinstance(item, type) for item in result),
+                f"Bound-method call returned loaded classes: {result!r}",
+            )
+        else:
+            self.assertFalse(callable(result))
+
+    def test_init_globals_os_system_does_not_execute(self) -> None:
+        class _Probe:
+            def __init__(self) -> None:
+                pass
+
+        fd, marker = tempfile.mkstemp(prefix="heym_expr_rce_reg_")
+        os.close(fd)
+        os.unlink(marker)
+        try:
+            payload = f'$p.__init__.__globals__["os"].system("touch {marker}")'
+            result = self._executor().resolve_expression(
+                payload,
+                {"p": _Probe},
+                preserve_type=True,
+            )
+            self.assertFalse(
+                os.path.exists(marker),
+                f"PoC executed; marker created, result={result!r}",
+            )
+            self.assertNotEqual(result, 0)
+        finally:
+            if os.path.exists(marker):
+                os.unlink(marker)
+
+    def test_underscore_prefixed_dict_keys_still_resolve(self) -> None:
+        executor = self._executor()
+        self.assertEqual(
+            executor.resolve_expression(
+                "$item._id",
+                {"item": {"_id": "abc-123"}},
+                preserve_type=True,
+            ),
+            "abc-123",
+        )
+        self.assertEqual(
+            executor.resolve_expression(
+                '$arr.map("item._id")',
+                {"arr": [{"_id": "a"}, {"_id": "b"}]},
+                preserve_type=True,
+            ),
+            ["a", "b"],
+        )
+        self.assertEqual(
+            executor.resolve_expression(
+                '$arr.distinctBy("item._id").map("item._id")',
+                {"arr": [{"_id": "a"}, {"_id": "a"}, {"_id": "b"}]},
+                preserve_type=True,
+            ),
+            ["a", "b"],
+        )
+
+    def test_legitimate_map_item_id_still_works(self) -> None:
+        result = self._executor().resolve_expression(
+            '$arr.map("item.id")',
+            {"arr": [{"id": 1}, {"id": 2}]},
+            preserve_type=True,
+        )
+        self.assertEqual(result, [1, 2])
 
 
 if __name__ == "__main__":
