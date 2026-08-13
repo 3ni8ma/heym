@@ -6866,13 +6866,10 @@ export function usePropertiesPanelController() {
     credentialId: string | undefined,
     currentModel?: string,
   ): { value: string; label: string }[] {
-    if (!credentialId) return [{ value: "", label: "Select credential first..." }];
+    if (!credentialId) return [];
     const cached = playwrightAiStepModelsCache.value[credentialId];
     if (cached) {
-      const options: { value: string; label: string }[] = [
-        { value: "", label: "Select model..." },
-        ...cached,
-      ];
+      const options: { value: string; label: string }[] = [...cached];
 
       if (
         currentModel &&
@@ -6890,7 +6887,7 @@ export function usePropertiesPanelController() {
     // While loading: keep current model in options so save preserves it
     return currentModel
       ? [{ value: currentModel, label: `${currentModel} (loading...)` }]
-      : [{ value: "", label: "Loading..." }];
+      : [];
   }
 
   interface PlaywrightStepSection {
@@ -8921,6 +8918,21 @@ export function usePropertiesPanelController() {
   });
 
   const imageLightboxSrc = ref<string | null>(null);
+  const imageLightboxSrcs = ref<string[]>([]);
+
+  function openImageLightbox(src: string, gallery: readonly string[]): void {
+    const unique = [...new Set(gallery.length > 0 ? gallery : [src])];
+    if (!unique.includes(src)) {
+      unique.unshift(src);
+    }
+    imageLightboxSrcs.value = unique;
+    imageLightboxSrc.value = src;
+  }
+
+  function closeImageLightbox(): void {
+    imageLightboxSrc.value = null;
+    imageLightboxSrcs.value = [];
+  }
 
 
   async function copyOutput(): Promise<void> {
@@ -8972,7 +8984,7 @@ export function usePropertiesPanelController() {
     }
     if (e.key === "Escape" && imageLightboxSrc.value) {
       e.stopPropagation();
-      imageLightboxSrc.value = null;
+      closeImageLightbox();
       return;
     }
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === "o") {
@@ -9674,6 +9686,9 @@ export function usePropertiesPanelController() {
     displayNodeOutput,
     nodeOutputImageSrcs,
     imageLightboxSrc,
+    imageLightboxSrcs,
+    openImageLightbox,
+    closeImageLightbox,
     copyOutput,
     canVisitWorkflow,
     visitWorkflow,

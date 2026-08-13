@@ -4,6 +4,7 @@ import Button from "@/components/ui/Button.vue";
 import ExpressionInput from "@/components/ui/ExpressionInput.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
+import SearchableSelect from "@/components/ui/SearchableSelect.vue";
 import Select from "@/components/ui/Select.vue";
 import Textarea from "@/components/ui/Textarea.vue";
 import type { PlaywrightStepAction } from "@/types/workflow";
@@ -485,13 +486,19 @@ with sync_playwright() as p:
                     @update:model-value="(v) => { updatePlaywrightStep(section.key, index, 'credentialId', v); loadPlaywrightAiStepModels(v as string); }"
                   />
                 </div>
-                <div class="space-y-1">
+                <div
+                  class="space-y-1"
+                  data-testid="playwright-ai-step-model-field"
+                >
                   <Label class="text-xs">Model</Label>
-                  <Select
+                  <SearchableSelect
                     :model-value="step.model || ''"
                     :options="playwrightAiStepModelOptions(step.credentialId, step.model)"
+                    :placeholder="step.credentialId ? 'Select model...' : 'Select credential first...'"
+                    search-placeholder="Search models..."
+                    :empty-text="step.credentialId ? 'No models found.' : 'Select a credential first.'"
                     :disabled="!step.credentialId"
-                    @update:model-value="updatePlaywrightStep(section.key, index, 'model', $event)"
+                    @update:model-value="updatePlaywrightStep(section.key, index, 'model', $event || '')"
                   />
                 </div>
                 <div class="flex flex-col gap-2 pt-1">
@@ -745,6 +752,29 @@ with sync_playwright() as p:
         </div>
         <p class="text-xs text-muted-foreground">
           Only applies in local development. Docker always runs headless (no display).
+        </p>
+      </div>
+      <div
+        class="flex flex-col gap-1"
+        data-testid="playwright-stealth-field"
+      >
+        <div class="flex items-center gap-2">
+          <input
+            id="playwright-stealth"
+            type="checkbox"
+            class="h-4 w-4 rounded border-input bg-background"
+            :checked="selectedNode.data.playwrightStealth === true"
+            @change="updateNodeData('playwrightStealth', ($event.target as HTMLInputElement).checked)"
+          >
+          <Label
+            for="playwright-stealth"
+            class="text-sm font-normal"
+          >
+            Reduce automation flags
+          </Label>
+        </div>
+        <p class="text-xs text-muted-foreground">
+          Steps mode only. Uses a standard Chrome user agent and turns off common Playwright signals so sites are less likely to treat the session as a bot.
         </p>
       </div>
       <div class="flex flex-col gap-1">
