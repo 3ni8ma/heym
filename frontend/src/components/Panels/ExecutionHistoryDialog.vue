@@ -260,11 +260,9 @@ async function cancelActiveExecution(item: ActiveExecutionItem): Promise<void> {
     // 404 = already finished, treat as success
   } finally {
     isCancellingId.value = null;
-    // If the cancelled execution belongs to the currently open workflow,
-    // also abort the live SSE stream so the canvas stops mid-run.
-    if (workflowStore.isExecuting && workflowStore.currentWorkflow?.id === item.workflow_id) {
-      await workflowStore.stopExecution();
-    }
+    // Only abort the live SSE stream when the canvas is on this very execution; a
+    // second run of the same workflow must survive.
+    await workflowStore.stopExecutionIfCurrent(item.execution_id);
     await refreshHistory();
   }
 }
