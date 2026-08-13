@@ -37,6 +37,7 @@ import type {
   LLMModel,
   NotionDataSourcesResponse,
   NotionPagesResponse,
+  OpenCodeUsage,
   SupabaseColumnsResponse,
   ClickHouseColumnsResponse,
   SupabaseTablesResponse,
@@ -1351,6 +1352,11 @@ export const credentialsApi = {
 
   getCodexUsage: async (id: string): Promise<CodexUsage> => {
     const response = await api.get<CodexUsage>(`/credentials/${id}/codex-usage`);
+    return response.data;
+  },
+
+  getOpenCodeUsage: async (id: string): Promise<OpenCodeUsage> => {
+    const response = await api.get<OpenCodeUsage>(`/credentials/${id}/opencode-usage`);
     return response.data;
   },
 
