@@ -3,7 +3,7 @@ import copy
 import json
 import logging
 import uuid
-from collections.abc import Iterator
+from collections.abc import Coroutine, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -152,6 +152,16 @@ def _non_blocking_thread_pool(max_workers: int) -> Iterator[ThreadPoolExecutor]:
         pool.shutdown(wait=False, cancel_futures=True)
 
 
+_DETACHED_TASKS: set[asyncio.Task[None]] = set()
+
+
+def _spawn_detached_task(coro: Coroutine[Any, Any, None]) -> None:
+    """Run a coroutine outside the request that started it, holding a strong reference."""
+    task = asyncio.create_task(coro)
+    _DETACHED_TASKS.add(task)
+    task.add_done_callback(_DETACHED_TASKS.discard)
+
+
 def _coerce_bool(value: object, *, default: bool = False) -> bool:
     if value is None:
         return default
@@ -278,6 +288,120 @@ def _persist_playwright_save_steps(
             modified = _apply_saved_steps(steps, save_steps) or modified
     if modified:
         flag_modified(workflow, "nodes")
+
+
+async def persist_stream_execution_result(
+    db: AsyncSession,
+    *,
+    workflow: Workflow,
+    execution_id: uuid.UUID,
+    enriched_inputs: dict,
+    trigger_source: str,
+    raw_body: Any,
+    query_params: dict[str, str],
+    workflow_cache: dict[str, dict],
+    credentials_owner_id: uuid.UUID,
+    final_result: dict,
+    was_cancelled: bool,
+) -> bool:
+    """Record a streamed run's terminal state. Returns False when there is nothing to write.
+
+    Pending (HITL/Codex) runs are persisted while streaming because their history id has to
+    reach the client, so they are skipped here.
+    """
+    if was_cancelled:
+        db.add(
+            ExecutionHistory(
+                id=execution_id,
+                workflow_id=workflow.id,
+                inputs=enriched_inputs,
+                outputs={},
+                node_results=[],
+                status="cancelled",
+                execution_time_ms=0,
+                trigger_source=trigger_source,
+            )
+        )
+        await upsert_workflow_analytics_snapshot(
+            db,
+            workflow_id=workflow.id,
+            owner_id=workflow.owner_id,
+            workflow_name_snapshot=workflow.name,
+            status="cancelled",
+            execution_time_ms=0.0,
+        )
+        return True
+
+    if not final_result or final_result.get("status") == "pending":
+        return False
+
+    status_value = final_result.get("status", "error")
+    node_results = final_result.get("node_results", [])
+    sub_workflow_executions = final_result.get("sub_workflow_executions", [])
+
+    if workflow.cache_ttl_seconds and workflow.cache_ttl_seconds > 0 and status_value == "success":
+        await response_cache.set(
+            db,
+            str(workflow.id),
+            raw_body,
+            query_params,
+            {"outputs": final_result.get("outputs", {})},
+            workflow.cache_ttl_seconds,
+        )
+
+    if status_value == "success":
+        _persist_playwright_save_steps(workflow, node_results, db)
+
+    await _persist_global_variables_from_execution(
+        db,
+        credentials_owner_id,
+        workflow.nodes,
+        workflow_cache,
+        node_results,
+        sub_workflow_executions,
+    )
+    db.add(
+        ExecutionHistory(
+            id=execution_id,
+            workflow_id=workflow.id,
+            inputs=enriched_inputs,
+            outputs=final_result.get("outputs", {}),
+            node_results=node_results,
+            status=status_value,
+            execution_time_ms=final_result.get("execution_time_ms", 0),
+            trigger_source=trigger_source,
+        )
+    )
+    await upsert_workflow_analytics_snapshot(
+        db,
+        workflow_id=workflow.id,
+        owner_id=workflow.owner_id,
+        workflow_name_snapshot=workflow.name,
+        status=status_value,
+        execution_time_ms=float(final_result.get("execution_time_ms", 0)),
+    )
+
+    for sub_exec in sub_workflow_executions:
+        db.add(
+            ExecutionHistory(
+                workflow_id=uuid.UUID(sub_exec["workflow_id"]),
+                inputs=sub_exec["inputs"],
+                outputs=sub_exec["outputs"],
+                node_results=sub_exec.get("node_results", []),
+                status=sub_exec["status"],
+                execution_time_ms=sub_exec["execution_time_ms"],
+                trigger_source=sub_exec.get("trigger_source", "SUB_WORKFLOW"),
+            )
+        )
+        await upsert_workflow_analytics_snapshot(
+            db,
+            workflow_id=uuid.UUID(sub_exec["workflow_id"]),
+            owner_id=None,
+            workflow_name_snapshot=sub_exec.get("workflow_name") or "Sub-workflow",
+            status=sub_exec["status"],
+            execution_time_ms=float(sub_exec["execution_time_ms"]),
+        )
+    return True
 
 
 async def _finalize_allow_downstream_history(
@@ -3327,6 +3451,7 @@ async def execute_workflow_stream(
     final_result: dict = {}
     executor_holder: dict = {}
     was_cancelled: bool = False
+    query_params = dict(request.query_params)
 
     def run_executor():
         nonlocal final_result, was_cancelled
@@ -3395,11 +3520,48 @@ async def execute_workflow_stream(
             else:
                 clear_active_execution(execution_id)
 
+    async def persist_terminal_result() -> None:
+        async with async_session_maker() as session:
+            run_workflow = await session.get(Workflow, workflow_id)
+            if run_workflow is None:
+                return
+            written = await persist_stream_execution_result(
+                session,
+                workflow=run_workflow,
+                execution_id=execution_id,
+                enriched_inputs=enriched_inputs,
+                trigger_source=trigger_source,
+                raw_body=raw_body,
+                query_params=query_params,
+                workflow_cache=workflow_cache,
+                credentials_owner_id=credentials_owner_id,
+                final_result=final_result,
+                was_cancelled=was_cancelled,
+            )
+            if written:
+                await session.commit()
+
+    async def finalize_execution(run_future: asyncio.Future[Any]) -> None:
+        """Persist the run once it ends, whether or not anyone is still reading the stream.
+
+        Starlette cancels the response task the moment the client disconnects, so a run
+        recorded by ``event_generator`` would finish on the server and leave no history.
+        """
+        try:
+            await run_future
+        except Exception:
+            logger.exception("Streaming execution %s failed", execution_id)
+        try:
+            await persist_terminal_result()
+        except Exception:
+            logger.exception("Could not persist execution %s", execution_id)
+
     async def event_generator():
         nonlocal final_result, was_cancelled
         loop = asyncio.get_event_loop()
         with _non_blocking_thread_pool(max_workers=1) as pool:
             future = loop.run_in_executor(pool, run_executor)
+            _spawn_detached_task(finalize_execution(future))
             last_heartbeat_at = loop.time()
             yield (
                 "data: "
@@ -3565,97 +3727,6 @@ async def execute_workflow_stream(
                 except Exception:
                     cancel_event.set()
                     break
-
-            if was_cancelled:
-                cancelled_entry = ExecutionHistory(
-                    id=execution_id,
-                    workflow_id=workflow.id,
-                    inputs=enriched_inputs,
-                    outputs={},
-                    node_results=[],
-                    status="cancelled",
-                    execution_time_ms=0,
-                    trigger_source=trigger_source,
-                )
-                db.add(cancelled_entry)
-                await upsert_workflow_analytics_snapshot(
-                    db,
-                    workflow_id=workflow.id,
-                    owner_id=workflow.owner_id,
-                    workflow_name_snapshot=workflow.name,
-                    status="cancelled",
-                    execution_time_ms=0.0,
-                )
-                await db.flush()
-            elif final_result and final_result.get("status") != "pending":
-                if (
-                    workflow.cache_ttl_seconds
-                    and workflow.cache_ttl_seconds > 0
-                    and final_result.get("status") == "success"
-                ):
-                    await response_cache.set(
-                        db,
-                        workflow_id_str,
-                        raw_body,
-                        dict(request.query_params),
-                        {"outputs": final_result.get("outputs", {})},
-                        workflow.cache_ttl_seconds,
-                    )
-
-                if final_result.get("status") == "success":
-                    _persist_playwright_save_steps(
-                        workflow, final_result.get("node_results", []), db
-                    )
-
-                await _persist_global_variables_from_execution(
-                    db,
-                    credentials_owner_id,
-                    workflow.nodes,
-                    workflow_cache,
-                    final_result.get("node_results", []),
-                    final_result.get("sub_workflow_executions", []),
-                )
-                history_entry = ExecutionHistory(
-                    id=execution_id,
-                    workflow_id=workflow.id,
-                    inputs=enriched_inputs,
-                    outputs=final_result.get("outputs", {}),
-                    node_results=final_result.get("node_results", []),
-                    status=final_result.get("status", "error"),
-                    execution_time_ms=final_result.get("execution_time_ms", 0),
-                    trigger_source=trigger_source,
-                )
-                db.add(history_entry)
-                await upsert_workflow_analytics_snapshot(
-                    db,
-                    workflow_id=workflow.id,
-                    owner_id=workflow.owner_id,
-                    workflow_name_snapshot=workflow.name,
-                    status=final_result.get("status", "error"),
-                    execution_time_ms=float(final_result.get("execution_time_ms", 0)),
-                )
-
-                for sub_exec in final_result.get("sub_workflow_executions", []):
-                    sub_history = ExecutionHistory(
-                        workflow_id=uuid.UUID(sub_exec["workflow_id"]),
-                        inputs=sub_exec["inputs"],
-                        outputs=sub_exec["outputs"],
-                        node_results=sub_exec.get("node_results", []),
-                        status=sub_exec["status"],
-                        execution_time_ms=sub_exec["execution_time_ms"],
-                        trigger_source=sub_exec.get("trigger_source", "SUB_WORKFLOW"),
-                    )
-                    db.add(sub_history)
-                    await upsert_workflow_analytics_snapshot(
-                        db,
-                        workflow_id=uuid.UUID(sub_exec["workflow_id"]),
-                        owner_id=None,
-                        workflow_name_snapshot=sub_exec.get("workflow_name") or "Sub-workflow",
-                        status=sub_exec["status"],
-                        execution_time_ms=float(sub_exec["execution_time_ms"]),
-                    )
-
-                await db.flush()
 
     return StreamingResponse(
         event_generator(),

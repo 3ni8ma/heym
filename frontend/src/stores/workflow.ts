@@ -1945,6 +1945,12 @@ export const useWorkflowStore = defineStore("workflow", () => {
     currentExecutionWorkflowId.value = null;
   }
 
+  /** Stop the canvas run only when it is the cancelled one, so a sibling run keeps going. */
+  async function stopExecutionIfCurrent(executionId: string): Promise<void> {
+    if (!isExecuting.value || currentExecutionId.value !== executionId) return;
+    await stopExecution();
+  }
+
   function clearWorkflow(): void {
     abortController.value?.abort();
     abortController.value = null;
@@ -3578,6 +3584,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     observeExecution,
     disconnectExecutionObservation,
     stopExecution,
+    stopExecutionIfCurrent,
     clearWorkflow,
     clearExecution,
     clearCanvas,
