@@ -96,6 +96,21 @@ class CodexUsageResponse(BaseModel):
     error: str | None = None
 
 
+class OpenCodeUsageWindow(BaseModel):
+    key: str  # "rolling" | "weekly" | "monthly"
+    label: str  # e.g. "5 hours", "Weekly", "Monthly"
+    used_percent: float
+    status: str = "ok"  # "ok" | "rate-limited"
+    resets_at: str | None = None
+    reset_after_seconds: int | None = None
+
+
+class OpenCodeUsageResponse(BaseModel):
+    available: bool
+    windows: list[OpenCodeUsageWindow] = []
+    error: str | None = None
+
+
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str

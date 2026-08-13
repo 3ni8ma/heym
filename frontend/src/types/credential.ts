@@ -103,6 +103,21 @@ export interface CodexUsage {
   error?: string | null;
 }
 
+export interface OpenCodeUsageWindow {
+  key: string;
+  label: string;
+  used_percent: number;
+  status: string;
+  resets_at?: string | null;
+  reset_after_seconds?: number | null;
+}
+
+export interface OpenCodeUsage {
+  available: boolean;
+  windows: OpenCodeUsageWindow[];
+  error?: string | null;
+}
+
 export interface CredentialConfigOpenAI {
   api_key: string;
 }

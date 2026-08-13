@@ -32,6 +32,7 @@ from app.models.schemas import (
     LLMModel,
     NotionDataSourcesResponse,
     NotionPagesResponse,
+    OpenCodeUsageResponse,
     SupabaseColumnsResponse,
     SupabaseTablesResponse,
     TeamShareRequest,
@@ -45,6 +46,7 @@ from app.services.embedding import (
     embedding_config_from_credential,
 )
 from app.services.encryption import decrypt_config, encrypt_config, mask_api_key
+from app.services.opencode_usage_service import fetch_opencode_usage
 from app.services.vector_store import VECTOR_STORE_BACKENDS
 from app.services.vector_store_pg import pgvector_dimension_message
 
@@ -1445,6 +1447,31 @@ async def get_codex_usage(
         credential_id=str(credential.id),
         access_token=str(config.get("access_token") or ""),
         account_id=str(config.get("account_id") or "") or None,
+    )
+
+
+@router.get("/{credential_id}/opencode-usage", response_model=OpenCodeUsageResponse)
+async def get_opencode_usage(
+    credential_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> OpenCodeUsageResponse:
+    credential = await _get_accessible_credential(db, credential_id, current_user)
+    if credential is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Credential not found",
+        )
+    if credential.type != CredentialType.opencode:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Usage is only available for OpenCode credentials",
+        )
+    config = decrypt_config(credential.encrypted_config)
+    return await fetch_opencode_usage(
+        credential_id=str(credential.id),
+        api_key=str(config.get("api_key") or ""),
+        base_url=str(config.get("base_url") or ""),
     )
 
 

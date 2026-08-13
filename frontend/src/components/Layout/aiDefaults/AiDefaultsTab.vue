@@ -1,9 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 
-import type { CodexUsage, CredentialListItem, LLMModel } from "@/types/credential";
+import type {
+  CodexUsage,
+  CredentialListItem,
+  LLMModel,
+  OpenCodeUsage,
+} from "@/types/credential";
 
 import CodexUsageCard from "@/components/Layout/aiDefaults/CodexUsageCard.vue";
+import OpenCodeUsageCard from "@/components/Layout/aiDefaults/OpenCodeUsageCard.vue";
 import Button from "@/components/ui/Button.vue";
 import Label from "@/components/ui/Label.vue";
 import SearchableSelect from "@/components/ui/SearchableSelect.vue";
@@ -37,13 +43,14 @@ const preferredInvalid = computed(() => aiDefaults.preferredStatus(credentials.v
 const codexCreds = ref<CredentialListItem[]>([]);
 const openCodeCreds = ref<CredentialListItem[]>([]);
 const usageByCred = ref<Record<string, CodexUsage | null>>({});
+const openCodeUsageByCred = ref<Record<string, OpenCodeUsage | null>>({});
 const usageLoading = ref<Record<string, boolean>>({});
 
-async function loadCodexUsage(): Promise<void> {
+async function loadCodingUsage(): Promise<void> {
   codexCreds.value = await credentialsApi.listByType("codex");
   openCodeCreds.value = await credentialsApi.listByType("opencode");
-  await Promise.all(
-    codexCreds.value.map(async (c) => {
+  await Promise.all([
+    ...codexCreds.value.map(async (c) => {
       usageLoading.value = { ...usageLoading.value, [c.id]: true };
       try {
         usageByCred.value = {
@@ -56,7 +63,20 @@ async function loadCodexUsage(): Promise<void> {
         usageLoading.value = { ...usageLoading.value, [c.id]: false };
       }
     }),
-  );
+    ...openCodeCreds.value.map(async (c) => {
+      usageLoading.value = { ...usageLoading.value, [c.id]: true };
+      try {
+        openCodeUsageByCred.value = {
+          ...openCodeUsageByCred.value,
+          [c.id]: await credentialsApi.getOpenCodeUsage(c.id),
+        };
+      } catch {
+        openCodeUsageByCred.value = { ...openCodeUsageByCred.value, [c.id]: null };
+      } finally {
+        usageLoading.value = { ...usageLoading.value, [c.id]: false };
+      }
+    }),
+  ]);
 }
 
 async function loadModels(credId: string): Promise<void> {
@@ -98,7 +118,7 @@ onMounted(async () => {
     await loadModels(selectedCredentialId.value);
     selectedModel.value = authStore.user?.preferred_model ?? "";
   }
-  void loadCodexUsage();
+  void loadCodingUsage();
 });
 </script>
 
@@ -151,7 +171,7 @@ onMounted(async () => {
           variant="outline"
           size="sm"
           type="button"
-          @click="loadCodexUsage"
+          @click="loadCodingUsage"
         >
           Refresh
         </Button>
@@ -163,21 +183,13 @@ onMounted(async () => {
         :usage="usageByCred[c.id] ?? null"
         :loading="usageLoading[c.id] ?? false"
       />
-      <div
+      <OpenCodeUsageCard
         v-for="c in openCodeCreds"
         :key="c.id"
-        class="rounded-lg border border-border bg-card/60 p-3"
-      >
-        <div class="flex items-center justify-between gap-2">
-          <span class="text-sm font-medium truncate">{{ c.name }}</span>
-          <span class="text-[10px] rounded px-1.5 py-0.5 bg-muted text-muted-foreground">
-            OpenCode
-          </span>
-        </div>
-        <p class="text-xs text-muted-foreground mt-1">
-          Usage unavailable — this gateway does not expose usage data.
-        </p>
-      </div>
+        :name="c.name"
+        :usage="openCodeUsageByCred[c.id] ?? null"
+        :loading="usageLoading[c.id] ?? false"
+      />
     </div>
 
     <div class="flex justify-end gap-3 pt-2">

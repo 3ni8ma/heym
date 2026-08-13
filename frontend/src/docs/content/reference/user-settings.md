@@ -86,7 +86,7 @@ You can still change the credential and model per surface at any time; the prefe
 
 For each **Codex** credential (including shared ones) the tab shows remaining rate-limit usage as a horizontal bar per active window — for example a **5 hours** window and/or a **Weekly** window, depending on your plan. Each bar shows the percentage of quota left and a reset countdown. A **Refresh** button re-fetches on demand (results are cached briefly on the server).
 
-**OpenCode** credentials are listed with a **"usage unavailable"** note: the OpenCode zen gateway does not expose remaining-quota data, so no bar can be shown.
+For each **OpenCode** credential the tab shows the OpenCode Go subscription windows — **5 hours**, **Weekly** and **Monthly** — as the same style of bar, read from the gateway's authenticated usage endpoint with that credential's API key. A window that has hit its cap is shown as **"limit reached"** in amber. If the key is invalid or the workspace has no Go subscription, the card says why instead of showing bars.
 
 ## Observability Tab
 
