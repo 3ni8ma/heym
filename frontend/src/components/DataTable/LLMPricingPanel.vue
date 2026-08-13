@@ -12,6 +12,18 @@ import Label from "@/components/ui/Label.vue";
 import { formatDate } from "@/lib/utils";
 import { llmPricingApi } from "@/services/api";
 
+interface Props {
+  initialModels?: string[];
+  embedded?: boolean;
+  autoOpenAddDialog?: boolean;
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  initialModels: () => [],
+  embedded: false,
+  autoOpenAddDialog: false,
+});
+
 const rows = ref<LLMPricingRow[]>([]);
 const syncStatus = ref<LLMPricingSyncStatus | null>(null);
 const loading = ref(false);
@@ -19,6 +31,7 @@ const syncing = ref(false);
 const clearing = ref(false);
 const error = ref("");
 const search = ref("");
+const isSearchFocused = ref(false);
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 let pollGeneration = 0;
 
@@ -49,6 +62,17 @@ const filteredRows = computed(() => {
 const customizedRowsCount = computed(
   () => rows.value.filter((row) => row.is_custom || row.is_override).length,
 );
+
+function rowMatchesModel(row: LLMPricingRow, model: string): boolean {
+  return row.model === model || (row.provider !== null && `${row.provider}/${row.model}` === model);
+}
+
+const suggestedModel = computed(() => {
+  const missingModel = props.initialModels.find(
+    (model) => !rows.value.some((row) => rowMatchesModel(row, model)),
+  );
+  return missingModel ?? props.initialModels[0] ?? "";
+});
 
 function stopPolling(): void {
   pollGeneration += 1;
@@ -156,6 +180,21 @@ async function clearAll(): Promise<void> {
   }
 }
 
+function openAddDialog(): void {
+  if (!addForm.value.model && suggestedModel.value) {
+    addForm.value = { ...addForm.value, model: suggestedModel.value };
+  }
+  showAddDialog.value = true;
+}
+
+function clearFocusedSearchOnEscape(): boolean {
+  if (!isSearchFocused.value || !search.value) {
+    return false;
+  }
+  search.value = "";
+  return true;
+}
+
 function startEdit(row: LLMPricingRow): void {
   editingId.value = row.id;
   editInput.value = {
@@ -239,6 +278,10 @@ function badgeFor(row: LLMPricingRow): { label: string; classes: string } | null
   return null;
 }
 
+if (props.autoOpenAddDialog) {
+  openAddDialog();
+}
+
 onMounted(() => {
   loadAll({ startPoll: true });
 });
@@ -246,12 +289,18 @@ onMounted(() => {
 onBeforeUnmount(() => {
   stopPolling();
 });
+
+defineExpose({ clearFocusedSearchOnEscape });
 </script>
 
 <template>
-  <div class="space-y-4">
+  <!-- Reserve the dialog's full height so the late-arriving rows cannot resize it. -->
+  <div :class="embedded ? 'flex min-h-[85vh] flex-col gap-4' : 'space-y-4'">
     <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-      <div class="min-w-0">
+      <div
+        v-if="!embedded"
+        class="min-w-0"
+      >
         <h2 class="text-xl font-semibold flex items-center gap-2">
           <Coins class="w-5 h-5" />
           LLM Cost Table
@@ -279,7 +328,10 @@ onBeforeUnmount(() => {
           </span>
         </div>
       </div>
-      <div class="flex flex-wrap items-center gap-2 md:flex-nowrap md:justify-end">
+      <div
+        class="flex flex-wrap items-center gap-2 md:flex-nowrap md:justify-end"
+        :class="{ 'md:ml-auto': embedded }"
+      >
         <Button
           variant="outline"
           size="sm"
@@ -291,7 +343,7 @@ onBeforeUnmount(() => {
         <Button
           variant="outline"
           size="sm"
-          @click="showAddDialog = true"
+          @click="openAddDialog"
         >
           <Plus class="w-4 h-4 mr-1" />
           <span class="hidden sm:inline">Add Custom Model</span>
@@ -314,6 +366,8 @@ onBeforeUnmount(() => {
     <Input
       v-model="search"
       placeholder="Search model or provider…"
+      @focus="isSearchFocused = true"
+      @blur="isSearchFocused = false"
     />
 
     <div
@@ -326,7 +380,7 @@ onBeforeUnmount(() => {
     <Card
       variant="flat"
       :hover="false"
-      class="p-0 overflow-hidden"
+      :class="embedded ? 'p-0 overflow-hidden flex-1' : 'p-0 overflow-hidden'"
     >
       <div class="overflow-x-auto">
         <table class="w-full min-w-[640px] text-sm">
