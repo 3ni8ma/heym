@@ -40,7 +40,7 @@ import { templatesApi } from "@/services/api";
 
 const TABS = [
   { id: "workflows", label: "Workflows", icon: Workflow },
-  { id: "board", label: "Board", icon: SquareKanban },
+  { id: "board", label: "Kanban Board", icon: SquareKanban },
   { id: "globalvariables", label: "Variables", icon: Variable },
   { id: "chat", label: "Chat", icon: MessageCircle },
   { id: "drive", label: "Drive", icon: HardDrive },
