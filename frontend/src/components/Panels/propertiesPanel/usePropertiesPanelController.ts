@@ -12,7 +12,7 @@ import {
   type Ref,
 } from "vue";
 import { useRouter } from "vue-router";
-import { AlertTriangle, Ban, BarChart3, Bot, Braces, Brain, Bug, CalendarClock, Clock, Database, FileJson, FileText, FolderOpen, GitBranch, GitMerge, Github, Globe, HardDrive, Inbox, ListTodo, Mail, MessageSquare, MonitorPlay, Play, Plug, Puzzle, Rabbit, Radio, Repeat, Search, Send, Server, Settings2, Sheet, ShieldAlert, Shuffle, StickyNote, Table2, Terminal, Type, Upload, Variable, XCircle } from "lucide-vue-next";
+import { AlertTriangle, Ban, BarChart3, Bot, Braces, Brain, Bug, CalendarClock, Clock, Code2, Database, FileJson, FileText, FolderOpen, GitBranch, GitMerge, Github, Globe, HardDrive, Inbox, ListTodo, Mail, MessageSquare, MonitorPlay, Play, Plug, Puzzle, Rabbit, Radio, Repeat, Search, Send, Server, Settings2, Sheet, ShieldAlert, Shuffle, StickyNote, Table2, Terminal, Type, Upload, Variable, XCircle } from "lucide-vue-next";
 import HeymIcon from "@/components/Nodes/HeymIcon.vue";
 import type { ClickHouseColumn, CredentialListItem, LLMModel, NotionDataSourceItem, NotionPageItem } from "@/types/credential";
 import type { AgentMCPConnection, AgentSkill, AgentSkillFile, ExecuteInputMapping, GuardrailCategory, InputField, MappingField, MCPTransportType, OutputSchemaField, PlaywrightStep, PlaywrightStepAction, WorkflowListItem } from "@/types/workflow";
@@ -114,6 +114,7 @@ export function usePropertiesPanelController() {
     merge: GitMerge,
     set: Settings2,
     converter: Repeat,
+    code: Code2,
     jsonOutputMapper: Braces,
     telegramTrigger: MessageSquare,
     telegram: MessageSquare,
@@ -176,6 +177,7 @@ export function usePropertiesPanelController() {
     merge: "node-merge",
     set: "node-set",
     converter: "node-set",
+    code: "node-set",
     jsonOutputMapper: "node-output",
     telegramTrigger: "node-telegram",
     telegram: "node-telegram",
@@ -238,6 +240,7 @@ export function usePropertiesPanelController() {
     merge: "merge-node",
     set: "set-node",
     converter: "converter-node",
+    code: "code-node",
     jsonOutputMapper: "json-output-mapper-node",
     telegramTrigger: "telegram-trigger-node",
     telegram: "telegram-node",
@@ -687,6 +690,7 @@ export function usePropertiesPanelController() {
   ];
   const crawlerUrlInputRef = ref<ExpandableFieldRef | null>(null);
   const consoleLogMessageInputRef = ref<ExpandableFieldRef | null>(null);
+  const codeParametersInputRef = ref<ExpandableFieldRef | null>(null);
   type ConverterExpressionFieldKey = "source" | "converterFileId" | "ocrPageRange";
 
   interface ConverterExpressionField {
@@ -2267,6 +2271,7 @@ export function usePropertiesPanelController() {
     rabbitmqMessageBodyInputRef.value?.closeExpandDialog();
     crawlerUrlInputRef.value?.closeExpandDialog();
     consoleLogMessageInputRef.value?.closeExpandDialog();
+    codeParametersInputRef.value?.closeExpandDialog();
     closeConverterExpressionDialogs();
     closeHeymExpressionDialogs();
     switchExpressionInputRef.value?.closeExpandDialog();
@@ -2883,6 +2888,16 @@ export function usePropertiesPanelController() {
         }
       };
       nextTick(() => tryOpenDialog());
+    } else if (nodeType === "code") {
+      const tryOpenDialog = (attempts = 0): void => {
+        if (attempts > 20) return;
+        if (codeParametersInputRef.value) {
+          nextTick(() => codeParametersInputRef.value?.openExpandDialog());
+        } else {
+          setTimeout(() => tryOpenDialog(attempts + 1), 100);
+        }
+      };
+      nextTick(() => tryOpenDialog());
     } else if (nodeType === "heym") {
       currentHeymExpressionFieldIndex.value = 0;
       const tryOpenDialog = (attempts = 0): void => {
@@ -3184,6 +3199,7 @@ export function usePropertiesPanelController() {
       case "crawler":
       case "consoleLog":
       case "converter":
+      case "code":
       case "switch":
       case "loop":
       case "grist":
@@ -9143,6 +9159,7 @@ export function usePropertiesPanelController() {
     websocketTriggerEventOptions,
     crawlerUrlInputRef,
     consoleLogMessageInputRef,
+    codeParametersInputRef,
     converterExpressionFieldCount,
     converterExpressionFieldIndex,
     setConverterExpressionInputRef,

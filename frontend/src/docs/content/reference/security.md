@@ -95,9 +95,27 @@ Only non-secret, portable environment variables (proxy and CA-bundle settings, l
 
 As with tools, `subprocess` mode runs the skill in the backend process and is **not a security boundary** — use it only for trusted single-user or local development (`run.sh` selects it for native dev).
 
+## Code Node Sandbox
+
+The [Code node](../nodes/code-node.md) runs arbitrary user Python together with arbitrary third-party dependencies, so it is the strictest of the three sandboxes and the only one with **no escape hatch**: it reads no sandbox-mode variable, has no `subprocess` mode, and fails closed when no Docker daemon is reachable. It never falls back to running user code in the backend process.
+
+Execution is one or two throwaway containers, both hardened like the tool and skill sandboxes (non-root, all capabilities dropped, `no-new-privileges`, read-only root filesystem, CPU/memory/PID limits, and **no Docker socket**):
+
+- With an empty `requirements.txt`, a **single container with `--network none`** runs the code. The runner arrives in the container's stdin payload, so nothing is mounted at all.
+- With dependencies, a first container installs them with network access into a per-run `.deps` directory, and a second container mounts that subtree **read-only** and runs the code. The execution container has no network unless the node's `codeAllowNetwork` option is turned on.
+
+Dependencies are installed with `uv`, retried with `pip`, and never cached between runs. When the backend runs in a container, the per-run directory lives on the same `heym-codex-workspaces` volume the skill sandbox uses, mounted through a per-run `volume-subpath` so one run never sees another's files; that form needs **Docker Engine 25.0 or newer**. A native backend (`./run.sh`) has no such volume and does not need one — its per-run directory is a local temporary path bind-mounted straight into the sibling. Either way the directory is deleted after every execution regardless of outcome.
+
+Only non-secret, portable environment variables are forwarded into the containers — proxy settings, CA bundles, and locale, which dependency installation needs to reach PyPI behind a corporate proxy. Database URLs, `SECRET_KEY`/`ENCRYPTION_KEY`, provider API keys, and OAuth secrets are withheld by an allowlist, so a new backend secret is dropped by default rather than leaked until someone updates a denylist. The backend's `HOME` never overrides the sandbox's own writable path.
+
+The **Format** button uses the same sandbox. Ruff parses and rewrites the source rather than executing it, but running it on the backend host would hand an untrusted file a process that inherits the backend's whole environment, so it gets its own throwaway `--network none` container with the same limits and the same allowlisted environment. It fails closed without Docker rather than formatting on the host.
+
+Sandbox limits are constants rather than environment variables — 512 MB of memory, one CPU, 256 processes, a 120-second install timeout, and a 60-second execution timeout. The image is resolved from the existing `HEYM_PYTHON_TOOL_IMAGE` / `HEYM_CODEX_DOCKER_IMAGE` chain; the node introduces no configuration of its own.
+
 ## Related
 
 - [Running & Deployment](../getting-started/running-and-deployment.md) – Configure `SECRET_KEY`, `ENCRYPTION_KEY`, `ALLOW_REGISTER`, and `HEYM_PYTHON_TOOL_SANDBOX` at startup
+- [Code Node](../nodes/code-node.md) – Sandboxed Python execution with its own dependencies
 - [Agent Node](../nodes/agent-node.md) – Custom Python tools that run in the sandbox
 - [Execution Tokens](./execution-tokens.md) – Scoped JWTs for calling workflows from external systems
 - [Guardrails](./guardrails.md) – Block unsafe content in LLM and Agent nodes
