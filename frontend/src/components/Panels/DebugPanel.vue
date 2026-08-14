@@ -2490,8 +2490,10 @@ function isMarkdownSkillFile(file: AgentSkillFile): boolean {
   return file.path.toLowerCase().endsWith(".md");
 }
 
-function findMatchingExistingAgentNode(node: WorkflowNode): WorkflowNode | undefined {
-  const byId = workflowStore.nodes.find((existingNode) => existingNode.type === "agent" && existingNode.id === node.id);
+function findMatchingExistingNode(node: WorkflowNode): WorkflowNode | undefined {
+  const byId = workflowStore.nodes.find(
+    (existingNode) => existingNode.type === node.type && existingNode.id === node.id,
+  );
   if (byId) {
     return byId;
   }
@@ -2502,7 +2504,7 @@ function findMatchingExistingAgentNode(node: WorkflowNode): WorkflowNode | undef
   }
 
   return workflowStore.nodes.find(
-    (existingNode) => existingNode.type === "agent" && existingNode.data?.label === label,
+    (existingNode) => existingNode.type === node.type && existingNode.data?.label === label,
   );
 }
 
@@ -2529,7 +2531,7 @@ function preserveAgentSkillFiles(node: WorkflowNode): WorkflowNode {
     return node;
   }
 
-  const existingNode = findMatchingExistingAgentNode(node);
+  const existingNode = findMatchingExistingNode(node);
   if (!existingNode || existingNode.type !== "agent") {
     return node;
   }
@@ -2600,7 +2602,8 @@ function applyWorkflowChanges(showMessage = true): void {
       }
     }
     if (isPlaceholderOrInvalidModel(model)) {
-      data.model = effectiveModel || "";
+      const existingNode = findMatchingExistingNode(mergedNode);
+      data.model = existingNode?.data?.model || effectiveModel || "";
     }
 
     const fb = data.fallbackCredentialId as string | undefined;
