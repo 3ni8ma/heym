@@ -134,12 +134,9 @@ def is_expression_callable(candidate: object) -> bool:
     name = getattr(candidate, "__name__", None)
     if owner is None or not name or _is_private_python_attr(name):
         return False
-    for klass in type(owner).__mro__:
-        if klass.__module__ != __name__:
-            continue
-        if name in vars(klass):
-            return True
-    return False
+    # Resolved at call time so the wrapper classes below are already defined.
+    wrapper_types = (DotDict, DotList, DotStr, DotInt, DotFloat, DotBool, DotDateTime)
+    return any(klass in wrapper_types and name in vars(klass) for klass in type(owner).__mro__)
 
 
 _DOLLAR_NAME_RE = re.compile(r"\$([a-zA-Z_][a-zA-Z0-9_]*)")
@@ -1068,15 +1065,17 @@ class DotList(list):
 
             def get_func(obj, key, default=None):
                 if isinstance(obj, dict):
-                    return obj.get(key, default)
-                if isinstance(key, str) and _is_private_python_attr(key):
+                    value = obj.get(key, default)
+                elif isinstance(key, str) and _is_private_python_attr(key):
                     return default
-                if not hasattr(obj, key):
+                elif not hasattr(obj, key):
                     return default
-                attribute = getattr(obj, key, default)
-                if callable(attribute) and not is_expression_callable(attribute):
+                else:
+                    value = getattr(obj, key, default)
+                # Same rule for dict values and attributes: no unlisted callables escape.
+                if callable(value) and not is_expression_callable(value):
                     return default
-                return attribute
+                return value
 
             inherited_names.update(
                 {

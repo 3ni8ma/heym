@@ -770,6 +770,14 @@ class TestGuardedItemExpressionHelpers(unittest.TestCase):
             ["bob"],
         )
 
+    def test_get_helper_filters_callable_dictionary_values(self) -> None:
+        self.assertEqual(
+            self._executor().resolve_expression(
+                "$arr.map(\"get(item, 'f')\")", {"arr": [{"f": len}]}, preserve_type=True
+            ),
+            [None],
+        )
+
     def test_public_item_paths_and_helpers_still_work(self) -> None:
         executor = self._executor()
         self.assertEqual(

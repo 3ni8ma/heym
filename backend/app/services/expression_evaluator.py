@@ -1248,8 +1248,10 @@ class ExpressionEvaluatorService:
                         ]
                         if not required_params:
                             result = executor._unwrap_value(result())
-                if callable(result) and not _is_invocable_expression_callable(result, executor):
-                    # Never render a raw callable repr; it leaks internals into the preview.
+                if callable(result):
+                    # A callable that survived (unlisted, or listed but needing arguments)
+                    # must not reach the response: its repr leaks internals and Pydantic
+                    # cannot serialize it.
                     result = None
                 return ExpressionEvaluateResponse(
                     result=result,

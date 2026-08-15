@@ -1762,6 +1762,21 @@ class TestPreviewCallableAllowlist(unittest.TestCase):
         self.assertNotIsInstance(response.result, str)
         self.assertIsNone(response.result)
 
+    def test_registered_function_needing_arguments_serializes(self) -> None:
+        # `$len` is allowlisted but cannot be invoked without arguments. Returning it
+        # raw used to break response serialization.
+        response = self._service().evaluate("$len", {})
+        self.assertIsNone(response.result)
+        self.assertEqual(response.result_type, "null")
+        self.assertIn('"result":null', response.model_dump_json())
+
+    def test_allowlist_rejects_non_wrapper_classes(self) -> None:
+        from app.services.workflow_executor import WorkflowExecutor, is_expression_callable
+
+        executor = WorkflowExecutor(nodes=[], edges=[])
+        self.assertFalse(is_expression_callable(executor.execute))
+        self.assertFalse(is_expression_callable(executor.resolve_expression))
+
 
 class TestWorkflowMetadataVariables(unittest.TestCase):
     def test_workflow_metadata_variables_resolve_in_preview(self) -> None:
