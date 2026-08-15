@@ -49,7 +49,7 @@ $credentials.MyNotionWorkspace
 Use `$global.variableName` to reference [Global Variables](./global-variables.md) – persistent, user-scoped key-value data managed in the [Variables tab](../tabs/global-variables-tab.md).
 
 ```
-$global.apiKey
+$global.environment
 $global.settings.baseUrl
 ```
 
@@ -146,7 +146,7 @@ item.value
 - `$vars.myArray.add("item")` - Add item to an array variable
 
 ### $global Usage
-- `$global.apiKey` - Access a global variable named `apiKey`
+- `$global.environment` - Access a global variable named `environment`
 - `$global.settings.baseUrl` - Access nested fields in an object-type global variable
 
 ## Request Context (API Execution)

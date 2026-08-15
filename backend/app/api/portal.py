@@ -51,6 +51,7 @@ from app.services.global_variables_service import get_global_variables_context
 from app.services.hitl_service import build_public_base_url, persist_pending_hitl_execution
 from app.services.portal_progress import PortalProgressTracker
 from app.services.portal_rate_limiter import portal_login_limiter
+from app.services.secret_tokens import hash_secret
 from app.services.workflow_executor import (
     ExecutionResult,
     WorkflowCancelledError,
@@ -74,8 +75,9 @@ async def _create_session(
     token = _generate_session_token()
     expires_at = datetime.now(timezone.utc) + timedelta(hours=_session_ttl_hours)
 
+    # Only the digest is persisted; the plaintext goes to the browser and nowhere else.
     session = PortalSession(
-        token=token,
+        token=hash_secret(token),
         workflow_id=workflow_id,
         username=username,
         expires_at=expires_at,
@@ -89,7 +91,8 @@ async def _create_session(
 async def _validate_session(db: AsyncSession, token: str, workflow_id: uuid.UUID) -> bool:
     result = await db.execute(
         select(PortalSession).where(
-            PortalSession.token == token, PortalSession.workflow_id == workflow_id
+            PortalSession.token == hash_secret(token),
+            PortalSession.workflow_id == workflow_id,
         )
     )
     session = result.scalar_one_or_none()

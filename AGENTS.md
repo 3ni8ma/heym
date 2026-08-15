@@ -78,6 +78,17 @@ Frontend: Playwright E2E specs live in `frontend/e2e/`; run them with `./run_e2e
 **New UI behavior should include Playwright E2E coverage when practical.** E2E tests run as a separate required job in PR checks and are intentionally excluded from `./check.sh` to keep the default local check path fast.
 If the local environment does not export `SECRET_KEY`, prefix full-suite commands with `SECRET_KEY=test-secret-key-for-tests-only-32-bytes` (test-only value; never use it for runtime/prod).
 
+### Secret handling (capability secrets)
+A capability secret is any value that grants access on its own: API keys, session tokens, share links, webhook auth headers. `backend/app/services/secret_tokens.py` holds the one hashing helper; do not add a second.
+
+- **Hash at rest, and never accept the stored form as a credential.** Persist `hash_secret(value)` and look rows up with a plain equality on the digest. A lookup that also tries the presented value verbatim will match a stored digest, which hands anyone who can read the database a working credential and defeats the point of hashing. Every such column gets a backfilling migration instead of a runtime fallback.
+- **A migration that backfills digests can only be guarded when the plaintext is shape-distinguishable from a digest.** `secrets.token_hex(32)` is 64 lowercase hex characters, identical in shape to SHA-256, so a "skip if it looks hashed" guard would skip every real key. `secrets.token_urlsafe(n)` is distinguishable and can be guarded. Document which case applies, and that downgrade cannot restore plaintext.
+- **Return once, at creation.** The endpoint that mints a secret returns it; nothing returns it again. List and config endpoints expose a `*_set: bool` flag so the UI can say "configured" without reading it, and the frontend holds the freshly minted value in a session-scoped ref for copy actions.
+- **Keep credentials out of URLs.** Accept them from headers only. Query strings reach access logs, proxy logs, browser history and Referer headers. Short-lived in-memory handshake parameters such as the MCP `?session=` token are the exception.
+- **Owner-only secrets stay owner-only for reads and writes.** Mask them for collaborators in the response schema and reject collaborator writes. Masking the read without guarding the write lets a masked, empty editor field autosave over the owner's value.
+- **Redact at every persistence boundary, not just the obvious one.** A request-derived secret usually reaches more than one structure: run inputs, node outputs, `node_results`, and sub-workflow history are separate columns. Redacting one moves the secret rather than removing it. Use one recursive redactor per run and apply it at each write.
+- **When touching any of the above:** add focused tests under `backend/tests/test_advisory_*.py`, including the negative case that the stored representation does not authenticate.
+
 ### Node and operation integration
 When adding a new node type, operation, or operation-specific field, keep the canvas affordances in sync with the schema:
 

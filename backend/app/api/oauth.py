@@ -18,7 +18,7 @@ from app.db.models import OAuthAccessToken, OAuthAuthorizationCode, OAuthClient,
 from app.db.session import get_db
 from app.services.auth import verify_password
 from app.services.auth_rate_limiter import oauth_register_limiter
-from app.services.oauth_tokens import hash_oauth_token, oauth_token_lookup_values
+from app.services.oauth_tokens import hash_oauth_token
 
 router = APIRouter()
 
@@ -683,7 +683,7 @@ async def _handle_refresh_token_grant(request: Request, form: dict, db: AsyncSes
     result = await db.execute(
         select(OAuthAccessToken)
         .where(
-            OAuthAccessToken.refresh_token.in_(oauth_token_lookup_values(str(refresh_token_str))),
+            OAuthAccessToken.refresh_token == hash_oauth_token(str(refresh_token_str)),
             OAuthAccessToken.revoked.is_(False),
         )
         .with_for_update()

@@ -22,7 +22,7 @@ from app.api.oauth import (
     token_endpoint,
 )
 from app.db.models import OAuthAccessToken, OAuthAuthorizationCode
-from app.services.oauth_tokens import hash_oauth_token, oauth_token_lookup_values
+from app.services.oauth_tokens import hash_oauth_token
 
 
 def _pkce_challenge(verifier: str) -> str:
@@ -69,10 +69,8 @@ def _request(
     )
 
 
-def _compiled_in_values(statement: object, param_name: str) -> list[str]:
-    compiled = statement.compile()
-    values = compiled.params[param_name]
-    return list(values)
+def _compiled_param(statement: object, param_name: str) -> object:
+    return statement.compile().params[param_name]
 
 
 class OAuthPKCETests(unittest.TestCase):
@@ -230,11 +228,17 @@ class OAuthTokenStorageTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(token_record.access_token, result["access_token"])
         self.assertNotEqual(token_record.refresh_token, result["refresh_token"])
 
-    def test_lookup_values_include_hash_and_legacy_plaintext_token(self) -> None:
-        values = oauth_token_lookup_values("legacy-token")
+    def test_stored_digest_is_not_itself_a_token(self) -> None:
+        """The lookup must never accept the stored representation as a credential.
 
-        self.assertEqual(values[0], hash_oauth_token("legacy-token"))
-        self.assertEqual(values[1], "legacy-token")
+        A fallback that also tried the presented value verbatim would match the
+        stored digest, so anyone able to read oauth_access_tokens would hold a
+        working bearer token.
+        """
+        raw_token = "legacy-token"
+        stored = hash_oauth_token(raw_token)
+
+        self.assertNotEqual(hash_oauth_token(stored), stored)
 
 
 class OAuthRegistrationTests(unittest.IsolatedAsyncioTestCase):
@@ -263,7 +267,7 @@ class OAuthRegistrationTests(unittest.IsolatedAsyncioTestCase):
 
 
 class MCPBearerTokenLookupTests(unittest.IsolatedAsyncioTestCase):
-    async def test_default_mcp_auth_queries_hash_and_legacy_plaintext_token(self) -> None:
+    async def test_default_mcp_auth_queries_only_the_digest(self) -> None:
         raw_token = "legacy-access-token"
         user = SimpleNamespace(id=uuid.uuid4())
         token_record = SimpleNamespace(user_id=user.id)
@@ -288,11 +292,11 @@ class MCPBearerTokenLookupTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(result, user)
         token_query = db.execute.call_args_list[0].args[0]
         self.assertEqual(
-            _compiled_in_values(token_query, "access_token_1"),
-            list(oauth_token_lookup_values(raw_token)),
+            _compiled_param(token_query, "access_token_1"),
+            hash_oauth_token(raw_token),
         )
 
-    async def test_named_mcp_server_auth_queries_hash_and_legacy_plaintext_token(self) -> None:
+    async def test_named_mcp_server_auth_queries_only_the_digest(self) -> None:
         raw_token = "legacy-server-token"
         server_id = uuid.uuid4()
         user = SimpleNamespace(id=uuid.uuid4())
@@ -322,8 +326,8 @@ class MCPBearerTokenLookupTests(unittest.IsolatedAsyncioTestCase):
         self.assertIs(result_server, server)
         token_query = db.execute.call_args_list[0].args[0]
         self.assertEqual(
-            _compiled_in_values(token_query, "access_token_1"),
-            list(oauth_token_lookup_values(raw_token)),
+            _compiled_param(token_query, "access_token_1"),
+            hash_oauth_token(raw_token),
         )
 
 

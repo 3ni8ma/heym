@@ -33,6 +33,7 @@ function makeWorkflow(id: string): Workflow {
     auth_type: "jwt",
     auth_header_key: null,
     auth_header_value: null,
+    auth_header_value_set: false,
     webhook_body_mode: "legacy",
     allow_anonymous: false,
     owner_id: "owner-id",

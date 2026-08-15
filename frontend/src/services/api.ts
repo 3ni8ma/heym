@@ -2280,7 +2280,9 @@ export interface MCPChatToolUpdate {
 }
 
 export interface MCPConfigResponse {
+  /** Only returned by the regenerate call; hashed at rest, so reads omit it. */
   mcp_api_key: string | null;
+  mcp_api_key_set: boolean;
   mcp_endpoint_url: string;
   workflows: MCPWorkflowItem[];
   chat_tool: MCPChatToolConfig;
@@ -2307,7 +2309,9 @@ export interface MCPFetchToolsResponse {
 export interface MCPServerItem {
   id: string;
   name: string;
-  api_key: string;
+  /** Only returned when generated or regenerated; hashed at rest otherwise. */
+  api_key: string | null;
+  api_key_set: boolean;
   created_at: string;
   workflow_ids: string[];
   chat_tool: MCPChatToolConfig;

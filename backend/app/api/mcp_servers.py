@@ -57,7 +57,8 @@ from app.services.execution_cancellation import clear_execution as clear_active_
 from app.services.execution_cancellation import register_execution
 from app.services.global_variables_service import get_global_variables_context
 from app.services.mcp_session import mcp_session_store, mcp_sse_channels
-from app.services.oauth_tokens import oauth_token_lookup_values
+from app.services.oauth_tokens import hash_oauth_token
+from app.services.secret_tokens import hash_secret
 from app.services.workflow_executor import execute_workflow
 
 router = APIRouter()
@@ -96,11 +97,18 @@ async def _get_server_workflows(db: AsyncSession, server_id: uuid.UUID) -> list[
     return list(result.scalars().all())
 
 
-def _server_response(server: MCPServer, workflow_ids: list[uuid.UUID]) -> MCPServerResponse:
+def _server_response(
+    server: MCPServer,
+    workflow_ids: list[uuid.UUID],
+    *,
+    plaintext_api_key: str | None = None,
+) -> MCPServerResponse:
+    """Build a server response; the raw key is present only when just generated."""
     return MCPServerResponse(
         id=server.id,
         name=server.name,
-        api_key=server.api_key,
+        api_key=plaintext_api_key,
+        api_key_set=bool(server.api_key),
         created_at=server.created_at,
         workflow_ids=workflow_ids,
         chat_tool=MCPChatToolConfig(
@@ -156,20 +164,18 @@ async def _get_named_server_context(
         user = _session_user_from_id(user_id_str)
         return user, _session_server_from_id(server_id, user.id)
 
-    # 1. OAuth Bearer token
+    # 1. OAuth Bearer token. Header only: a long-lived token in the query string
+    # lands in access logs, proxies, browser history and Referer headers.
     auth_header = request.headers.get("Authorization", "")
-    token_param = request.query_params.get("token")
     bearer_token: str | None = None
     if auth_header.startswith("Bearer "):
         bearer_token = auth_header[7:]
-    elif token_param:
-        bearer_token = token_param
 
     if bearer_token:
         now = datetime.now(timezone.utc)
         token_res = await db.execute(
             select(OAuthAccessToken).where(
-                OAuthAccessToken.access_token.in_(oauth_token_lookup_values(bearer_token)),
+                OAuthAccessToken.access_token == hash_oauth_token(bearer_token),
                 OAuthAccessToken.revoked.is_(False),
                 OAuthAccessToken.expires_at > now,
             )
@@ -193,8 +199,8 @@ async def _get_named_server_context(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
         return user, server
 
-    # 2. Per-server API key
-    api_key = x_mcp_key or request.query_params.get("key")
+    # 2. Per-server API key. Header only, see get_mcp_user for the reasoning.
+    api_key = x_mcp_key
     if not api_key:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -202,7 +208,9 @@ async def _get_named_server_context(
             headers={"WWW-Authenticate": 'Bearer realm="heym-mcp"'},
         )
     server_res = await db.execute(
-        select(MCPServer).where(MCPServer.api_key == api_key, MCPServer.id == server_id)
+        select(MCPServer).where(
+            MCPServer.api_key == hash_secret(api_key), MCPServer.id == server_id
+        )
     )
     server = server_res.scalar_one_or_none()
     if server is None:
@@ -258,15 +266,16 @@ async def create_mcp_server(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> MCPServerResponse:
+    api_key = secrets.token_urlsafe(48)
     server = MCPServer(
         user_id=current_user.id,
         name=body.name,
-        api_key=secrets.token_urlsafe(48),
+        api_key=hash_secret(api_key),
     )
     db.add(server)
     await db.commit()
     await db.refresh(server)
-    return _server_response(server, [])
+    return _server_response(server, [], plaintext_api_key=api_key)
 
 
 @router.delete("/{server_id}", status_code=204)
@@ -287,11 +296,12 @@ async def regenerate_server_key(
     db: AsyncSession = Depends(get_db),
 ) -> MCPServerResponse:
     server = await _fetch_server_for_user(db, server_id, current_user.id)
-    server.api_key = secrets.token_urlsafe(48)
+    api_key = secrets.token_urlsafe(48)
+    server.api_key = hash_secret(api_key)
     await db.commit()
     await db.refresh(server)
     workflow_ids = await _get_server_workflow_ids(db, server.id)
-    return _server_response(server, workflow_ids)
+    return _server_response(server, workflow_ids, plaintext_api_key=api_key)
 
 
 @router.patch("/{server_id}/workflows/{workflow_id}")

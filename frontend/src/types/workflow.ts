@@ -23,7 +23,9 @@ export interface Workflow {
   edges: WorkflowEdge[];
   auth_type: WorkflowAuthType;
   auth_header_key: string | null;
+  /** Owner-only. Null for direct and team collaborators even when a secret is set. */
   auth_header_value: string | null;
+  auth_header_value_set: boolean;
   webhook_body_mode: WebhookBodyMode;
   allow_anonymous: boolean;
   owner_id: string;
@@ -1255,7 +1257,9 @@ export interface WorkflowVersion {
   edges: WorkflowEdge[];
   auth_type: WorkflowAuthType;
   auth_header_key: string | null;
+  /** Owner-only, same rule as Workflow.auth_header_value. */
   auth_header_value: string | null;
+  auth_header_value_set: boolean;
   webhook_body_mode: WebhookBodyMode;
   cache_ttl_seconds: number | null;
   rate_limit_requests: number | null;

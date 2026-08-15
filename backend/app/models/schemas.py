@@ -263,7 +263,10 @@ class WorkflowResponse(BaseModel):
     edges: list[dict]
     auth_type: WorkflowAuthType
     auth_header_key: str | None
+    # Owner-only: masked to None for direct and team collaborators, who still
+    # need to know a secret is configured so the editor can show it as set.
     auth_header_value: str | None
+    auth_header_value_set: bool = False
     webhook_body_mode: WebhookBodyMode
     allow_anonymous: bool
     owner_id: uuid.UUID
@@ -294,7 +297,9 @@ class WorkflowVersionResponse(BaseModel):
     edges: list[dict]
     auth_type: WorkflowAuthType
     auth_header_key: str | None
+    # Owner-only, same masking rule as WorkflowResponse.
     auth_header_value: str | None
+    auth_header_value_set: bool = False
     webhook_body_mode: WebhookBodyMode
     cache_ttl_seconds: int | None = None
     rate_limit_requests: int | None = None
@@ -1149,7 +1154,10 @@ class MCPChatToolUpdate(BaseModel):
 
 
 class MCPConfigResponse(BaseModel):
+    # Only ever populated by the regenerate endpoint. The key is hashed at rest,
+    # so config reads can report that one exists but not what it is.
     mcp_api_key: str | None = None
+    mcp_api_key_set: bool = False
     mcp_endpoint_url: str
     workflows: list[MCPWorkflowItem] = Field(default_factory=list)
     chat_tool: MCPChatToolConfig = Field(default_factory=MCPChatToolConfig)
@@ -1174,7 +1182,9 @@ class MCPServerWorkflowToggleRequest(BaseModel):
 class MCPServerResponse(BaseModel):
     id: uuid.UUID
     name: str
-    api_key: str
+    # Returned once, when generated or regenerated. Hashed at rest otherwise.
+    api_key: str | None = None
+    api_key_set: bool = False
     created_at: datetime
     workflow_ids: list[uuid.UUID] = Field(default_factory=list)
     chat_tool: MCPChatToolConfig = Field(default_factory=MCPChatToolConfig)

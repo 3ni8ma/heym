@@ -72,34 +72,26 @@ release.
 We are grateful to the security researchers who responsibly disclose
 vulnerabilities in Heym:
 
-- [@jashidsany](https://github.com/jashidsany) for reporting an authenticated
-  sandbox escape in user-defined Python tools (GHSA-wcgw-9hfw-f6f2).
-- [@okcomputerfan](https://github.com/okcomputerfan) (also known as pixileaf)
-  for reporting multiple authentication and RCE vulnerabilities in the workflow
-  condition evaluator, Slack/Telegram webhooks, OAuth redirect_uri validation,
-  and token-at-rest storage (GHSA-pm6h-x3h5-j38h).
-- [@sajdakabir](https://github.com/sajdakabir) for reporting a server-side
-  request forgery (SSRF) in the MCP HTTP/SSE tool transports, for reporting a horizontal IDOR
-  in template get-by-id (GHSA-5748-x76g-v68m) and a missing creator gate in team
-  member management that let any member alter the roster and reach team-shared
-  credentials (GHSA-vxpw-x7j7-8723), for reporting unsandboxed skill code
-  execution where Agent Python skills ran outside the Docker isolation mandated
-  for Python tools (GHSA-hcv7-mg77-pg73), and for reporting command execution via
-  the MCP `stdio` transport, where a caller-supplied command was started on the
-  backend host before any MCP validation could reject it (GHSA-378x-q589-34mv).
+- [@jashidsany](https://github.com/jashidsany) for a sandbox escape in
+  user-defined Python tools (GHSA-wcgw-9hfw-f6f2).
+- [@okcomputerfan](https://github.com/okcomputerfan) (also known as pixileaf) for
+  authentication and RCE issues across the condition evaluator, Slack and
+  Telegram webhooks, OAuth `redirect_uri` validation, and token storage
+  (GHSA-pm6h-x3h5-j38h).
+- [@sajdakabir](https://github.com/sajdakabir) for four reports: SSRF in the MCP
+  HTTP/SSE transports and a template IDOR (GHSA-5748-x76g-v68m), a missing
+  creator gate in team member management (GHSA-vxpw-x7j7-8723), unsandboxed
+  Agent Python skills (GHSA-hcv7-mg77-pg73), and command execution via the MCP
+  `stdio` transport (GHSA-378x-q589-34mv).
 - [@EQSTLab](https://github.com/EQSTLab) (reporter) and
-  [@min8282](https://github.com/min8282) (finder) for reporting a backend remote
-  code execution in the Playwright node, where the custom `playwrightCode` field
-  let any authenticated user run arbitrary Python in the backend process
-  (GHSA-mp23-7m6r-jfw4).
-- [@0neOfU4](https://github.com/0neOfU4) for reporting a server-side request
-  forgery (SSRF) in the HTTP workflow node, where a workflow author could point
-  the node at internal or cloud-metadata addresses that were guarded on the MCP
-  transports but not on the HTTP node (GHSA-8wj7-v2w6-wfcx).
-- [@SashaMIT](https://github.com/SashaMIT) for reporting an authenticated
-  expression-engine sandbox escape via DotList map/filter item expressions and
-  the simpleeval fallback resolver (GHSA-87x2-9jwx-7gh4), and for reporting a
-  server-side request forgery (SSRF) in the LLM image-edit input loader, where
-  the backend fetched a caller-controlled image URL with a scheme-only check
-  instead of the egress guard applied to the HTTP node, and contributing the fix
-  (GHSA-6rph-qqcv-jqh4).
+  [@min8282](https://github.com/min8282) (finder) for backend RCE via the
+  Playwright node's custom `playwrightCode` field (GHSA-mp23-7m6r-jfw4).
+- [@0neOfU4](https://github.com/0neOfU4) for SSRF in the HTTP workflow node,
+  which was guarded on the MCP transports but not there (GHSA-8wj7-v2w6-wfcx).
+- [@SashaMIT](https://github.com/SashaMIT) for three reports: an
+  expression-engine sandbox escape via DotList item expressions and the
+  simpleeval fallback (GHSA-87x2-9jwx-7gh4), SSRF in the LLM image-edit input
+  loader, where a caller-controlled URL got a scheme-only check instead of the
+  egress guard, and contributing that fix (GHSA-6rph-qqcv-jqh4), and a cluster
+  of capability secrets stored or returned in plaintext across webhook auth,
+  MCP keys, portal sessions, and Discord interactions (GHSA-6x65-w7q7-wg93).

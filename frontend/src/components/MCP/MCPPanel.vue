@@ -51,6 +51,11 @@ const newServerName = ref("");
 const creatingServer = ref(false);
 const allWorkflows = ref<MCPWorkflowItem[]>([]);
 const showServerApiKey = ref<Record<string, boolean>>({});
+// Keys are hashed at rest, so the API returns plaintext exactly once. Hold that
+// value for the session so copy and deeplink actions still work right after
+// generating, and fall back to a placeholder once it is gone.
+const revealedServerKeys = ref<Record<string, string>>({});
+const revealedApiKey = ref<string | null>(null);
 const regeneratingServerKey = ref<string | null>(null);
 const togglingServerWorkflow = ref<string | null>(null);
 const llmCredentials = ref<CredentialListItem[]>([]);
@@ -112,8 +117,8 @@ const sseEndpointUrl = computed(() => {
 });
 
 const maskedApiKey = computed(() => {
-  if (!config.value?.mcp_api_key) return null;
-  const key = config.value.mcp_api_key;
+  if (!revealedApiKey.value) return null;
+  const key = revealedApiKey.value;
   return key.slice(0, 8) + "..." + key.slice(-4);
 });
 
@@ -163,6 +168,7 @@ async function createServer(): Promise<void> {
   creatingServer.value = true;
   try {
     const server = await mcpServersApi.create(newServerName.value.trim());
+    rememberServerKey(server);
     namedServers.value.push(server);
     newServerName.value = "";
     expandedServer.value = server.id;
@@ -192,6 +198,7 @@ async function regenerateServerKey(server: MCPServerItem): Promise<void> {
   regeneratingServerKey.value = server.id;
   try {
     const updated = await mcpServersApi.regenerateKey(server.id);
+    rememberServerKey(updated);
     const idx = namedServers.value.findIndex((s) => s.id === server.id);
     if (idx !== -1) namedServers.value[idx] = updated;
     showServerApiKey.value[server.id] = true;
@@ -201,6 +208,14 @@ async function regenerateServerKey(server: MCPServerItem): Promise<void> {
   } finally {
     regeneratingServerKey.value = null;
   }
+}
+
+function rememberServerKey(server: MCPServerItem): void {
+  if (server.api_key) revealedServerKeys.value[server.id] = server.api_key;
+}
+
+function serverKey(server: MCPServerItem): string | null {
+  return revealedServerKeys.value[server.id] ?? null;
 }
 
 function toggleServerKeyVisibility(serverId: string): void {
@@ -214,7 +229,7 @@ function serverMcpConfigJson(server: MCPServerItem): string {
         [server.name.toLowerCase().replace(/\s+/g, "_")]: {
           url: serverSseUrl(server.id),
           headers: {
-            "X-MCP-Key": server.api_key,
+            "X-MCP-Key": serverKey(server) ?? "YOUR_API_KEY",
           },
         },
       },
@@ -227,7 +242,7 @@ function serverMcpConfigJson(server: MCPServerItem): string {
 function addServerToCursor(server: MCPServerItem): void {
   const mcpConfig = {
     url: serverSseUrl(server.id),
-    headers: { "X-MCP-Key": server.api_key },
+    headers: { "X-MCP-Key": serverKey(server) ?? "YOUR_API_KEY" },
   };
   const configBase64 = btoa(JSON.stringify(mcpConfig));
   window.open(
@@ -328,8 +343,11 @@ async function regenerateKey(): Promise<void> {
   regenerating.value = true;
   try {
     const result = await mcpApi.regenerateKey();
+    revealedApiKey.value = result.mcp_api_key;
+    // Flip the flag too, otherwise the button keeps offering "Generate" for a
+    // key that now exists.
     if (config.value) {
-      config.value.mcp_api_key = result.mcp_api_key;
+      config.value.mcp_api_key_set = true;
     }
     showApiKey.value = true;
     showToast("API key regenerated successfully");
@@ -361,7 +379,7 @@ const mcpConfigJson = computed(() => {
         heym: {
           url: sseEndpointUrl.value,
           headers: {
-            "X-MCP-Key": config.value?.mcp_api_key || "YOUR_API_KEY",
+            "X-MCP-Key": revealedApiKey.value || "YOUR_API_KEY",
           },
         },
       },
@@ -375,7 +393,7 @@ const cursorDeepLink = computed(() => {
   const mcpConfig = {
     url: sseEndpointUrl.value,
     headers: {
-      "X-MCP-Key": config.value?.mcp_api_key || "YOUR_API_KEY",
+      "X-MCP-Key": revealedApiKey.value || "YOUR_API_KEY",
     },
   };
   const configBase64 = btoa(JSON.stringify(mcpConfig));
@@ -486,11 +504,17 @@ function addToCursor(): void {
                 <div class="flex items-center gap-2 flex-wrap">
                   <div class="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 bg-muted rounded-md">
                     <code
-                      v-if="config.mcp_api_key"
+                      v-if="revealedApiKey"
                       class="text-sm font-mono truncate flex-1 min-w-0"
                     >
-                      {{ showApiKey ? config.mcp_api_key : maskedApiKey }}
+                      {{ showApiKey ? revealedApiKey : maskedApiKey }}
                     </code>
+                    <span
+                      v-else-if="config.mcp_api_key_set"
+                      class="text-sm text-muted-foreground italic truncate flex-1 min-w-0"
+                    >
+                      Key is set and hidden. Regenerate to get a new one.
+                    </span>
                     <span
                       v-else
                       class="text-sm text-muted-foreground italic truncate flex-1 min-w-0"
@@ -498,7 +522,7 @@ function addToCursor(): void {
                       No API key generated yet
                     </span>
                     <Button
-                      v-if="config.mcp_api_key"
+                      v-if="revealedApiKey"
                       variant="ghost"
                       size="sm"
                       class="h-6 w-6 p-0 shrink-0"
@@ -515,11 +539,11 @@ function addToCursor(): void {
                     </Button>
                   </div>
                   <Button
-                    v-if="config.mcp_api_key"
+                    v-if="revealedApiKey"
                     variant="outline"
                     size="sm"
                     class="shrink-0"
-                    @click="copyToClipboard(config.mcp_api_key!, 'API Key')"
+                    @click="copyToClipboard(revealedApiKey, 'API Key')"
                   >
                     <Copy class="w-4 h-4" />
                   </Button>
@@ -534,7 +558,7 @@ function addToCursor(): void {
                       class="w-4 h-4"
                       :class="{ 'animate-spin': regenerating }"
                     />
-                    {{ config.mcp_api_key ? 'Regenerate' : 'Generate' }}
+                    {{ config.mcp_api_key_set ? 'Regenerate' : 'Generate' }}
                   </Button>
                 </div>
               </div>
@@ -906,10 +930,20 @@ function addToCursor(): void {
                 </label>
                 <div class="flex items-center gap-2 flex-wrap">
                   <div class="flex-1 min-w-0 flex items-center gap-2 px-3 py-2 bg-muted rounded-md">
-                    <code class="text-xs font-mono truncate flex-1 min-w-0">
-                      {{ showServerApiKey[server.id] ? server.api_key : server.api_key.slice(0, 8) + '...' + server.api_key.slice(-4) }}
+                    <code
+                      v-if="serverKey(server)"
+                      class="text-xs font-mono truncate flex-1 min-w-0"
+                    >
+                      {{ showServerApiKey[server.id] ? serverKey(server) : serverKey(server)!.slice(0, 8) + '...' + serverKey(server)!.slice(-4) }}
                     </code>
+                    <span
+                      v-else
+                      class="text-xs text-muted-foreground italic truncate flex-1 min-w-0"
+                    >
+                      Key is set and hidden. Regenerate to get a new one.
+                    </span>
                     <button
+                      v-if="serverKey(server)"
                       class="p-1 rounded hover:bg-background text-muted-foreground hover:text-foreground transition-colors shrink-0"
                       @click.stop="toggleServerKeyVisibility(server.id)"
                     >
@@ -924,10 +958,11 @@ function addToCursor(): void {
                     </button>
                   </div>
                   <Button
+                    v-if="serverKey(server)"
                     variant="outline"
                     size="sm"
                     class="shrink-0"
-                    @click="copyToClipboard(server.api_key, 'API Key')"
+                    @click="copyToClipboard(serverKey(server)!, 'API Key')"
                   >
                     <Copy class="w-4 h-4" />
                   </Button>
