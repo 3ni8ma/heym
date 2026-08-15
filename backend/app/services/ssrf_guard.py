@@ -1,8 +1,10 @@
-"""SSRF egress guard for the HTTP workflow node (GHSA-8wj7-v2w6-wfcx).
+"""SSRF egress guard for outbound fetches the backend performs on a user URL.
 
-The HTTP node sends requests to URLs chosen by the workflow author. On a
+Used by the HTTP workflow node (GHSA-8wj7-v2w6-wfcx) and the LLM image-edit
+input loader (GHSA-6rph-qqcv-jqh4). Both send requests to URLs chosen by the
+workflow author, or by the caller when the field is templated from input. On a
 multi-tenant or hosted deployment those authors are not necessarily trusted, so
-without a guard the node can be pointed at loopback, private, link-local, or
+without a guard they can be pointed at loopback, private, link-local, or
 cloud-metadata endpoints (SSRF, CWE-918). This mirrors the protection already
 applied to the MCP http(s)/SSE transports.
 
@@ -41,6 +43,18 @@ from app.http_identity import HEYM_USER_AGENT
 
 _ALLOWED_URL_SCHEMES = ("http", "https")
 
+# Prefixes the rejection messages so the operator sees the field they configured.
+# The dial-time pin is shared by every caller of the guarded client, so it cannot
+# attribute a hop to one node and uses the neutral subject instead.
+_DEFAULT_URL_SUBJECT = "HTTP node URL"
+_PINNED_DIAL_SUBJECT = "Guarded request URL"
+
+# IPv6 forms that carry an IPv4 destination but that ``is_global`` still reports
+# as globally routable, so the embedded address has to be checked instead.
+_NAT64_WELL_KNOWN_PREFIX = ipaddress.ip_network("64:ff9b::/96")  # RFC 6052
+_NAT64_LOCAL_USE_PREFIX = ipaddress.ip_network("64:ff9b:1::/48")  # RFC 8215
+_IPV4_COMPATIBLE_PREFIX = ipaddress.ip_network("::/96")  # deprecated ::x.x.x.x
+
 _GUARDED_CLIENT: httpx.Client | None = None
 _GUARDED_CLIENT_LOCK = Lock()
 
@@ -51,6 +65,7 @@ class SsrfBlockedError(ValueError):
 
 def _resolve_host_addresses(
     hostname: str,
+    subject: str = _DEFAULT_URL_SUBJECT,
 ) -> list[ipaddress.IPv4Address | ipaddress.IPv6Address]:
     """Resolve a URL host to every IP address it maps to.
 
@@ -70,7 +85,7 @@ def _resolve_host_addresses(
     try:
         resolved = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
     except socket.gaierror as exc:
-        raise SsrfBlockedError("HTTP node URL host could not be resolved") from exc
+        raise SsrfBlockedError(f"{subject} host could not be resolved") from exc
 
     addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
     seen: set[str] = set()
@@ -85,51 +100,87 @@ def _resolve_host_addresses(
         addresses.append(address)
 
     if not addresses:
-        raise SsrfBlockedError("HTTP node URL host could not be resolved")
+        raise SsrfBlockedError(f"{subject} host could not be resolved")
     return addresses
+
+
+def _embedded_ipv4(
+    address: ipaddress.IPv6Address,
+) -> ipaddress.IPv4Address | None:
+    """Return the IPv4 address carried inside an IPv6 transition address, if any.
+
+    Only the NAT64 well-known prefix and the deprecated IPv4-compatible form are
+    unwrapped. Both are reported globally routable even when they carry loopback,
+    private, or cloud-metadata IPv4 (GHSA-79qr-f49h-6g8c). 6to4 and Teredo are
+    refused outright by the caller instead, so they never reach this function.
+    """
+    if address.ipv4_mapped is not None:
+        return address.ipv4_mapped
+    if address in _NAT64_WELL_KNOWN_PREFIX or address in _IPV4_COMPATIBLE_PREFIX:
+        return ipaddress.IPv4Address(int(address) & 0xFFFFFFFF)
+    return None
 
 
 def _is_public_address(
     address: ipaddress.IPv4Address | ipaddress.IPv6Address,
 ) -> bool:
-    """Whether an address is globally routable (IPv4-mapped IPv6 unwrapped first).
+    """Whether an address is globally routable (embedded IPv4 unwrapped first).
 
     ``is_global`` alone treats multicast (e.g. ``224.0.0.1``, ``239.255.255.250``)
-    as public, so multicast is rejected explicitly.
+    as public, so multicast is rejected explicitly, and it misjudges several IPv6
+    transition forms, which are refused or decided by the IPv4 they carry.
     """
-    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
-        address = address.ipv4_mapped
+    if isinstance(address, ipaddress.IPv6Address):
+        if address.sixtofour is not None or address.teredo is not None:
+            # Refused outright rather than left to is_global. The stdlib only
+            # began treating these as private in 3.11.10 (CVE-2024-4032) and the
+            # project supports >=3.11, so on an older interpreter a 6to4 address
+            # wrapping 169.254.169.254 is reported globally routable. Neither
+            # relay is worth reaching, so the check does not depend on the
+            # interpreter's classification.
+            return False
+        if address in _NAT64_LOCAL_USE_PREFIX:
+            # Already private per RFC 8215, asserted here so a future change in
+            # the stdlib classification cannot silently open a local-use range
+            # whose embedded IPv4 offset depends on the deployed prefix length.
+            return False
+        embedded = _embedded_ipv4(address)
+        if embedded is not None:
+            address = embedded
     return address.is_global and not address.is_multicast
 
 
-def guard_http_url(url: str) -> None:
-    """Reject HTTP node URLs that could reach internal networks (SSRF guard).
+def guard_http_url(url: str, subject: str = _DEFAULT_URL_SUBJECT) -> None:
+    """Reject user-supplied URLs that could reach internal networks (SSRF guard).
 
     Only ``http``/``https`` schemes are allowed. Unless
     ``HEYM_HTTP_ALLOW_PRIVATE_URLS=true``, the host must resolve exclusively to
     globally routable addresses; loopback, private, link-local (including the
     ``169.254.169.254`` cloud-metadata endpoint), multicast, and other non-public
     destinations are refused.
+
+    ``subject`` names the field being guarded so the rejection message points at
+    the node the operator actually configured.
     """
     parsed = urlparse(url)
     if parsed.scheme.lower() not in _ALLOWED_URL_SCHEMES:
-        raise SsrfBlockedError("HTTP node URL must use http or https")
+        raise SsrfBlockedError(f"{subject} must use http or https")
 
     if settings.http_allow_private_urls:
         return
 
     hostname = parsed.hostname
     if not hostname:
-        raise SsrfBlockedError("HTTP node URL must include a host")
+        raise SsrfBlockedError(f"{subject} must include a host")
 
     try:
         _ = parsed.port
     except ValueError as exc:
-        raise SsrfBlockedError("HTTP node URL includes an invalid port") from exc
+        raise SsrfBlockedError(f"{subject} includes an invalid port") from exc
 
-    addresses = _resolve_host_addresses(hostname)
+    addresses = _resolve_host_addresses(hostname, subject)
     if not all(_is_public_address(address) for address in addresses):
-        raise SsrfBlockedError("HTTP node URL is not allowed (resolves to a non-public address)")
+        raise SsrfBlockedError(f"{subject} is not allowed (resolves to a non-public address)")
 
 
 def _resolve_pinned_ip(host: str) -> str:
@@ -139,9 +190,11 @@ def _resolve_pinned_ip(host: str) -> str:
     actual TCP target so the connection cannot be rebound to an internal IP after
     validation (TLS SNI still uses the original hostname, so certs stay valid).
     """
-    addresses = _resolve_host_addresses(host)
+    addresses = _resolve_host_addresses(host, _PINNED_DIAL_SUBJECT)
     if not all(_is_public_address(address) for address in addresses):
-        raise SsrfBlockedError("HTTP node URL is not allowed (resolves to a non-public address)")
+        raise SsrfBlockedError(
+            f"{_PINNED_DIAL_SUBJECT} is not allowed (resolves to a non-public address)"
+        )
     return addresses[0].compressed
 
 
@@ -182,7 +235,9 @@ class _HttpEgressPinBackend(httpcore.NetworkBackend):
         timeout: float | None = None,
         socket_options: Any = None,
     ) -> httpcore.NetworkStream:
-        raise httpcore.ConnectError("HTTP node does not allow unix-socket connections")
+        raise httpcore.ConnectError(
+            "The guarded HTTP client does not allow unix-socket connections"
+        )
 
 
 def _install_egress_pin(client: httpx.Client) -> None:
@@ -199,27 +254,29 @@ def _install_egress_pin(client: httpx.Client) -> None:
         return
     if getattr(client, "_mounts", None):
         raise RuntimeError(
-            "HTTP node SSRF egress pin refuses a client with proxy/mount transports "
+            "SSRF egress pin refuses a client with proxy/mount transports "
             "(a proxy would bypass the pinned backend); build it with trust_env=False"
         )
     transport = getattr(client, "_transport", None)
     pool = getattr(transport, "_pool", None)
     backend = getattr(pool, "_network_backend", None)
     if pool is None or backend is None:
-        raise RuntimeError(
-            "HTTP node SSRF egress pin could not be installed (httpx internals unavailable)"
-        )
+        raise RuntimeError("SSRF egress pin could not be installed (httpx internals unavailable)")
     if isinstance(backend, _HttpEgressPinBackend):
         return
     pool._network_backend = _HttpEgressPinBackend(backend)
 
 
 def get_guarded_http_client() -> httpx.Client:
-    """Return the shared HTTP-node client with the SSRF egress pin installed.
+    """Return the shared guarded client with the SSRF egress pin installed.
 
     Kept separate from ``workflow_executor.get_http_client`` so the guard applies
-    only to the user-URL HTTP node, not to integration nodes (crawler, Telegram,
-    Slack, Discord) that legitimately reach operator-configured internal hosts.
+    only where the backend dials a user-supplied URL (the HTTP node and the LLM
+    image-edit input loader), not to integration nodes (crawler, Telegram, Slack,
+    Discord) that legitimately reach operator-configured internal hosts. Carriers
+    that fetch on our behalf, such as FlareSolverr and the Playwright runner, are
+    deliberately out of scope: they resolve the target themselves, so their egress
+    belongs to the deployment's network policy rather than to this guard.
     """
     from app.services import workflow_executor as _wf
 
