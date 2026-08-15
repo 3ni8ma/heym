@@ -730,5 +730,71 @@ class TestExpressionEvalRejectsDotListAndFallbackSandboxEscape(unittest.TestCase
         self.assertEqual(result, [1, 2])
 
 
+class TestGuardedItemExpressionHelpers(unittest.TestCase):
+    """Per-helper coverage for GHSA-87x2-9jwx-7gh4 so each guarded path stays pinned."""
+
+    def _executor(self) -> WorkflowExecutor:
+        return WorkflowExecutor(nodes=[], edges=[])
+
+    def test_every_item_expression_helper_rejects_private_paths(self) -> None:
+        executor = self._executor()
+        cases = [
+            '$arr.map("item.__class__")',
+            '$arr.filter("item.__class__")',
+            '$arr.sort("item.__class__")',
+            '$arr.distinctBy("item.__class__")',
+            "$arr.map(\"concat('item.__class__', '')\")",
+            "$arr.map(\"get(item, '__class__')\")",
+        ]
+        for expression in cases:
+            with self.subTest(expression=expression):
+                result = executor.resolve_expression(expression, {"arr": ["x"]}, preserve_type=True)
+                for item in result if isinstance(result, list) else [result]:
+                    self.assertNotIsInstance(item, type)
+                    self.assertFalse(callable(item))
+
+    def test_get_helper_hides_inherited_builtin_callables(self) -> None:
+        executor = self._executor()
+        self.assertEqual(
+            executor.resolve_expression(
+                "$arr.map(\"get(item, 'pop')\")", {"arr": [[1, 2]]}, preserve_type=True
+            ),
+            [None],
+        )
+        self.assertEqual(
+            executor.resolve_expression(
+                "$arr.map(\"get(item, 'name')\")",
+                {"arr": [{"name": "bob"}]},
+                preserve_type=True,
+            ),
+            ["bob"],
+        )
+
+    def test_public_item_paths_and_helpers_still_work(self) -> None:
+        executor = self._executor()
+        self.assertEqual(
+            executor.resolve_expression(
+                '$arr.sort("item.n")', {"arr": [{"n": 2}, {"n": 1}]}, preserve_type=True
+            ),
+            [{"n": 1}, {"n": 2}],
+        )
+        self.assertEqual(
+            executor.resolve_expression(
+                '$arr.filter("item.ok")',
+                {"arr": [{"ok": True}, {"ok": False}]},
+                preserve_type=True,
+            ),
+            [{"ok": True}],
+        )
+        self.assertEqual(
+            executor.resolve_expression(
+                "$arr.map(\"concat('item.name', '!')\")",
+                {"arr": [{"name": "bob"}]},
+                preserve_type=True,
+            ),
+            ["bob!"],
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

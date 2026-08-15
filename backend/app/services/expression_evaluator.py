@@ -59,6 +59,23 @@ class ExpressionEvaluateResponse(BaseModel):
     selected_loop_total: int | None = None
 
 
+def _is_invocable_expression_callable(candidate: object, executor: Any) -> bool:
+    """True when a paren-less result may be auto-invoked for the preview.
+
+    Only the Dot wrapper methods and the registered ``$`` functions qualify, so
+    `$s.upper` still renders while `$arr.pop` is handed back uncalled.
+    """
+    from app.services.workflow_executor import is_expression_callable
+
+    if is_expression_callable(candidate):
+        return True
+    try:
+        registered = executor._get_evaluator_functions().values()
+    except Exception:  # noqa: BLE001 - preview must not fail on evaluator internals
+        return False
+    return any(candidate is function for function in registered)
+
+
 def _fallback_find_expressions(text: str) -> list[tuple[int, int, str]]:
     """Return `$...` spans using the same parsing rules as the workflow executor."""
     expressions: list[tuple[int, int, str]] = []
@@ -1208,7 +1225,11 @@ class ExpressionEvaluatorService:
                     current_node_id,
                     preserve_type=True,
                 )
-                if callable(result) and not trimmed.endswith(")"):
+                if (
+                    callable(result)
+                    and not trimmed.endswith(")")
+                    and _is_invocable_expression_callable(result, executor)
+                ):
                     try:
                         signature = inspect.signature(result)
                     except (TypeError, ValueError):
@@ -1227,6 +1248,9 @@ class ExpressionEvaluatorService:
                         ]
                         if not required_params:
                             result = executor._unwrap_value(result())
+                if callable(result) and not _is_invocable_expression_callable(result, executor):
+                    # Never render a raw callable repr; it leaks internals into the preview.
+                    result = None
                 return ExpressionEvaluateResponse(
                     result=result,
                     result_type=classify_type(result),

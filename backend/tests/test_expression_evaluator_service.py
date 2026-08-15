@@ -1715,6 +1715,54 @@ class TestExpressionEvalRejectsDotListAndFallbackSandboxEscapeService(unittest.T
         self.assertEqual(mapped.result, ["a", "b"])
 
 
+class TestPreviewCallableAllowlist(unittest.TestCase):
+    """Paren-less previews may only invoke Dot wrapper methods and registered `$` functions."""
+
+    def _service(self) -> ExpressionEvaluatorService:
+        return ExpressionEvaluatorService()
+
+    def test_supported_paren_less_expressions_still_invoke(self) -> None:
+        service = self._service()
+        cases: list[tuple[str, dict]] = [
+            ("$Date", {}),
+            ("$Date().format", {}),
+            ("$now.toISO", {}),
+            ("$now.year", {}),
+            ("$s.upper", {"s": "ab"}),
+            ("$arr.first", {"arr": [1, 2]}),
+        ]
+        for expression, context in cases:
+            with self.subTest(expression=expression):
+                response = service.evaluate(expression, context)
+                self.assertIsNone(response.error)
+                self.assertIsNotNone(response.result, f"{expression} should still resolve")
+                self.assertFalse(callable(response.result))
+
+    def test_upper_and_first_return_the_invoked_value(self) -> None:
+        service = self._service()
+        self.assertEqual(service.evaluate("$s.upper", {"s": "ab"}).result, "AB")
+        self.assertEqual(service.evaluate("$arr.first", {"arr": [1, 2]}).result, 1)
+
+    def test_inherited_builtin_methods_are_not_invoked(self) -> None:
+        service = self._service()
+        cases: list[tuple[str, str, dict, object]] = [
+            ("$arr.pop", "arr", {"arr": [1, 2, 3]}, [1, 2, 3]),
+            ("$arr.clear", "arr", {"arr": [1, 2]}, [1, 2]),
+            ("$d.popitem", "d", {"d": {"a": 1, "b": 2}}, {"a": 1, "b": 2}),
+        ]
+        for expression, key, context, unchanged in cases:
+            with self.subTest(expression=expression):
+                response = service.evaluate(expression, context)
+                self.assertIsNone(response.result, f"{expression} must not be invoked")
+                self.assertEqual(response.result_type, "null")
+                self.assertEqual(context[key], unchanged, "preview must not mutate the input")
+
+    def test_blocked_callable_never_leaks_its_repr(self) -> None:
+        response = self._service().evaluate("$arr.pop", {"arr": [1, 2, 3]})
+        self.assertNotIsInstance(response.result, str)
+        self.assertIsNone(response.result)
+
+
 class TestWorkflowMetadataVariables(unittest.TestCase):
     def test_workflow_metadata_variables_resolve_in_preview(self) -> None:
         wid = uuid.uuid4()

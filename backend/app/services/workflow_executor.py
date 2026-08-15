@@ -124,6 +124,24 @@ def _sandbox_rejected_private_access(exc: BaseException, expr: str) -> bool:
     return isinstance(exc, FeatureNotAvailable) or type(exc).__name__ == "FeatureNotAvailable"
 
 
+def is_expression_callable(candidate: object) -> bool:
+    """True only for methods the Dot wrappers define themselves.
+
+    Inherited builtin methods (``list.pop``, ``dict.popitem``) are not expression
+    API, so callers must never invoke or hand back one.
+    """
+    owner = getattr(candidate, "__self__", None)
+    name = getattr(candidate, "__name__", None)
+    if owner is None or not name or _is_private_python_attr(name):
+        return False
+    for klass in type(owner).__mro__:
+        if klass.__module__ != __name__:
+            continue
+        if name in vars(klass):
+            return True
+    return False
+
+
 _DOLLAR_NAME_RE = re.compile(r"\$([a-zA-Z_][a-zA-Z0-9_]*)")
 _ITEM_EXPRESSION_STRING_START_RE = re.compile(r"\.(?:distinctBy|distinct_by|filter|map|sort)\(\s*$")
 _POSTGRES_UNSAFE_JSON_STRING_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\ud800-\udfff]")
@@ -1053,7 +1071,12 @@ class DotList(list):
                     return obj.get(key, default)
                 if isinstance(key, str) and _is_private_python_attr(key):
                     return default
-                return getattr(obj, key, default) if hasattr(obj, key) else default
+                if not hasattr(obj, key):
+                    return default
+                attribute = getattr(obj, key, default)
+                if callable(attribute) and not is_expression_callable(attribute):
+                    return default
+                return attribute
 
             inherited_names.update(
                 {
