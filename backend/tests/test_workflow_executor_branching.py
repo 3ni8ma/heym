@@ -1,5 +1,8 @@
+import os
+import tempfile
 import unittest
 import uuid
+from datetime import datetime
 from unittest.mock import patch
 
 import httpx
@@ -624,6 +627,206 @@ class TestConditionEvalRejectsDunderTraversal(unittest.TestCase):
                 {"node": {"value": None}},
                 None,
             )
+        )
+
+
+class TestExpressionEvalRejectsDotListAndFallbackSandboxEscape(unittest.TestCase):
+    """Regression for GHSA-87x2-9jwx-7gh4.
+
+    simpleeval hardening from GHSA-pm6h covers condition/substitution, but DotList
+    item expressions and the simpleeval fallback resolver walked dunders with raw
+    getattr. These tests pin the three PoC expressions and keep ``_id`` dict keys
+    working.
+    """
+
+    def _executor(self) -> WorkflowExecutor:
+        return WorkflowExecutor(nodes=[], edges=[])
+
+    def test_map_dunder_path_does_not_return_bound_method(self) -> None:
+        executor = self._executor()
+        result = executor.resolve_expression(
+            '$arr.map("item.__class__.__base__.__subclasses__")',
+            {"arr": ["x"]},
+            preserve_type=True,
+        )
+        self.assertIsInstance(result, list)
+        self.assertEqual(len(result), 1)
+        self.assertFalse(callable(result[0]))
+        self.assertNotIsInstance(result[0], type)
+        self.assertIsNone(result[0])
+
+    def test_calling_mapped_dunder_method_does_not_list_subclasses(self) -> None:
+        executor = self._executor()
+        mapped = executor.resolve_expression(
+            '$arr.map("item.__class__.__base__.__subclasses__")[0]',
+            {"arr": ["x"]},
+            preserve_type=True,
+        )
+        result = executor.resolve_expression("$m()", {"m": mapped}, preserve_type=True)
+        if isinstance(result, (list, tuple)) and result:
+            self.assertFalse(
+                all(isinstance(item, type) for item in result),
+                f"Bound-method call returned loaded classes: {result!r}",
+            )
+        else:
+            self.assertFalse(callable(result))
+
+    def test_init_globals_os_system_does_not_execute(self) -> None:
+        class _Probe:
+            def __init__(self) -> None:
+                pass
+
+        fd, marker = tempfile.mkstemp(prefix="heym_expr_rce_reg_")
+        os.close(fd)
+        os.unlink(marker)
+        try:
+            payload = f'$p.__init__.__globals__["os"].system("touch {marker}")'
+            result = self._executor().resolve_expression(
+                payload,
+                {"p": _Probe},
+                preserve_type=True,
+            )
+            self.assertFalse(
+                os.path.exists(marker),
+                f"PoC executed; marker created, result={result!r}",
+            )
+            self.assertNotEqual(result, 0)
+        finally:
+            if os.path.exists(marker):
+                os.unlink(marker)
+
+    def test_underscore_prefixed_dict_keys_still_resolve(self) -> None:
+        executor = self._executor()
+        self.assertEqual(
+            executor.resolve_expression(
+                "$item._id",
+                {"item": {"_id": "abc-123"}},
+                preserve_type=True,
+            ),
+            "abc-123",
+        )
+        self.assertEqual(
+            executor.resolve_expression(
+                '$arr.map("item._id")',
+                {"arr": [{"_id": "a"}, {"_id": "b"}]},
+                preserve_type=True,
+            ),
+            ["a", "b"],
+        )
+        self.assertEqual(
+            executor.resolve_expression(
+                '$arr.distinctBy("item._id").map("item._id")',
+                {"arr": [{"_id": "a"}, {"_id": "a"}, {"_id": "b"}]},
+                preserve_type=True,
+            ),
+            ["a", "b"],
+        )
+
+    def test_legitimate_map_item_id_still_works(self) -> None:
+        result = self._executor().resolve_expression(
+            '$arr.map("item.id")',
+            {"arr": [{"id": 1}, {"id": 2}]},
+            preserve_type=True,
+        )
+        self.assertEqual(result, [1, 2])
+
+
+class TestGuardedItemExpressionHelpers(unittest.TestCase):
+    """Per-helper coverage for GHSA-87x2-9jwx-7gh4 so each guarded path stays pinned."""
+
+    def _executor(self) -> WorkflowExecutor:
+        return WorkflowExecutor(nodes=[], edges=[])
+
+    def test_every_item_expression_helper_rejects_private_paths(self) -> None:
+        executor = self._executor()
+        cases = [
+            '$arr.map("item.__class__")',
+            '$arr.filter("item.__class__")',
+            '$arr.sort("item.__class__")',
+            '$arr.distinctBy("item.__class__")',
+            "$arr.map(\"concat('item.__class__', '')\")",
+            "$arr.map(\"get(item, '__class__')\")",
+        ]
+        for expression in cases:
+            with self.subTest(expression=expression):
+                result = executor.resolve_expression(expression, {"arr": ["x"]}, preserve_type=True)
+                for item in result if isinstance(result, list) else [result]:
+                    self.assertNotIsInstance(item, type)
+                    self.assertFalse(callable(item))
+
+    def test_get_helper_hides_inherited_builtin_callables(self) -> None:
+        executor = self._executor()
+        self.assertEqual(
+            executor.resolve_expression(
+                "$arr.map(\"get(item, 'pop')\")", {"arr": [[1, 2]]}, preserve_type=True
+            ),
+            [None],
+        )
+        self.assertEqual(
+            executor.resolve_expression(
+                "$arr.map(\"get(item, 'name')\")",
+                {"arr": [{"name": "bob"}]},
+                preserve_type=True,
+            ),
+            ["bob"],
+        )
+
+    def test_node_output_never_carries_a_method_reference(self) -> None:
+        # The repr of a bound method leaks a heap address into execution history.
+        executor = self._executor()
+        for expression, context in (
+            ("$s.upper", {"s": "ab"}),
+            ("$arr.pop", {"arr": [1, 2]}),
+            ("$len", {}),
+        ):
+            with self.subTest(expression=expression):
+                self.assertIsNone(executor.resolve_expression(expression, context))
+
+    def test_documented_expression_api_is_unchanged(self) -> None:
+        executor = self._executor()
+        cases: list[tuple[str, dict, object]] = [
+            ("$s.upper()", {"s": "ab"}, "AB"),
+            ("$arr.count(1)", {"arr": [1, 1]}, 2),
+            ("$arr.index(2)", {"arr": [1, 2]}, 1),
+            ('$arr.join("-")', {"arr": ["a", "b"]}, "a-b"),
+            ("$doc._id", {"doc": {"_id": "x"}}, "x"),
+            ("$now.year", {}, datetime.now().year),
+        ]
+        for expression, context, expected in cases:
+            with self.subTest(expression=expression):
+                self.assertEqual(executor.resolve_expression(expression, context), expected)
+
+    def test_get_helper_filters_callable_dictionary_values(self) -> None:
+        self.assertEqual(
+            self._executor().resolve_expression(
+                "$arr.map(\"get(item, 'f')\")", {"arr": [{"f": len}]}, preserve_type=True
+            ),
+            [None],
+        )
+
+    def test_public_item_paths_and_helpers_still_work(self) -> None:
+        executor = self._executor()
+        self.assertEqual(
+            executor.resolve_expression(
+                '$arr.sort("item.n")', {"arr": [{"n": 2}, {"n": 1}]}, preserve_type=True
+            ),
+            [{"n": 1}, {"n": 2}],
+        )
+        self.assertEqual(
+            executor.resolve_expression(
+                '$arr.filter("item.ok")',
+                {"arr": [{"ok": True}, {"ok": False}]},
+                preserve_type=True,
+            ),
+            [{"ok": True}],
+        )
+        self.assertEqual(
+            executor.resolve_expression(
+                "$arr.map(\"concat('item.name', '!')\")",
+                {"arr": [{"name": "bob"}]},
+                preserve_type=True,
+            ),
+            ["bob!"],
         )
 
 

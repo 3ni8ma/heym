@@ -1,3 +1,5 @@
+import os
+import tempfile
 import unittest
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -623,6 +625,116 @@ class ExpressionEvaluateApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(response.result, raw_secret)
         self.assertNotIn("secret-key-value", response.result)
         self.assertEqual(response.result_type, "string")
+
+    async def test_map_dunder_item_expression_does_not_escape_sandbox(self) -> None:
+        workflow = self._workflow(
+            nodes=[
+                {"id": "node-upstream", "type": "set", "data": {"label": "arr"}},
+                {"id": self.current_node_id, "type": "output", "data": {"label": "finalOutput"}},
+            ],
+            edges=[{"id": "e1", "source": "node-upstream", "target": self.current_node_id}],
+        )
+        request = self._request(
+            expression='$arr.items.map("item.__class__.__base__.__subclasses__")',
+            node_results=[
+                {
+                    "node_id": "node-upstream",
+                    "label": "arr",
+                    "output": {"items": ["x"]},
+                }
+            ],
+        )
+        with (
+            patch("app.api.expressions.get_workflow_by_id", AsyncMock(return_value=workflow)),
+            patch("app.api.expressions.get_credentials_context", AsyncMock(return_value={})),
+            patch(
+                "app.api.expressions.get_global_variables_context",
+                AsyncMock(return_value={}),
+            ),
+        ):
+            response = await evaluate_expression(
+                request, http_request=self._http_request(), db=self.db, current_user=self.user
+            )
+
+        result = response.result
+        if isinstance(result, list):
+            for item in result:
+                self.assertFalse(callable(item))
+                self.assertNotIsInstance(item, type)
+        else:
+            self.assertFalse(callable(result))
+            self.assertNotIsInstance(result, type)
+
+    async def test_init_globals_os_system_does_not_execute(self) -> None:
+        class _Probe:
+            def __init__(self) -> None:
+                pass
+
+        fd, marker = tempfile.mkstemp(prefix="heym_expr_rce_api_")
+        os.close(fd)
+        os.unlink(marker)
+        workflow = self._workflow(
+            nodes=[
+                {"id": "node-upstream", "type": "set", "data": {"label": "p"}},
+                {"id": self.current_node_id, "type": "output", "data": {"label": "finalOutput"}},
+            ],
+            edges=[{"id": "e1", "source": "node-upstream", "target": self.current_node_id}],
+        )
+        request = self._request(
+            expression=f'$p.__init__.__globals__["os"].system("touch {marker}")',
+            node_results=[
+                {"node_id": "node-upstream", "label": "p", "output": _Probe},
+            ],
+        )
+        try:
+            with (
+                patch("app.api.expressions.get_workflow_by_id", AsyncMock(return_value=workflow)),
+                patch("app.api.expressions.get_credentials_context", AsyncMock(return_value={})),
+                patch(
+                    "app.api.expressions.get_global_variables_context",
+                    AsyncMock(return_value={}),
+                ),
+            ):
+                response = await evaluate_expression(
+                    request, http_request=self._http_request(), db=self.db, current_user=self.user
+                )
+            self.assertFalse(
+                os.path.exists(marker),
+                f"PoC executed; marker created, result={response.result!r}",
+            )
+            self.assertNotEqual(response.result, 0)
+        finally:
+            if os.path.exists(marker):
+                os.unlink(marker)
+
+    async def test_underscore_prefixed_dict_keys_still_resolve(self) -> None:
+        workflow = self._workflow(
+            nodes=[
+                {"id": "node-upstream", "type": "set", "data": {"label": "item"}},
+                {"id": self.current_node_id, "type": "output", "data": {"label": "finalOutput"}},
+            ],
+            edges=[{"id": "e1", "source": "node-upstream", "target": self.current_node_id}],
+        )
+        request = self._request(
+            expression="$item._id",
+            node_results=[
+                {"node_id": "node-upstream", "label": "item", "output": {"_id": "abc-123"}},
+            ],
+        )
+        with (
+            patch("app.api.expressions.get_workflow_by_id", AsyncMock(return_value=workflow)),
+            patch("app.api.expressions.get_credentials_context", AsyncMock(return_value={})),
+            patch(
+                "app.api.expressions.get_global_variables_context",
+                AsyncMock(return_value={}),
+            ),
+        ):
+            response = await evaluate_expression(
+                request, http_request=self._http_request(), db=self.db, current_user=self.user
+            )
+
+        self.assertIsNone(response.error)
+        self.assertEqual(response.result, "abc-123")
 
     def test_request_rejects_expression_over_max_length(self) -> None:
         with self.assertRaises(ValidationError):
