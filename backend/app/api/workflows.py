@@ -3,7 +3,7 @@ import copy
 import json
 import logging
 import uuid
-from collections.abc import Coroutine, Iterator
+from collections.abc import Coroutine, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -170,9 +170,26 @@ def _coerce_bool(value: object, *, default: bool = False) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _sanitize_headers(raw_headers: dict[str, str]) -> dict[str, str]:
-    """Return lowercased headers with sensitive entries removed."""
-    return {k.lower(): v for k, v in raw_headers.items() if k.lower() not in _SENSITIVE_HEADERS}
+def _sanitize_headers(
+    raw_headers: dict[str, str],
+    extra_sensitive: Iterable[str] | None = None,
+) -> dict[str, str]:
+    """Return lowercased headers with sensitive entries removed.
+
+    ``extra_sensitive`` carries request-scoped names, notably the workflow's own
+    ``auth_header_key``, which is a shared secret the fixed denylist cannot know.
+    Matching is case-insensitive, as HTTP header names are.
+    """
+    denied = set(_SENSITIVE_HEADERS)
+    if extra_sensitive:
+        denied.update(name.lower() for name in extra_sensitive if name)
+    return {k.lower(): v for k, v in raw_headers.items() if k.lower() not in denied}
+
+
+def _webhook_secret_names(workflow: Workflow) -> tuple[str, ...]:
+    """Return the request-scoped secret header names configured on this workflow."""
+    key = getattr(workflow, "auth_header_key", None)
+    return (key,) if key else ()
 
 
 def _sanitize_invalid_unicode(value: Any) -> Any:
@@ -189,12 +206,28 @@ def _sanitize_invalid_unicode(value: Any) -> Any:
     return value
 
 
-def _build_workflow_response(workflow: Workflow) -> WorkflowResponse:
-    """Return a workflow response with UTF-8-safe node and edge payloads."""
+def _build_workflow_response(workflow: Workflow, viewer_id: uuid.UUID) -> WorkflowResponse:
+    """Return a workflow response with UTF-8-safe payloads and owner-only secrets."""
     response = WorkflowResponse.model_validate(workflow)
     response.nodes = _sanitize_invalid_unicode(response.nodes)
     response.edges = _sanitize_invalid_unicode(response.edges)
     response.sse_node_config = _sanitize_invalid_unicode(response.sse_node_config or {})
+    response.auth_header_value_set = bool(workflow.auth_header_value)
+    if workflow.owner_id != viewer_id:
+        response.auth_header_value = None
+    return response
+
+
+def _build_workflow_version_response(
+    version: WorkflowVersion,
+    *,
+    is_owner: bool,
+) -> WorkflowVersionResponse:
+    """Return a version response, masking the webhook secret for collaborators."""
+    response = WorkflowVersionResponse.model_validate(version)
+    response.auth_header_value_set = bool(version.auth_header_value)
+    if not is_owner:
+        response.auth_header_value = None
     return response
 
 
@@ -1354,7 +1387,7 @@ async def create_workflow(
         workflow_id=workflow.id,
         dedupe_key=f"{EVENT_WORKFLOW_CREATED}:{workflow.id}",
     )
-    return _build_workflow_response(workflow)
+    return _build_workflow_response(workflow, current_user.id)
 
 
 @router.get("/{workflow_id}", response_model=WorkflowResponse)
@@ -1371,7 +1404,7 @@ async def get_workflow(
             detail="Workflow not found",
         )
 
-    response = _build_workflow_response(workflow)
+    response = _build_workflow_response(workflow, current_user.id)
     if workflow.owner_id != current_user.id:
         share_result = await db.execute(
             select(WorkflowShare).where(
@@ -1466,7 +1499,10 @@ async def update_workflow(
         workflow.auth_type = workflow_data.auth_type
     if workflow_data.auth_header_key is not None:
         workflow.auth_header_key = workflow_data.auth_header_key
-    if workflow_data.auth_header_value is not None:
+    # Only the owner reads this secret, so only the owner may write it. Without
+    # this guard a collaborator whose editor rendered the masked (empty) field
+    # would silently overwrite the owner's secret on the next autosave.
+    if workflow_data.auth_header_value is not None and workflow.owner_id == current_user.id:
         workflow.auth_header_value = workflow_data.auth_header_value
     if workflow_data.webhook_body_mode is not None:
         if workflow_data.webhook_body_mode != old_webhook_body_mode:
@@ -1599,7 +1635,7 @@ async def update_workflow(
             workflow_id=workflow.id,
             dedupe_key=f"{EVENT_WORKFLOW_UPDATED}:{workflow.id}:{updated_payload['updated_at']}",
         )
-    return _build_workflow_response(workflow)
+    return _build_workflow_response(workflow, current_user.id)
 
 
 @router.delete("/{workflow_id}/cache", status_code=status.HTTP_204_NO_CONTENT)
@@ -1781,7 +1817,8 @@ async def list_workflow_versions(
     )
     versions = result.scalars().all()
 
-    return [WorkflowVersionResponse.model_validate(version) for version in versions]
+    is_owner = workflow.owner_id == current_user.id
+    return [_build_workflow_version_response(version, is_owner=is_owner) for version in versions]
 
 
 @router.get("/{workflow_id}/versions/{version_id}", response_model=WorkflowVersionResponse)
@@ -1812,7 +1849,7 @@ async def get_workflow_version(
             detail="Version not found",
         )
 
-    return WorkflowVersionResponse.model_validate(version)
+    return _build_workflow_version_response(version, is_owner=workflow.owner_id == current_user.id)
 
 
 @router.get(
@@ -1847,6 +1884,24 @@ async def get_workflow_version_diff(
             detail="Version not found",
         )
 
+    is_owner = workflow.owner_id == current_user.id
+
+    def _diff_config(source: Workflow | WorkflowVersion) -> dict[str, Any]:
+        """Build the comparable config, masking the webhook secret for collaborators.
+
+        Both sides are masked identically, so a hidden secret never shows up as a
+        phantom change in the diff.
+        """
+        return {
+            "auth_type": source.auth_type,
+            "auth_header_key": source.auth_header_key,
+            "auth_header_value": source.auth_header_value if is_owner else None,
+            "webhook_body_mode": source.webhook_body_mode,
+            "cache_ttl_seconds": source.cache_ttl_seconds,
+            "rate_limit_requests": source.rate_limit_requests,
+            "rate_limit_window_seconds": source.rate_limit_window_seconds,
+        }
+
     if compare_to:
         compare_result = await db.execute(
             select(WorkflowVersion).where(
@@ -1862,53 +1917,21 @@ async def get_workflow_version_diff(
             )
         old_nodes = compare_version.nodes
         old_edges = compare_version.edges
-        old_config = {
-            "auth_type": compare_version.auth_type,
-            "auth_header_key": compare_version.auth_header_key,
-            "auth_header_value": compare_version.auth_header_value,
-            "webhook_body_mode": compare_version.webhook_body_mode,
-            "cache_ttl_seconds": compare_version.cache_ttl_seconds,
-            "rate_limit_requests": compare_version.rate_limit_requests,
-            "rate_limit_window_seconds": compare_version.rate_limit_window_seconds,
-        }
+        old_config = _diff_config(compare_version)
         compared_to_version_id = str(compare_version.id)
         compared_to_version_number = compare_version.version_number
         new_nodes = version.nodes
         new_edges = version.edges
-        new_config = {
-            "auth_type": version.auth_type,
-            "auth_header_key": version.auth_header_key,
-            "auth_header_value": version.auth_header_value,
-            "webhook_body_mode": version.webhook_body_mode,
-            "cache_ttl_seconds": version.cache_ttl_seconds,
-            "rate_limit_requests": version.rate_limit_requests,
-            "rate_limit_window_seconds": version.rate_limit_window_seconds,
-        }
+        new_config = _diff_config(version)
     else:
         old_nodes = version.nodes
         old_edges = version.edges
-        old_config = {
-            "auth_type": version.auth_type,
-            "auth_header_key": version.auth_header_key,
-            "auth_header_value": version.auth_header_value,
-            "webhook_body_mode": version.webhook_body_mode,
-            "cache_ttl_seconds": version.cache_ttl_seconds,
-            "rate_limit_requests": version.rate_limit_requests,
-            "rate_limit_window_seconds": version.rate_limit_window_seconds,
-        }
+        old_config = _diff_config(version)
         compared_to_version_id = None
         compared_to_version_number = None
         new_nodes = workflow.nodes
         new_edges = workflow.edges
-        new_config = {
-            "auth_type": workflow.auth_type,
-            "auth_header_key": workflow.auth_header_key,
-            "auth_header_value": workflow.auth_header_value,
-            "webhook_body_mode": workflow.webhook_body_mode,
-            "cache_ttl_seconds": workflow.cache_ttl_seconds,
-            "rate_limit_requests": workflow.rate_limit_requests,
-            "rate_limit_window_seconds": workflow.rate_limit_window_seconds,
-        }
+        new_config = _diff_config(workflow)
 
     diff = calculate_workflow_diff(
         old_nodes=old_nodes,
@@ -1989,7 +2012,7 @@ async def revert_workflow_to_version(
     await db.flush()
     await db.refresh(workflow)
 
-    return _build_workflow_response(workflow)
+    return _build_workflow_response(workflow, current_user.id)
 
 
 @router.delete("/{workflow_id}/versions", status_code=status.HTTP_204_NO_CONTENT)
@@ -2636,7 +2659,7 @@ async def execute_workflow_endpoint(
     await validate_workflow_auth(workflow, request, current_user, db)
 
     enriched_inputs = {
-        "headers": _sanitize_headers(dict(request.headers)),
+        "headers": _sanitize_headers(dict(request.headers), _webhook_secret_names(workflow)),
         "query": dict(request.query_params),
         "body": raw_body,
     }
@@ -3280,7 +3303,7 @@ async def execute_workflow_stream(
         )
 
     enriched_inputs = {
-        "headers": _sanitize_headers(dict(request.headers)),
+        "headers": _sanitize_headers(dict(request.headers), _webhook_secret_names(workflow)),
         "query": dict(request.query_params),
         "body": raw_body,
     }

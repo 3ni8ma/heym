@@ -193,6 +193,30 @@ async def _get_public_key(db: AsyncSession, credential_id: str) -> str | None:
     return public_key or None
 
 
+def _redact_interaction_token(value: object, raw_token: str) -> object:
+    """Recursively drop the Discord interaction token from anything persisted.
+
+    The token reaches more than the run inputs: the discordTrigger node copies
+    the whole interaction into its output, which comes back as ``outputs`` and
+    ``node_results``. Redacting one structure and not the others just moves the
+    secret to a different column, so every persisted shape goes through here.
+
+    ``application_id`` is deliberately kept. It identifies the app but is not the
+    capability secret; the token alone grants follow-up posting rights.
+
+    New containers are returned rather than mutating in place, because the
+    follow-up sender still reads the raw interaction after the run completes.
+    """
+    if isinstance(value, dict):
+        return {k: _redact_interaction_token(v, raw_token) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_interaction_token(item, raw_token) for item in value]
+    if isinstance(value, str) and raw_token and raw_token in value:
+        # Also catches the token embedded in a rendered string, such as a URL.
+        return value.replace(raw_token, "[redacted]")
+    return value
+
+
 async def _execute_workflow_background(
     workflow: Workflow,
     node_id: str,
@@ -211,6 +235,14 @@ async def _execute_workflow_background(
             "data": interaction_body.get("data", {}),
             "headers": safe_headers,
         }
+
+        # One redactor for this run, applied at every persistence boundary below.
+        # The live `inputs` dict keeps the raw token because the workflow and the
+        # follow-up sender both still need it.
+        raw_token = str(interaction_body.get("token") or "")
+
+        def redact(value: object) -> object:
+            return _redact_interaction_token(value, raw_token) if raw_token else value
 
         async with async_session_maker() as db:
             workflow_result = await db.execute(select(Workflow).where(Workflow.id == workflow.id))
@@ -233,7 +265,7 @@ async def _execute_workflow_background(
             cancel_event = register_execution(
                 workflow_id=fresh_workflow.id,
                 execution_id=execution_id,
-                inputs=inputs,
+                inputs=redact(inputs),
                 trigger_source="discord",
                 actor_user_id=fresh_workflow.owner_id,
             )
@@ -257,9 +289,9 @@ async def _execute_workflow_background(
             history_entry = ExecutionHistory(
                 id=execution_id,
                 workflow_id=fresh_workflow.id,
-                inputs=inputs,
-                outputs=result.outputs,
-                node_results=result.node_results,
+                inputs=redact(inputs),
+                outputs=redact(result.outputs),
+                node_results=redact(result.node_results),
                 status=result.status,
                 execution_time_ms=result.execution_time_ms,
                 trigger_source="Discord",
@@ -277,9 +309,9 @@ async def _execute_workflow_background(
             for sub_exec in result.sub_workflow_executions:
                 sub_history = ExecutionHistory(
                     workflow_id=uuid.UUID(sub_exec.workflow_id),
-                    inputs=sub_exec.inputs,
-                    outputs=sub_exec.outputs,
-                    node_results=sub_exec.node_results,
+                    inputs=redact(sub_exec.inputs),
+                    outputs=redact(sub_exec.outputs),
+                    node_results=redact(sub_exec.node_results),
                     status=sub_exec.status,
                     execution_time_ms=sub_exec.execution_time_ms,
                     trigger_source=sub_exec.trigger_source,

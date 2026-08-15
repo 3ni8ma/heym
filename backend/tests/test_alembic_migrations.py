@@ -15,7 +15,19 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["108_add_alerts"])
+        self.assertEqual(self.script.get_heads(), ["111_backfill_oauth_token_hashes"])
+
+    def test_capability_secret_revisions_form_one_chain(self) -> None:
+        chain = {
+            "109_hash_mcp_api_keys": "108_add_alerts",
+            "110_hash_portal_sessions": "109_hash_mcp_api_keys",
+            "111_backfill_oauth_token_hashes": "110_hash_portal_sessions",
+        }
+        for revision_id, expected_parent in chain.items():
+            with self.subTest(revision=revision_id):
+                revision = self.script.get_revision(revision_id)
+                self.assertIsNotNone(revision)
+                self.assertEqual(revision.down_revision, expected_parent)
 
     def test_heym_events_revision_follows_mcp_chat_tool_revision(self) -> None:
         heym_events_revision = self.script.get_revision("107_add_heym_events")

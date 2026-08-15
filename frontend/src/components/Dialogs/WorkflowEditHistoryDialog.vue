@@ -121,6 +121,7 @@ const allVersions = computed(() => {
     auth_type: current.auth_type,
     auth_header_key: current.auth_header_key,
     auth_header_value: current.auth_header_value,
+    auth_header_value_set: current.auth_header_value_set,
     webhook_body_mode: current.webhook_body_mode,
     cache_ttl_seconds: current.cache_ttl_seconds,
     rate_limit_requests: current.rate_limit_requests,

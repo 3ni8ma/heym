@@ -1,6 +1,8 @@
 # Global Variables
 
-The **Global Variable Store** holds persistent, user-scoped key-value data that survives across workflow executions. Use it for API keys, configuration, or shared state that multiple workflows need.
+The **Global Variable Store** holds persistent, user-scoped key-value data that survives across workflow executions. Use it for configuration, feature flags, counters, or shared state that multiple workflows need.
+
+> **Do not store secrets here.** Global variables are not a secrets vault: values are stored unencrypted, they are returned in full to anyone you share them with, and collaborators can edit them. API keys, passwords and tokens belong in [Credentials](./credentials.md), which encrypts them at rest and never returns the secret to the client.
 
 ## Local vs Global
 
@@ -19,7 +21,7 @@ The **Global Variable Store** holds persistent, user-scoped key-value data that 
 Access global variables with `$global.variableName`:
 
 ```
-$global.apiKey
+$global.environment
 $global.settings.baseUrl
 $global.userId
 ```

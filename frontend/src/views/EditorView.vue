@@ -80,6 +80,13 @@ const webhookBodyMode = ref<WebhookBodyMode>("legacy");
 const authType = ref<WorkflowAuthType>("jwt");
 const authHeaderKey = ref("");
 const authHeaderValue = ref("");
+// The backend masks this secret for collaborators, reporting only that one
+// exists. Hidden means read-only here: the field must never autosave back.
+const isAuthHeaderValueHidden = computed(
+  () =>
+    workflowStore.currentWorkflow?.auth_header_value_set === true &&
+    !workflowStore.currentWorkflow?.auth_header_value,
+);
 const curlCopied = ref(false);
 const executionTokens = ref<ExecutionToken[]>([]);
 const selectedTokenId = ref<string | null>(null);
@@ -798,6 +805,7 @@ watch(authHeaderKey, async (value) => {
 
 watch(authHeaderValue, async (value) => {
   if (!workflowStore.currentWorkflow) return;
+  if (isAuthHeaderValueHidden.value) return;
   if (workflowStore.currentWorkflow.auth_header_value === value) return;
   await workflowApi.update(workflowId.value, { auth_header_value: value });
   workflowStore.currentWorkflow.auth_header_value = value;
@@ -1834,7 +1842,8 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
             <Label>Header Value</Label>
             <Input
               v-model="authHeaderValue"
-              placeholder="your-secret-value"
+              :readonly="isAuthHeaderValueHidden"
+              :placeholder="isAuthHeaderValueHidden ? 'Set by the owner and hidden' : 'your-secret-value'"
             />
           </div>
         </div>

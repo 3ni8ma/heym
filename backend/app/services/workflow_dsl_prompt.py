@@ -3309,7 +3309,7 @@ This returns: `["news/my-article.html", "blog/another-post.html", ...]`
     "playwrightAuthFallbackSteps": [
       { "action": "navigate", "url": "https://example.com/login" },
       { "action": "fill", "selector": "#email", "value": "$userInput.body.email" },
-      { "action": "fill", "selector": "#password", "value": "$global.loginPassword" },
+      { "action": "fill", "selector": "#password", "value": "$credentials.SiteLogin" },
       { "action": "click", "selector": "button[type=submit]" }
     ],
     "playwrightHeadless": true
@@ -3770,7 +3770,7 @@ When a merge node (e.g., labeled "mergeResults") combines inputs:
 - Variables are set using the `variable` node and can be updated by multiple nodes
 
 **$global Usage** (persistent, user-scoped):
-- `$global.apiKey` - Access a global variable named "apiKey" (persisted across workflows)
+- `$global.environment` - Access a global variable named "environment" (persisted across workflows). Global variables are unencrypted and readable by anyone they are shared with, so keep secrets in credentials instead
 - `$global.settings.baseUrl` - Access nested fields in object-type global variables
 - Global variables are set by variable nodes with `isGlobal: true`, or created/managed in the Variables tab
 

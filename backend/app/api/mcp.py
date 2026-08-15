@@ -61,7 +61,8 @@ from app.services.execution_cancellation import (
 from app.services.global_variables_service import get_global_variables_context
 from app.services.hitl_service import build_public_base_url
 from app.services.mcp_session import mcp_session_store, mcp_sse_channels
-from app.services.oauth_tokens import oauth_token_lookup_values
+from app.services.oauth_tokens import hash_oauth_token
+from app.services.secret_tokens import hash_secret
 from app.services.workflow_executor import execute_workflow
 
 router = APIRouter()
@@ -354,21 +355,19 @@ async def get_mcp_user(
         user_id_str, _ = resolve_result  # ignore server_id for default server
         return _session_user_from_id(user_id_str)
 
-    # 1. Check for Bearer token (OAuth) — from header or ?token= query param
+    # 1. Check for Bearer token (OAuth). Header only: a long-lived token in the
+    # query string lands in access logs, proxies, browser history and Referer.
     auth_header = request.headers.get("Authorization", "")
-    token_param = request.query_params.get("token")
 
     bearer_token = None
     if auth_header.startswith("Bearer "):
         bearer_token = auth_header[7:]
-    elif token_param:
-        bearer_token = token_param
 
     if bearer_token:
         now = datetime.now(timezone.utc)
         result = await db.execute(
             select(OAuthAccessToken).where(
-                OAuthAccessToken.access_token.in_(oauth_token_lookup_values(bearer_token)),
+                OAuthAccessToken.access_token == hash_oauth_token(bearer_token),
                 OAuthAccessToken.revoked.is_(False),
                 OAuthAccessToken.expires_at > now,
             )
@@ -391,8 +390,8 @@ async def get_mcp_user(
             )
         return user
 
-    # 2. Fall back to X-MCP-Key (existing behavior)
-    api_key = x_mcp_key or request.query_params.get("key")
+    # 2. Fall back to X-MCP-Key. Header only, for the same reason as above.
+    api_key = x_mcp_key
 
     if not api_key:
         raise HTTPException(
@@ -401,7 +400,7 @@ async def get_mcp_user(
             headers={"WWW-Authenticate": 'Bearer realm="heym-mcp"'},
         )
 
-    result = await db.execute(select(User).where(User.mcp_api_key == api_key))
+    result = await db.execute(select(User).where(User.mcp_api_key == hash_secret(api_key)))
     user = result.scalar_one_or_none()
 
     if user is None:
@@ -778,7 +777,8 @@ async def get_mcp_config(
     mcp_endpoint_url = f"{base_url}/api/mcp/sse"
 
     return MCPConfigResponse(
-        mcp_api_key=current_user.mcp_api_key,
+        mcp_api_key=None,
+        mcp_api_key_set=bool(current_user.mcp_api_key),
         mcp_endpoint_url=mcp_endpoint_url,
         workflows=workflow_items,
         chat_tool=MCPChatToolConfig(
@@ -820,10 +820,11 @@ async def regenerate_mcp_key(
     db: AsyncSession = Depends(get_db),
 ) -> MCPRegenerateKeyResponse:
     new_key = secrets.token_hex(32)
-    current_user.mcp_api_key = new_key
+    current_user.mcp_api_key = hash_secret(new_key)
     await db.flush()
     await db.refresh(current_user)
 
+    # Returned here and never again; the row only holds the digest.
     return MCPRegenerateKeyResponse(mcp_api_key=new_key)
 
 

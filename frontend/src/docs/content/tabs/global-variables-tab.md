@@ -29,7 +29,7 @@ The **Variables** tab manages the **Global Variable Store** – persistent key-v
 Reference variables in any expression:
 
 ```
-$global.apiKey
+$global.environment
 $global.settings.baseUrl
 ```
 

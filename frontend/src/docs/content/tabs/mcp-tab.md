@@ -15,9 +15,10 @@ The default server is always available at `{origin}/api/mcp/sse`. All workflows 
 
 ### MCP API Key
 
-- The tab shows your MCP API key (masked)
-- **Regenerate** – Create a new API key if needed
+- Keys are stored as SHA-256 digests, so Heym cannot show you an existing key. The tab reports whether one is set, not what it is.
+- **Generate** / **Regenerate** – The new key is displayed once, right after you create it. Copy it then; reloading the tab hides it for good.
 - Use this key when connecting Claude Desktop, Cursor, or other MCP clients to Heym
+- Lost a key? Regenerate it. The previous key stops working immediately.
 
 ### Connection Methods
 
@@ -87,7 +88,7 @@ Each server card shows:
 | Setting | Description |
 |---------|-------------|
 | **SSE Endpoint** | Unique URL: `{origin}/api/mcp/servers/{uuid}/sse` |
-| **API Key** | Independent key; reveal with the eye icon, copy or regenerate as needed |
+| **API Key** | Independent key, shown once when generated or regenerated. Copy it right away; it is stored hashed and cannot be revealed later |
 | **How to connect** | **Copy JSON** copies the ready-to-paste MCP config; **Add to Cursor** installs it in one click |
 | **Heym Capabilities** | Toggle the `heym_chat` tool for this server and pick its credential and model |
 | **Assigned Workflows** | Toggle which of your workflows this server exposes |
@@ -102,9 +103,9 @@ Toggling a workflow moves it to the top of the assigned list, so the row you jus
 
 Named servers support the same authentication methods as the default server:
 
-- **X-MCP-Key header** – Pass the server's API key directly (API clients, Cursor)
-- **Claude OAuth** – Add the server URL to Claude integrations; leave credentials blank and Claude registers via OAuth automatically
-- **Session token** – Issued during the SSE handshake; scoped to the specific server so tokens from one named server cannot access another
+- **X-MCP-Key header** – Pass the server's API key directly (API clients, Cursor). Header only: keys are not accepted as a `?key=` query parameter, because URLs end up in access logs, proxy logs and browser history.
+- **Claude OAuth** – Add the server URL to Claude integrations; leave credentials blank and Claude registers via OAuth automatically. The bearer token must travel in the `Authorization` header, not as `?token=`.
+- **Session token** – Issued during the SSE handshake; scoped to the specific server so tokens from one named server cannot access another. This short-lived `?session=` parameter is unaffected.
 
 ### Deleting a Named Server
 
