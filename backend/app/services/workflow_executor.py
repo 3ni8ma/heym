@@ -6036,6 +6036,10 @@ class WorkflowExecutor:
         return datetime.now(self.configured_timezone)
 
     def _serialize_result(self, value: object) -> object:
+        if callable(value):
+            # A method reference is not a value. Its repr carries a heap address, so it
+            # must never land in node output or execution history.
+            return None
         unwrapped = self._unwrap_value(value)
         if isinstance(unwrapped, (dict, list)):
             return json.dumps(unwrapped, ensure_ascii=False)

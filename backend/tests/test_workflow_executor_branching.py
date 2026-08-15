@@ -2,6 +2,7 @@ import os
 import tempfile
 import unittest
 import uuid
+from datetime import datetime
 from unittest.mock import patch
 
 import httpx
@@ -769,6 +770,31 @@ class TestGuardedItemExpressionHelpers(unittest.TestCase):
             ),
             ["bob"],
         )
+
+    def test_node_output_never_carries_a_method_reference(self) -> None:
+        # The repr of a bound method leaks a heap address into execution history.
+        executor = self._executor()
+        for expression, context in (
+            ("$s.upper", {"s": "ab"}),
+            ("$arr.pop", {"arr": [1, 2]}),
+            ("$len", {}),
+        ):
+            with self.subTest(expression=expression):
+                self.assertIsNone(executor.resolve_expression(expression, context))
+
+    def test_documented_expression_api_is_unchanged(self) -> None:
+        executor = self._executor()
+        cases: list[tuple[str, dict, object]] = [
+            ("$s.upper()", {"s": "ab"}, "AB"),
+            ("$arr.count(1)", {"arr": [1, 1]}, 2),
+            ("$arr.index(2)", {"arr": [1, 2]}, 1),
+            ('$arr.join("-")', {"arr": ["a", "b"]}, "a-b"),
+            ("$doc._id", {"doc": {"_id": "x"}}, "x"),
+            ("$now.year", {}, datetime.now().year),
+        ]
+        for expression, context, expected in cases:
+            with self.subTest(expression=expression):
+                self.assertEqual(executor.resolve_expression(expression, context), expected)
 
     def test_get_helper_filters_callable_dictionary_values(self) -> None:
         self.assertEqual(
