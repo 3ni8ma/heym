@@ -96,6 +96,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ARG HEYM_CODEX_CLI_VERSION=latest
 RUN npm install -g @openai/codex@${HEYM_CODEX_CLI_VERSION}
 
+# OpenCode CLI (required by the OpenCode Go node). Pin via the HEYM_OPENCODE_CLI_VERSION build arg.
+ARG HEYM_OPENCODE_CLI_VERSION=latest
+RUN ARCH="$(uname -m)" \
+    && case "$ARCH" in \
+        x86_64)  OA=x64   ;; \
+        aarch64) OA=arm64 ;; \
+        *) echo "Unsupported arch for OpenCode CLI: $ARCH" && exit 1 ;; \
+    esac \
+    && if [ "${HEYM_OPENCODE_CLI_VERSION}" = "latest" ]; then \
+        OC_URL="https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-${OA}.tar.gz"; \
+    else \
+        OC_VER="${HEYM_OPENCODE_CLI_VERSION#v}"; \
+        OC_URL="https://github.com/anomalyco/opencode/releases/download/v${OC_VER}/opencode-linux-${OA}.tar.gz"; \
+    fi \
+    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o /tmp/opencode.tar.gz "$OC_URL" \
+    && tar xz -C /usr/local/bin -f /tmp/opencode.tar.gz opencode \
+    && rm /tmp/opencode.tar.gz \
+    && chmod +x /usr/local/bin/opencode \
+    && opencode --version
+
 # Install Docker CLI (static binary — no daemon needed, connects via mounted socket)
 RUN ARCH="$(uname -m)" \
     && case "$ARCH" in \
@@ -153,6 +173,7 @@ COPY --from=frontend-builder /app/node_modules /app/frontend/node_modules
 COPY --from=frontend-builder /app/vite.config.ts /app/frontend/vite.config.ts
 COPY docker/release-entrypoint.sh /app/release-entrypoint.sh
 COPY docker/heym-codex-docker /usr/local/bin/heym-codex-docker
+COPY docker/heym-opencode-docker /usr/local/bin/heym-opencode-docker
 
 # Playwright: install Chromium and final-stage system dependencies into the release image.
 RUN cd /app/backend && uv run python -m playwright install --with-deps chromium
@@ -162,12 +183,16 @@ ENV HEYM_CODEX_CLI_COMMAND=/usr/local/bin/heym-codex-docker \
     HEYM_CODEX_DOCKER_WORKSPACE_VOLUME=heym-codex-workspaces \
     HEYM_CODEX_NETWORK_ACCESS=true \
     HEYM_CODEX_WORKSPACE_DIR=/app/data/codex-workspaces \
+    HEYM_OPENCODE_CLI_COMMAND=/usr/local/bin/heym-opencode-docker \
+    HEYM_OPENCODE_DOCKER_IMAGE=${HEYM_RELEASE_IMAGE} \
+    HEYM_OPENCODE_DOCKER_WORKSPACE_VOLUME=heym-opencode-workspaces \
+    HEYM_OPENCODE_WORKSPACE_DIR=/app/data/opencode-workspaces \
     HEYM_SKILL_IMAGE=${HEYM_RELEASE_IMAGE} \
     HEYM_PLAYWRIGHT_SANDBOX_IMAGE=${HEYM_RELEASE_IMAGE} \
     HEYM_PLAYWRIGHT_SANDBOX_PYTHON=/app/backend/.venv/bin/python \
     HEYM_MCP_STDIO_IMAGE=${HEYM_RELEASE_IMAGE}
 
-RUN chmod +x /app/release-entrypoint.sh /usr/local/bin/heym-codex-docker
+RUN chmod +x /app/release-entrypoint.sh /usr/local/bin/heym-codex-docker /usr/local/bin/heym-opencode-docker
 
 EXPOSE 4017
 

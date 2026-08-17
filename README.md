@@ -344,6 +344,7 @@ docker run --env-file .env \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$(pwd)/data/files:/app/data/files" \
   -v heym-codex-workspaces:/app/data/codex-workspaces \
+  -v heym-opencode-workspaces:/app/data/opencode-workspaces \
   ghcr.io/heymrun/heym:latest
 
 # OR — minimal, no .env file
@@ -356,6 +357,7 @@ docker run \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$(pwd)/data/files:/app/data/files" \
   -v heym-codex-workspaces:/app/data/codex-workspaces \
+  -v heym-opencode-workspaces:/app/data/opencode-workspaces \
   ghcr.io/heymrun/heym:latest
 ```
 
@@ -365,6 +367,7 @@ Three things about the `docker run` setup are worth knowing:
 
 - **`FILE_STORAGE_DIR=/app/data/files` is load-bearing.** The release image runs the backend from `/app/backend`, so the default relative path would land inside the container instead of your mount and Drive uploads would vanish on restart. `./run.sh` and `./deploy.sh` are unaffected.
 - **Keep `heym-codex-workspaces` mounted.** Python skills and the Codex node run there in a hardened sibling container; without it, skill execution fails closed. Per-run isolation needs Docker Engine 25.0+.
+- **Keep `heym-opencode-workspaces` mounted** if you use the OpenCode Go node. The sibling runner shares that volume; without it the wrapper fails closed.
 - **The Docker socket grants broad host control.** MCP `stdio` servers need it, because the caller-supplied command runs in a throwaway container rather than on the host. Docker log access stays off unless you set `DOCKER_LOGS_ENABLED=true` and `DOCKER_LOGS_ALLOWED_EMAILS`. Create that admin account first, or keep `ALLOW_REGISTER=false`, so nobody can self-register into an allow-listed email.
 
 ## Deploy & Call Workflows

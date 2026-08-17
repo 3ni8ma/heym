@@ -218,7 +218,7 @@ The [OpenCode Go node](frontend/src/docs/content/nodes/opencode-go-node.md) runs
 | `HEYM_OPENCODE_DOCKER_ENTRYPOINT` | Entrypoint binary run inside the OpenCode runner container. | `opencode` |
 | `HEYM_OPENCODE_DOCKER_EXTRA_ARGS` | Extra `docker run` arguments appended to the OpenCode runner invocation (shell-split). | — |
 
-> `HEYM_OPENCODE_CLI_VERSION` is a **Docker build arg** (not a runtime env var) that pins the `opencode` CLI version installed into the image. Default `latest`.
+> `HEYM_OPENCODE_CLI_VERSION` is a **Docker build arg** (not a runtime env var) that pins the `opencode` CLI GitHub release installed into the image. Default `latest`.
 
 ## OpenTelemetry tracing
 
