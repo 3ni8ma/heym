@@ -1023,7 +1023,7 @@ function openContextMenu(event: MouseEvent, folder: FolderTree): void {
   contextMenuFolder.value = folderStore.findFolderById(folder.id) ?? folder;
 
   const menuWidth = 160;
-  const menuHeight = 195;
+  const menuHeight = 210;
   const padding = 8;
 
   let x = event.clientX;
@@ -2411,6 +2411,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
             <Edit2 class="w-4 h-4" />
             Rename
           </button>
+          <div class="border-t border-border/50 my-1.5" />
           <button
             class="w-full px-3 py-2 text-sm text-left flex items-center gap-2 hover:bg-accent/50 rounded-lg mx-1 transition-colors"
             style="width: calc(100% - 8px)"

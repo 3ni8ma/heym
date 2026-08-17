@@ -59,8 +59,8 @@ function save(): void {
     size="2xl"
     @close="emit('close')"
   >
-    <div class="flex flex-col gap-4">
-      <div class="flex items-center gap-3">
+    <div class="flex flex-col">
+      <div class="flex shrink-0 items-center gap-3 pb-4">
         <div
           class="w-12 h-12 shrink-0 rounded-lg bg-muted/60 ring-1 ring-inset ring-border flex items-center justify-center"
         >
@@ -79,46 +79,46 @@ function save(): void {
         </div>
       </div>
 
-      <div
-        class="grid grid-cols-6 sm:grid-cols-8 gap-2 max-h-[320px] overflow-y-auto pr-1"
-      >
-        <button
-          type="button"
-          class="flex flex-col items-center justify-center gap-1 p-2 rounded-lg border transition-colors"
-          :class="
-            selectedIcon === null
-              ? 'border-primary bg-primary/10'
-              : 'border-border hover:bg-muted/60'
-          "
-          @click="clearIcon"
-        >
-          <Folder class="w-5 h-5 text-amber-500" />
-          <span class="text-[10px] leading-none text-muted-foreground">Default</span>
-        </button>
-        <button
-          v-for="option in folderIconOptions"
-          :key="option.key"
-          type="button"
-          class="flex flex-col items-center justify-center gap-1 p-2 rounded-lg border transition-colors"
-          :class="
-            selectedIcon === option.key
-              ? 'border-primary bg-primary/10'
-              : 'border-border hover:bg-muted/60'
-          "
-          :title="humanizeIconKey(option.key)"
-          @click="selectIcon(option.key)"
-        >
-          <component
-            :is="option.component"
-            class="w-5 h-5 text-foreground"
-          />
-          <span class="text-[10px] leading-none text-muted-foreground truncate w-full text-center">
-            {{ humanizeIconKey(option.key) }}
-          </span>
-        </button>
+      <div class="max-h-[40vh] overflow-y-auto overscroll-y-contain pr-1">
+        <div class="grid grid-cols-6 sm:grid-cols-8 gap-2">
+          <button
+            type="button"
+            class="flex flex-col items-center justify-center gap-1 p-2 rounded-lg border transition-colors"
+            :class="
+              selectedIcon === null
+                ? 'border-primary bg-primary/10'
+                : 'border-border hover:bg-muted/60'
+            "
+            @click="clearIcon"
+          >
+            <Folder class="w-5 h-5 text-amber-500" />
+            <span class="text-[10px] leading-none text-muted-foreground">Default</span>
+          </button>
+          <button
+            v-for="option in folderIconOptions"
+            :key="option.key"
+            type="button"
+            class="flex flex-col items-center justify-center gap-1 p-2 rounded-lg border transition-colors"
+            :class="
+              selectedIcon === option.key
+                ? 'border-primary bg-primary/10'
+                : 'border-border hover:bg-muted/60'
+            "
+            :title="humanizeIconKey(option.key)"
+            @click="selectIcon(option.key)"
+          >
+            <component
+              :is="option.component"
+              class="w-5 h-5 text-foreground"
+            />
+            <span class="text-[10px] leading-none text-muted-foreground truncate w-full text-center">
+              {{ humanizeIconKey(option.key) }}
+            </span>
+          </button>
+        </div>
       </div>
 
-      <div class="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-2">
+      <div class="flex shrink-0 flex-col-reverse justify-end gap-3 border-t border-border/60 pt-4 mt-4 sm:flex-row">
         <Button
           variant="outline"
           type="button"
