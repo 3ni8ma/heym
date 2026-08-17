@@ -57,17 +57,24 @@ RUN curl -fsSL https://bun.sh/install | bash \
     && ln -sf /root/.bun/bin/bun /usr/local/bin/bun \
     && bun --version
 
-# OpenCode CLI (Go) required by the OpenCode Go node. The runner executes it inside a hardened
-# sibling container of this same image. Pin via the HEYM_OPENCODE_CLI_VERSION build arg; the
-# installer resolves "latest" only when VERSION is unset (passing VERSION=latest looks up a literal
-# "vlatest" tag and fails), so pass VERSION only for a pinned version.
+# OpenCode CLI (required by the OpenCode Go node). Pin via the HEYM_OPENCODE_CLI_VERSION build arg.
 ARG HEYM_OPENCODE_CLI_VERSION=latest
-RUN if [ "${HEYM_OPENCODE_CLI_VERSION}" = "latest" ]; then \
-        curl -fsSL https://opencode.ai/install | bash; \
+RUN ARCH="$(uname -m)" \
+    && case "$ARCH" in \
+        x86_64)  OA=x64   ;; \
+        aarch64) OA=arm64 ;; \
+        *) echo "Unsupported arch for OpenCode CLI: $ARCH" && exit 1 ;; \
+    esac \
+    && if [ "${HEYM_OPENCODE_CLI_VERSION}" = "latest" ]; then \
+        OC_URL="https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-${OA}.tar.gz"; \
     else \
-        curl -fsSL https://opencode.ai/install | VERSION="${HEYM_OPENCODE_CLI_VERSION}" bash; \
+        OC_VER="${HEYM_OPENCODE_CLI_VERSION#v}"; \
+        OC_URL="https://github.com/anomalyco/opencode/releases/download/v${OC_VER}/opencode-linux-${OA}.tar.gz"; \
     fi \
-    && ln -sf /root/.opencode/bin/opencode /usr/local/bin/opencode \
+    && curl -fsSL --retry 5 --retry-all-errors --retry-delay 2 -o /tmp/opencode.tar.gz "$OC_URL" \
+    && tar xz -C /usr/local/bin -f /tmp/opencode.tar.gz opencode \
+    && rm /tmp/opencode.tar.gz \
+    && chmod +x /usr/local/bin/opencode \
     && opencode --version
 
 # Install Docker CLI (static binary — no daemon needed, connects via mounted socket)
