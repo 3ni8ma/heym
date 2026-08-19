@@ -1,4 +1,4 @@
-const RELEASE_TOUR_STORAGE_KEY = "heym-release-tour-seen";
+export const RELEASE_TOUR_STORAGE_KEY = "heym-release-tour-seen";
 
 /** Completed tours as versioned release ids, e.g. `["2026.08@r1"]`. */
 export function readSeenReleaseIds(): string[] {

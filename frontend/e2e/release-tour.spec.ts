@@ -1,0 +1,29 @@
+import { expect, test } from "@playwright/test";
+
+import { prepareAuthenticatedPage } from "./support";
+
+test("auto-opens the release tour and can be dismissed", async ({ page }) => {
+  await prepareAuthenticatedPage(page, { allowReleaseTour: true });
+  await page.goto("/");
+
+  const tour = page.getByRole("dialog", { name: /New in Heym/ });
+  await expect(tour).toBeVisible();
+  await expect(tour.getByRole("heading", { name: "Three new things in this release" })).toBeVisible();
+
+  await tour.getByRole("button", { name: "Start tour" }).click();
+  await expect(tour.getByRole("heading", { name: "Run Python right on the canvas" })).toBeVisible();
+
+  await tour.getByRole("button", { name: "Close what's new" }).click();
+  await expect(tour).toBeHidden();
+  await expect(page.getByRole("button", { name: "New in Heym — open the release tour" })).toBeVisible();
+});
+
+test("does not auto-open when the current release is already seen", async ({ page }) => {
+  await prepareAuthenticatedPage(page);
+  await page.goto("/");
+
+  await expect(page.getByRole("button", { name: "New in Heym — open the release tour" })).toBeVisible();
+  // Auto-open is delayed 900ms; wait past it so a missed seen-seed still fails this test.
+  await page.waitForTimeout(1_200);
+  await expect(page.getByRole("dialog", { name: /New in Heym/ })).toHaveCount(0);
+});

@@ -148,6 +148,7 @@ The system lives in `frontend/src/features/release-tour/`, mounted through `Rele
 - Keep `tourEnabled: false` on a release that is still in progress, then flip it to `true` in the release commit. The registry still renders release notes while the flag is off — it only gates the automatic popup.
 - Start a new release entry (new `releaseId`, newer `publishedAt`) once the previous one has shipped. Only the newest enabled release is ever shown, so old unseen releases do not queue up behind it.
 - Bump `TOUR_REVISION` only to deliberately re-show an already-announced release; it invalidates every user's stored "seen" state.
+- E2E: `prepareAuthenticatedPage` marks the current tour seen (`heym-release-tour-seen`, same idea as `showcase_seen_*`) so the auto-open panel does not intercept clicks. Specs that cover the popup pass `{ allowReleaseTour: true }`. Keep the seeded versioned id in `frontend/e2e/support.ts` aligned with the newest enabled `releaseId` and `TOUR_REVISION`.
 
 ## Repository Layout
 ```
