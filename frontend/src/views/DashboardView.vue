@@ -66,6 +66,7 @@ import { useLongPress } from "@/composables/useLongPress";
 import { onDismissOverlays, pushOverlayState } from "@/composables/useOverlayBackHandler";
 import { useRecentWorkflows } from "@/composables/useRecentWorkflows";
 import { getDocPath } from "@/docs/manifest";
+import ReleaseTourHost from "@/features/release-tour/components/ReleaseTourHost.vue";
 import { resolveShowcaseContext } from "@/features/showcase/showcaseResolver";
 import TemplatesPage from "@/features/templates/components/TemplatesPage.vue";
 import { useRunbookPlayer } from "@/features/runbook/useRunbookPlayer";
@@ -266,6 +267,11 @@ const showcaseContext = computed(() => {
     routePath: route.path,
     dashboardTab: activeTab.value as DashboardShowcaseTab,
   });
+});
+
+// Every dashboard tab, but nowhere else in the app.
+const releaseTourEligible = computed(() => {
+  return !showCommandPalette.value && !historyOpen.value && !showWorkflowActionSheet.value;
 });
 
 const longPressTargetWorkflow = ref<WorkflowListItem | null>(null);
@@ -1511,6 +1517,12 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
   >
     <div class="min-h-screen bg-background overflow-x-hidden">
       <AppHeader :on-open-command-palette="() => { showCommandPalette = true; pushOverlayState(); }">
+        <template #before-docs>
+          <div
+            id="release-tour-launcher-slot"
+            class="contents"
+          />
+        </template>
         <template #actions>
           <Button
             variant="ghost"
@@ -2508,6 +2520,8 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
           </button>
         </div>
       </Transition>
+
+      <ReleaseTourHost :eligible="releaseTourEligible" />
     </div>
   </WorkspaceShell>
 </template>

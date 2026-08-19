@@ -65,6 +65,7 @@ export default {
           foreground: "hsl(var(--accent-foreground))",
           blue: "hsl(var(--accent-blue))",
           red: "hsl(var(--accent-red))",
+          orange: "hsl(var(--accent-orange))",
         },
         brand: {
           primary: "hsl(var(--primary))",

@@ -1,5 +1,7 @@
 import { expect, type APIResponse, type Page } from "@playwright/test";
 
+import { RELEASE_TOUR_STORAGE_KEY } from "../src/features/release-tour/releaseTourStorage";
+
 export const E2E_USER = {
   email: "playwright@heym.example.com",
   password: "Playwright123",
@@ -28,34 +30,53 @@ export async function mockVersionCheck(page: Page): Promise<void> {
   });
 }
 
-export async function prepareAuthenticatedPage(page: Page): Promise<void> {
+export interface PrepareAuthenticatedPageOptions {
+  /**
+   * Leave the current release tour unseen so the auto-open popup can appear.
+   * Default is false: E2E marks the newest tour seen, matching showcase_seen_*.
+   */
+  allowReleaseTour?: boolean;
+}
+
+export async function prepareAuthenticatedPage(
+  page: Page,
+  options: PrepareAuthenticatedPageOptions = {},
+): Promise<void> {
   await mockVersionCheck(page);
-  await page.addInitScript(() => {
-    const showcaseKeys = [
-      "dashboard_workflows",
-      "dashboard_board",
-      "dashboard_templates",
-      "dashboard_globalvariables",
-      "dashboard_chat",
-      "dashboard_drive",
-      "dashboard_datatable",
-      "dashboard_schedules",
-      "dashboard_credentials",
-      "dashboard_vectorstores",
-      "dashboard_mcp",
-      "dashboard_traces",
-      "dashboard_analytics",
-      "dashboard_dashboard",
-      "dashboard_teams",
-      "dashboard_logs",
-      "evals",
-      "docs",
-      "editor",
-    ];
-    for (const key of showcaseKeys) {
-      window.localStorage.setItem(`showcase_seen_${key}`, "1");
-    }
-  });
+  const allowReleaseTour = options.allowReleaseTour === true;
+  await page.addInitScript(
+    ({ showTour, storageKey }: { showTour: boolean; storageKey: string }) => {
+      const showcaseKeys = [
+        "dashboard_workflows",
+        "dashboard_board",
+        "dashboard_templates",
+        "dashboard_globalvariables",
+        "dashboard_chat",
+        "dashboard_drive",
+        "dashboard_datatable",
+        "dashboard_schedules",
+        "dashboard_credentials",
+        "dashboard_vectorstores",
+        "dashboard_mcp",
+        "dashboard_traces",
+        "dashboard_analytics",
+        "dashboard_dashboard",
+        "dashboard_teams",
+        "dashboard_logs",
+        "evals",
+        "docs",
+        "editor",
+      ];
+      for (const key of showcaseKeys) {
+        window.localStorage.setItem(`showcase_seen_${key}`, "1");
+      }
+      // Keep in sync with RELEASE_REGISTRY's newest enabled releaseId + TOUR_REVISION.
+      if (!showTour) {
+        window.localStorage.setItem(storageKey, JSON.stringify(["2026.08@r1"]));
+      }
+    },
+    { showTour: allowReleaseTour, storageKey: RELEASE_TOUR_STORAGE_KEY },
+  );
 }
 
 export async function createWorkflow(
