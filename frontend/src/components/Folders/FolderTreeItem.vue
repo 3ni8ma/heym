@@ -3,17 +3,22 @@ import { computed, onUnmounted, ref } from "vue";
 import {
   ChevronDown,
   ChevronRight,
+  Download,
+  Edit2,
   Folder,
   FolderOpen,
+  FolderPlus,
   MoreHorizontal,
+  Palette,
+  Trash2,
 } from "lucide-vue-next";
 
-import type { FolderTree, WorkflowListItem } from "@/types/workflow";
+import type { FolderTree, WorkflowListItem, WorkflowRowStatus } from "@/types/workflow";
 import Button from "@/components/ui/Button.vue";
+import WorkflowListRow from "@/components/Workflows/WorkflowListRow.vue";
 import { cn } from "@/lib/utils";
 import { getFolderIcon } from "@/lib/folderIcons";
 import { useFolderStore } from "@/stores/folder";
-import FolderWorkflowCard from "./FolderWorkflowCard.vue";
 import WorkflowFolderDropPlaceholder from "./WorkflowFolderDropPlaceholder.vue";
 
 interface Props {
@@ -24,6 +29,9 @@ interface Props {
   draggedWorkflowFolderId: string | null;
   draggedWorkflowName: string;
   copyingId: string | null;
+  selectedWorkflowId?: string | null;
+  pinnedWorkflowIds?: readonly string[];
+  statusFor: (workflow: WorkflowListItem) => WorkflowRowStatus;
   forceExpandedFolderIds?: ReadonlySet<string>;
   depth?: number;
   parentPath?: string;
@@ -34,6 +42,8 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  selectedWorkflowId: null,
+  pinnedWorkflowIds: () => [],
   forceExpandedFolderIds: undefined,
   depth: 0,
   parentPath: "",
@@ -51,10 +61,16 @@ const emit = defineEmits<{
   drop: [event: DragEvent, id: string];
   contextMenu: [event: MouseEvent, folder: FolderTree];
   createSubfolder: [parentId: string];
+  renameFolder: [folder: FolderTree];
+  changeFolderIcon: [folder: FolderTree];
+  downloadFolder: [folder: FolderTree];
+  deleteFolder: [folder: FolderTree];
+  selectWorkflow: [workflow: WorkflowListItem];
   openWorkflow: [id: string, event: MouseEvent];
   editWorkflow: [workflow: WorkflowListItem, event: Event];
   copyWorkflow: [id: string, event: Event];
   deleteWorkflow: [id: string, event: Event];
+  togglePinWorkflow: [id: string];
   dragStartWorkflow: [event: DragEvent, id: string];
   dragEndWorkflow: [];
 }>();
@@ -63,7 +79,9 @@ const folderStore = useFolderStore();
 const folderDropZone = ref<HTMLElement | null>(null);
 let expandTimer: ReturnType<typeof setTimeout> | null = null;
 
-const hasContent = computed(() => props.folder.children.length > 0 || props.folder.workflows.length > 0);
+const hasContent = computed(
+  () => props.folder.children.length > 0 || props.folder.workflows.length > 0,
+);
 const folderIconComponent = computed(() => getFolderIcon(props.folder.icon));
 const folderPath = computed((): string => {
   return props.parentPath ? `${props.parentPath} / ${props.folder.name}` : props.folder.name;
@@ -75,10 +93,13 @@ const isValidDropTarget = computed((): boolean => {
   return props.draggedWorkflowFolderId !== props.folder.id;
 });
 
-function handleToggle(event: MouseEvent): void {
-  event.stopPropagation();
-  emit("toggle", props.folder.id);
-}
+/** Counts nested folders too, so the badge matches what deleting the folder would remove. */
+const itemCount = computed((): number => {
+  function count(folder: FolderTree): number {
+    return folder.workflows.length + folder.children.reduce((sum, child) => sum + count(child), 0);
+  }
+  return count(props.folder);
+});
 
 function isFolderExpandedForView(folderId: string): boolean {
   return props.forceExpandedFolderIds?.has(folderId) === true || folderStore.isFolderExpanded(folderId);
@@ -89,11 +110,6 @@ function handleFolderClick(): void {
 }
 
 function handleContextMenu(event: MouseEvent): void {
-  emit("contextMenu", event, props.folder);
-}
-
-function handleMenuClick(event: MouseEvent): void {
-  event.stopPropagation();
   emit("contextMenu", event, props.folder);
 }
 
@@ -161,58 +177,123 @@ onUnmounted(clearExpandTimer);
     <div
       :data-testid="`workflow-folder-header-${folder.id}`"
       :class="cn(
-        'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-transparent transition-all cursor-pointer group hover:border-border/30',
+        'group flex cursor-pointer items-center gap-3 rounded-xl border px-3 py-2.5 transition-all sm:px-4',
+        depth > 0 ? 'py-2' : 'py-2.5 sm:py-3',
         isActiveDropTarget && isValidDropTarget
-          ? 'bg-primary/10 border-2 border-primary border-dashed shadow-sm'
+          ? 'border-2 border-dashed border-primary bg-primary/10 shadow-sm'
           : isActiveDropTarget
-            ? 'bg-muted/40 border-2 border-border border-dashed'
-            : 'hover:bg-muted/30'
+            ? 'border-2 border-dashed border-border bg-muted/40'
+            : 'border-border/50 bg-card hover:border-border hover:bg-muted/40',
       )"
-      :style="{ paddingLeft: `${depth * 14 + 8}px` }"
       @click="handleFolderClick"
       @contextmenu.prevent="handleContextMenu"
     >
-      <button
-        class="p-0.5 rounded hover:bg-muted/50 transition-colors"
-        @click="handleToggle"
+      <div
+        :class="cn(
+          'flex shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-amber-500/15 to-amber-500/5 ring-1 ring-inset ring-amber-500/20 transition-transform duration-200 group-hover:scale-[1.03] dark:from-amber-400/[0.12] dark:to-transparent dark:ring-amber-400/25',
+          depth > 0 ? 'h-8 w-8' : 'h-9 w-9 sm:h-10 sm:w-10',
+        )"
       >
-        <ChevronDown
-          v-if="isExpanded"
-          class="w-4 h-4 text-muted-foreground"
-        />
-        <ChevronRight
-          v-else
-          class="w-4 h-4 text-muted-foreground"
-        />
-      </button>
-
-      <div class="w-6 h-6 rounded-md bg-gradient-to-br from-amber-500/15 to-amber-500/5 ring-1 ring-inset ring-amber-500/20 flex items-center justify-center transition-transform duration-200 group-hover:scale-[1.03]">
         <component
           :is="folderIconComponent ?? (isExpanded ? FolderOpen : Folder)"
-          class="w-3.5 h-3.5 text-amber-500"
+          :class="cn('text-amber-500 dark:text-amber-300', depth > 0 ? 'h-3.5 w-3.5' : 'h-4 w-4')"
         />
       </div>
 
-      <span class="font-medium text-sm flex-1">{{ folder.name }}</span>
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-1.5">
+          <ChevronDown
+            v-if="isExpanded"
+            class="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+          />
+          <ChevronRight
+            v-else
+            class="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+          />
+          <span
+            :class="cn('truncate font-semibold', depth > 0 ? 'text-[13px]' : 'text-sm')"
+          >{{ folder.name }}</span>
+        </div>
+        <p
+          v-if="folder.description"
+          :class="cn('truncate pl-5 text-muted-foreground', depth > 0 ? 'text-[11px]' : 'text-xs')"
+        >
+          {{ folder.description }}
+        </p>
+      </div>
 
-      <span class="text-xs text-muted-foreground mr-2 hidden sm:inline">
-        {{ folder.workflows.length }} workflow{{ folder.workflows.length !== 1 ? 's' : '' }}
+      <span
+        class="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground"
+        :data-testid="`workflow-folder-count-${folder.id}`"
+      >
+        {{ itemCount }} item{{ itemCount === 1 ? '' : 's' }}
       </span>
 
       <Button
         variant="ghost"
         size="icon"
-        class="opacity-0 group-hover:opacity-100 transition-opacity w-6 h-6"
-        @click="handleMenuClick"
+        class="h-8 w-8 shrink-0 rounded-lg text-muted-foreground sm:hidden"
+        title="Folder actions"
+        @click.stop="handleContextMenu"
       >
-        <MoreHorizontal class="w-4 h-4" />
+        <MoreHorizontal class="h-4 w-4" />
       </Button>
+
+      <div
+        class="hidden shrink-0 items-center gap-0.5 sm:flex"
+        @click.stop
+      >
+        <Button
+          variant="ghost"
+          size="icon"
+          class="h-8 w-8 rounded-lg text-muted-foreground hover:bg-primary/10 hover:text-primary md:h-7 md:w-7"
+          title="New subfolder"
+          @click="emit('createSubfolder', folder.id)"
+        >
+          <FolderPlus class="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          class="h-8 w-8 rounded-lg text-muted-foreground hover:bg-primary/10 hover:text-primary md:h-7 md:w-7"
+          title="Rename folder"
+          @click="emit('renameFolder', folder)"
+        >
+          <Edit2 class="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          class="hidden h-8 w-8 rounded-lg text-muted-foreground hover:bg-primary/10 hover:text-primary sm:inline-flex md:h-7 md:w-7"
+          title="Change icon"
+          @click="emit('changeFolderIcon', folder)"
+        >
+          <Palette class="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          class="hidden h-8 w-8 rounded-lg text-muted-foreground hover:bg-primary/10 hover:text-primary sm:inline-flex md:h-7 md:w-7"
+          title="Download as ZIP"
+          @click="emit('downloadFolder', folder)"
+        >
+          <Download class="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          class="h-8 w-8 rounded-lg text-destructive hover:bg-destructive/10 hover:text-destructive md:h-7 md:w-7"
+          title="Delete folder"
+          @click="emit('deleteFolder', folder)"
+        >
+          <Trash2 class="h-3.5 w-3.5" />
+        </Button>
+      </div>
     </div>
 
     <div
       v-if="isActiveDropTarget"
-      class="grid grid-cols-1 gap-2 py-2 sm:grid-cols-2 lg:grid-cols-3"
-      :style="{ paddingLeft: `${(depth + 1) * 14 + 8}px`, paddingRight: '8px' }"
+      class="py-2 pl-5"
     >
       <WorkflowFolderDropPlaceholder
         :target-id="folder.id"
@@ -226,9 +307,10 @@ onUnmounted(clearExpandTimer);
     <div
       v-if="isExpanded && hasContent"
       :class="cn(
-        'folder-content',
-        isActiveDropTarget && isValidDropTarget && 'rounded-lg border border-primary/40 bg-primary/[0.025] mt-0.5'
+        'folder-content mt-1 space-y-1.5 border-l border-border/60 pl-3 sm:pl-4',
+        isActiveDropTarget && isValidDropTarget && 'rounded-lg border-primary/40 bg-primary/[0.025]',
       )"
+      :style="{ marginLeft: '1.25rem' }"
     >
       <FolderTreeItem
         v-for="child in folder.children"
@@ -241,6 +323,9 @@ onUnmounted(clearExpandTimer);
         :dragged-workflow-folder-id="draggedWorkflowFolderId"
         :dragged-workflow-name="draggedWorkflowName"
         :copying-id="copyingId"
+        :selected-workflow-id="selectedWorkflowId"
+        :pinned-workflow-ids="pinnedWorkflowIds"
+        :status-for="statusFor"
         :depth="depth + 1"
         :parent-path="folderPath"
         :is-mobile="isMobile"
@@ -254,38 +339,44 @@ onUnmounted(clearExpandTimer);
         @drop="(e, id) => emit('drop', e, id)"
         @context-menu="(e, f) => emit('contextMenu', e, f)"
         @create-subfolder="(id) => emit('createSubfolder', id)"
+        @rename-folder="(f) => emit('renameFolder', f)"
+        @change-folder-icon="(f) => emit('changeFolderIcon', f)"
+        @download-folder="(f) => emit('downloadFolder', f)"
+        @delete-folder="(f) => emit('deleteFolder', f)"
+        @select-workflow="(w) => emit('selectWorkflow', w)"
         @open-workflow="(id, e) => emit('openWorkflow', id, e)"
         @edit-workflow="(w, e) => emit('editWorkflow', w, e)"
         @copy-workflow="(id, e) => emit('copyWorkflow', id, e)"
         @delete-workflow="(id, e) => emit('deleteWorkflow', id, e)"
+        @toggle-pin-workflow="(id) => emit('togglePinWorkflow', id)"
         @drag-start-workflow="(e, id) => emit('dragStartWorkflow', e, id)"
         @drag-end-workflow="emit('dragEndWorkflow')"
       />
 
-      <div
-        v-if="folder.workflows.length > 0"
-        class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mt-1.5"
-        :style="{ paddingLeft: `${(depth + 1) * 14 + 8}px` }"
-      >
-        <FolderWorkflowCard
-          v-for="(workflow, index) in folder.workflows"
-          :key="workflow.id"
-          :workflow="workflow"
-          :index="index"
-          :copying-id="copyingId"
-          :is-dragging="draggedWorkflowId === workflow.id"
-          :is-mobile="isMobile"
-          :on-workflow-touch-start="onWorkflowTouchStart"
-          :on-workflow-touch-end="onWorkflowTouchEnd"
-          :on-workflow-touch-move="onWorkflowTouchMove"
-          @open="(id, event) => emit('openWorkflow', id, event)"
-          @edit="(item, event) => emit('editWorkflow', item, event)"
-          @copy="(id, event) => emit('copyWorkflow', id, event)"
-          @delete="(id, event) => emit('deleteWorkflow', id, event)"
-          @drag-start="(event, id) => emit('dragStartWorkflow', event, id)"
-          @drag-end="emit('dragEndWorkflow')"
-        />
-      </div>
+      <WorkflowListRow
+        v-for="(workflow, index) in folder.workflows"
+        :key="workflow.id"
+        :workflow="workflow"
+        :status="statusFor(workflow)"
+        :selected="selectedWorkflowId === workflow.id"
+        :pinned="pinnedWorkflowIds.includes(workflow.id)"
+        compact
+        :index="index"
+        :copying-id="copyingId"
+        :is-dragging="draggedWorkflowId === workflow.id"
+        :is-mobile="isMobile"
+        :on-touch-start-row="onWorkflowTouchStart"
+        :on-touch-end-row="onWorkflowTouchEnd"
+        :on-touch-move-row="onWorkflowTouchMove"
+        @select="(w) => emit('selectWorkflow', w)"
+        @open="(id, event) => emit('openWorkflow', id, event)"
+        @edit="(item, event) => emit('editWorkflow', item, event)"
+        @copy="(id, event) => emit('copyWorkflow', id, event)"
+        @delete="(id, event) => emit('deleteWorkflow', id, event)"
+        @toggle-pin="(id) => emit('togglePinWorkflow', id)"
+        @drag-start="(event, id) => emit('dragStartWorkflow', event, id)"
+        @drag-end="emit('dragEndWorkflow')"
+      />
     </div>
   </div>
 </template>

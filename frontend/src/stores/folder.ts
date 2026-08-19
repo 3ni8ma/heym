@@ -47,17 +47,26 @@ export const useFolderStore = defineStore("folder", () => {
   async function createFolder(
     name: string,
     parentId: string | null = null,
+    description: string | null = null,
   ): Promise<Folder> {
     const folder = await folderApi.create({
       name,
+      description,
       parent_id: parentId,
     });
     await fetchFolderTree();
     return folder;
   }
 
-  async function renameFolder(id: string, name: string): Promise<Folder> {
-    const folder = await folderApi.update(id, { name });
+  async function renameFolder(
+    id: string,
+    name: string,
+    description?: string | null,
+  ): Promise<Folder> {
+    const folder = await folderApi.update(
+      id,
+      description === undefined ? { name } : { name, description },
+    );
     await fetchFolderTree();
     return folder;
   }

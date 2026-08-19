@@ -38,9 +38,19 @@ export interface Workflow {
   error_workflow_id: string | null;
   minutes_saved_per_run: number | null;
   workflow_timeout_seconds: number | null;
+  /** Display name of the workflow owner; null when it cannot be resolved. */
+  owner_name?: string | null;
+  portal_enabled?: boolean;
+  portal_slug?: string | null;
   created_at: string;
   updated_at: string;
 }
+
+/** How a workflow starts, derived from its nodes by the backend. */
+export type WorkflowTriggerStatus = "scheduled" | "listening" | "paused" | "manual";
+
+/** Trigger status plus the two states only the client knows about. */
+export type WorkflowRowStatus = WorkflowTriggerStatus | "running" | "removeScheduled";
 
 export interface WorkflowListItem {
   id: string;
@@ -48,6 +58,7 @@ export interface WorkflowListItem {
   description: string | null;
   folder_id: string | null;
   first_node_type: NodeType | null;
+  trigger_status: WorkflowTriggerStatus;
   scheduled_for_deletion: string | null;
   created_at: string;
   updated_at: string;
@@ -56,6 +67,7 @@ export interface WorkflowListItem {
 export interface Folder {
   id: string;
   name: string;
+  description?: string | null;
   parent_id: string | null;
   icon?: string | null;
   owner_id: string;
@@ -71,6 +83,7 @@ export interface FolderWithContents extends Folder {
 export interface FolderTree {
   id: string;
   name: string;
+  description?: string | null;
   parent_id: string | null;
   icon?: string | null;
   children: FolderTree[];
