@@ -280,6 +280,10 @@ class WorkflowResponse(BaseModel):
     error_workflow_id: uuid.UUID | None = None
     minutes_saved_per_run: float | None = None
     workflow_timeout_seconds: int | None = None
+    owner_name: str | None = None
+    # Same audience as the portal settings endpoint: anyone who can read the workflow.
+    portal_enabled: bool = False
+    portal_slug: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -364,6 +368,8 @@ class WorkflowListResponse(BaseModel):
     description: str | None
     folder_id: uuid.UUID | None = None
     first_node_type: str | None = None
+    # scheduled | listening | paused | manual - see app/services/workflow_status.py
+    trigger_status: str = "manual"
     scheduled_for_deletion: datetime | None = None
     shared_by_team: str | None = None
     created_at: datetime
