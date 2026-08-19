@@ -14,6 +14,7 @@ import ExecutionHistoryAllDialog from "@/components/Panels/ExecutionHistoryAllDi
 import Button from "@/components/ui/Button.vue";
 import { onDismissOverlays, pushOverlayState } from "@/composables/useOverlayBackHandler";
 import { getDocPath } from "@/docs/manifest";
+import ReleaseTourHost from "@/features/release-tour/components/ReleaseTourHost.vue";
 import type { ShowcaseContext } from "@/features/showcase/showcase.types";
 import { hasShowcaseChatDraftPending } from "@/features/showcase/showcaseChatDraft";
 import { joinOriginAndPath } from "@/lib/appUrl";
@@ -36,6 +37,7 @@ const isCreatingConversation = ref(false);
 const isMobileViewport = ref(false);
 const showCommandPalette = ref(false);
 const historyOpen = ref(false);
+const releaseTourEligible = computed(() => !showCommandPalette.value && !historyOpen.value);
 const workflows = ref<WorkflowListItem[]>([]);
 const previousDocumentTitle = ref(DEFAULT_APP_TITLE);
 let mobileSidebarMediaQuery: MediaQueryList | null = null;
@@ -159,6 +161,10 @@ onUnmounted(() => {
     <div class="h-screen flex flex-col bg-background overflow-hidden">
       <AppHeader :on-open-command-palette="() => { showCommandPalette = true; pushOverlayState(); }">
         <template #before-docs>
+          <div
+            id="release-tour-launcher-slot"
+            class="contents"
+          />
           <button
             v-if="isMobileViewport && !chatStore.isSidebarOpen"
             class="p-2 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
@@ -263,6 +269,8 @@ onUnmounted(() => {
         :open="historyOpen"
         @close="historyOpen = false"
       />
+
+      <ReleaseTourHost :eligible="releaseTourEligible" />
     </div>
   </WorkspaceShell>
 </template>

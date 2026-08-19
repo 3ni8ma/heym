@@ -136,11 +136,25 @@ OTel tracing is env-gated (`HEYM_OTEL_ENABLED`, disabled by default) and bootstr
 - The frontend mirrors this: `StepCondition.vue` selects per-type field components from a lookup map, not a `v-if` chain, and node-type-style branching does not belong in `AlertsTab.vue`.
 - When adding a new alert type, also update `frontend/src/docs/content/tabs/alerts-tab.md`, `reference/features.md`, and the alert tool descriptions in `backend/app/api/ai_assistant.py`.
 
+### Release tour (announce user-visible work)
+**Any change a user can see must ship with its release tour entry in the same change.** A feature nobody discovers was not delivered. This covers new UI, new node types, new tabs or panels, and reworked UX flows. Pure refactors, backend-only changes, and bug fixes with no visible surface are exempt.
+
+The system lives in `frontend/src/features/release-tour/`, mounted through `ReleaseTourHost.vue`. It is **desktop only** (above the 768px breakpoint) and is mounted on three screens: the dashboard (every tab), Chat, and Docs. The launcher button teleports into `#release-tour-launcher-slot`, which each of those views puts in `AppHeader`'s `before-docs` slot. The header button appears immediately; only the *automatic* popup waits for a screen's intro video to be dismissed. `releaseRegistry.ts` is the source of truth; `releaseTourMapper.ts` holds the pure logic and must stay side-effect free.
+
+- Add a section to the **current unreleased** entry in `releaseRegistry.ts`: `id`, `title`, a `blocks` prose summary, and `tour` metadata (`description`, `useCases`, `tourVisual`).
+- List the new section's `id` in that release's `sectionOrder`. A section missing from `sectionOrder` never reaches the tour.
+- Build a matching animated mock under `components/visuals/` and register it in `tourVisuals.ts` under the same `tourVisual` key. An unregistered key silently falls back to the neutral visual, so the registry test in `releaseTourMapper.test.ts` guards this — keep it passing.
+- Visuals are **mock UI, never live UI**: Tailwind semantic tokens, no production API calls, no host-page state. Animate with CSS transitions, Vue `<Transition>`, and `useCycleStep` for looping demo states; there is no motion library and adding one needs a separate decision.
+- Keep `tourEnabled: false` on a release that is still in progress, then flip it to `true` in the release commit. The registry still renders release notes while the flag is off — it only gates the automatic popup.
+- Start a new release entry (new `releaseId`, newer `publishedAt`) once the previous one has shipped. Only the newest enabled release is ever shown, so old unseen releases do not queue up behind it.
+- Bump `TOUR_REVISION` only to deliberately re-show an already-announced release; it invalidates every user's stored "seen" state.
+
 ## Repository Layout
 ```
 heymrun/
 ├── frontend/src/
 │   ├── components/{Canvas,Nodes,ui, Panels, Evals, MCP, Teams}/
+│   ├── features/       # Self-contained feature modules (release-tour, showcase, templates, runbook)
 │   ├── stores/         # Pinia stores (workflow, auth, folder)
 │   ├── views/          # DashboardView, EditorView, ChatPortalView
 │   ├── services/       # API clients
@@ -172,7 +186,7 @@ heymrun/
 Use `sequentialthinking` for complex planning, `shadcn` for UI components. Always query for skills before starting. Use `heym-documentation` skill when documentation changes are involved.
 
 ## Feature Documentation Policy
-Medium/large features (new UI, node types, APIs, UX) must update docs via `heym-documentation` skill. Small bug fixes/refactors do not require doc updates.
+Medium/large features (new UI, node types, APIs, UX) must update docs via `heym-documentation` skill. Small bug fixes/refactors do not require doc updates. The same threshold triggers a release tour entry — see **Release tour (announce user-visible work)**.
 
 ## Licensing
 MIT with Commons Clause condition - open for use, not for commercial resale. See LICENSE and COMMONS-CLAUSE.md.

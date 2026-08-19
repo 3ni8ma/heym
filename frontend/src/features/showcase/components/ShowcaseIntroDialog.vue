@@ -84,7 +84,14 @@ watch(
     if (open && !wasOpen) {
       pushOverlayState();
     }
+    // Lets other floating surfaces (e.g. the release tour) hold back while this is up.
+    if (open) {
+      document.body.dataset.heymShowcaseIntroOpen = "true";
+    } else {
+      delete document.body.dataset.heymShowcaseIntroOpen;
+    }
   },
+  { immediate: true },
 );
 
 onMounted(() => {
@@ -96,6 +103,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener("keydown", handleKeydown, true);
+  delete document.body.dataset.heymShowcaseIntroOpen;
   unsubscribeDismissOverlays?.();
   unsubscribeDismissOverlays = null;
 });

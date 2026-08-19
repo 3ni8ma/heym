@@ -14,6 +14,7 @@ import WorkflowCommandPalette from "@/components/Dialogs/WorkflowCommandPalette.
 import AppHeader from "@/components/Layout/AppHeader.vue";
 import ExecutionHistoryAllDialog from "@/components/Panels/ExecutionHistoryAllDialog.vue";
 import WorkspaceShell from "@/components/Layout/WorkspaceShell.vue";
+import ReleaseTourHost from "@/features/release-tour/components/ReleaseTourHost.vue";
 import Button from "@/components/ui/Button.vue";
 import { onDismissOverlays, pushOverlayState } from "@/composables/useOverlayBackHandler";
 import { usePluginDocCategories } from "@/composables/usePluginDocCategories";
@@ -30,6 +31,9 @@ const showCommandPalette = ref(false);
 const historyOpen = ref(false);
 const mobileDrawerOpen = ref(false);
 const docsChatOpen = ref(false);
+const releaseTourEligible = computed(
+  () => !showCommandPalette.value && !historyOpen.value && !docsChatOpen.value && !mobileDrawerOpen.value,
+);
 const workflows = ref<WorkflowListItem[]>([]);
 
 const route = useRoute();
@@ -150,6 +154,12 @@ function onDocSelect(categoryId: string, slug: string, event?: MouseEvent | Keyb
             <Menu class="w-5 h-5" />
           </Button>
         </template>
+        <template #before-docs>
+          <div
+            id="release-tour-launcher-slot"
+            class="contents"
+          />
+        </template>
         <template #actions>
           <button
             type="button"
@@ -240,6 +250,8 @@ function onDocSelect(categoryId: string, slug: string, event?: MouseEvent | Keyb
         :doc-path="docPath"
         @close="docsChatOpen = false"
       />
+
+      <ReleaseTourHost :eligible="releaseTourEligible" />
     </div>
   </WorkspaceShell>
 </template>
