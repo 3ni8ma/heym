@@ -173,6 +173,7 @@ async def get_folder_tree(
         folder_map[folder.id] = FolderTreeResponse(
             id=folder.id,
             name=folder.name,
+            description=folder.description,
             parent_id=folder.parent_id,
             icon=folder.icon,
             children=[],
@@ -286,6 +287,7 @@ async def get_folder(
     return FolderWithContentsResponse(
         id=folder.id,
         name=folder.name,
+        description=folder.description,
         parent_id=folder.parent_id,
         icon=folder.icon,
         owner_id=folder.owner_id,
@@ -295,6 +297,7 @@ async def get_folder(
             FolderResponse(
                 id=c.id,
                 name=c.name,
+                description=c.description,
                 parent_id=c.parent_id,
                 icon=c.icon,
                 owner_id=c.owner_id,
@@ -339,6 +342,7 @@ async def create_folder(
 
     folder = Folder(
         name=data.name,
+        description=(data.description or "").strip() or None,
         parent_id=data.parent_id,
         icon=data.icon or None,
         owner_id=current_user.id,
@@ -365,6 +369,9 @@ async def update_folder(
 
     if data.name is not None:
         folder.name = data.name
+
+    if "description" in data.model_fields_set:
+        folder.description = (data.description or "").strip() or None
 
     if "icon" in data.model_fields_set:
         folder.icon = data.icon or None

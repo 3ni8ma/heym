@@ -853,12 +853,14 @@ class LLMModel(BaseModel):
 
 class FolderCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
+    description: str | None = Field(None, max_length=500)
     parent_id: uuid.UUID | None = None
     icon: str | None = Field(None, max_length=64)
 
 
 class FolderUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=255)
+    description: str | None = Field(None, max_length=500)
     parent_id: uuid.UUID | None = None
     icon: str | None = Field(None, max_length=64)
 
@@ -866,6 +868,7 @@ class FolderUpdate(BaseModel):
 class FolderResponse(BaseModel):
     id: uuid.UUID
     name: str
+    description: str | None = None
     parent_id: uuid.UUID | None = None
     icon: str | None = None
     owner_id: uuid.UUID
@@ -879,6 +882,7 @@ class FolderResponse(BaseModel):
 class FolderWithContentsResponse(BaseModel):
     id: uuid.UUID
     name: str
+    description: str | None = None
     parent_id: uuid.UUID | None = None
     icon: str | None = None
     owner_id: uuid.UUID
@@ -894,6 +898,7 @@ class FolderWithContentsResponse(BaseModel):
 class FolderTreeResponse(BaseModel):
     id: uuid.UUID
     name: str
+    description: str | None = None
     parent_id: uuid.UUID | None = None
     icon: str | None = None
     children: list["FolderTreeResponse"] = []
