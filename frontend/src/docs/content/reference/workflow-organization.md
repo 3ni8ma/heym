@@ -69,8 +69,12 @@ If any start node is still active, the workflow stays until the next run.
 
 ## Dashboard UI
 
-- **Sidebar** – New Folder, recursive folder tree with expand/collapse
-- **Context menu** – New Subfolder, Rename, Download as ZIP, Delete per folder
+- **Folder rows** – New Folder, recursive folder tree with expand/collapse. Each folder carries an
+  optional description under its name and a badge counting the workflows it holds, sub-folders
+  included.
+- **Folder actions** – New Subfolder, Rename, Change icon, Download as ZIP, and Delete sit inline
+  on every folder row; the right-click context menu offers the same set, and phones show a single
+  menu button.
 - **Main area** – Root workflows (no folder, not scheduled) and Scheduled for Deletion
 - **Folder drop preview** – Dragging a workflow highlights the exact folder or sub-folder and
   shows its full path in a card-sized preview. A collapsed folder expands after a short hover.

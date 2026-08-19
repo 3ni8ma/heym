@@ -657,7 +657,7 @@ See also [Running & Deployment](../getting-started/running-and-deployment.md), [
 
 ### [Workflows](../tabs/workflows-tab.md)
 
-The Workflows tab is the default dashboard view. It shows your workflow list in a card grid or list, with folders and sub-folders for [organization](./workflow-organization.md). Create workflows with New Workflow, drag and drop JSON to [import](./download-import.md), and edit or delete from the card menu. Workflows can be moved between folders; deletion is scheduled (trash) before permanent removal.
+The Workflows tab is the default dashboard view. It shows a two-pane listing: workflows and folders as dense rows on the left, and a preview of the selected workflow on the right with its trigger, last run, and steps, plus Open Workflow and Run Now. Every row carries a status chip (Running, Scheduled, Listening, Paused, Manual, Remove Scheduled) that the Status dropdown can filter on. Folders and sub-folders handle [organization](./workflow-organization.md). Create workflows with New Workflow, drag and drop JSON to [import](./download-import.md), and edit or delete from the row actions. Workflows can be moved between folders; deletion is scheduled (trash) before permanent removal.
 
 See also [Workflow Organization](./workflow-organization.md), [Download & Import](./download-import.md), and [Quick Drawer](./quick-drawer.md).
 
