@@ -953,3 +953,223 @@ test("configures Linear comment operations and persists update comment fields", 
     await deleteCredential(page, credential.id);
   }
 });
+
+test("selects a workflow into the preview panel and runs it from the quick drawer", async ({
+  page,
+}) => {
+  const workflowName = `Preview Workflow ${Date.now()}`;
+  const workflow = await createWorkflow(
+    page,
+    workflowName,
+    [
+      {
+        id: "n1",
+        type: "textInput",
+        position: { x: 0, y: 0 },
+        data: { label: "start", inputFields: [{ key: "text" }] },
+      },
+      {
+        id: "n2",
+        type: "output",
+        position: { x: 300, y: 0 },
+        data: { label: "Result" },
+      },
+    ],
+    [{ id: "e1", source: "n1", target: "n2" }],
+  );
+
+  try {
+    // The split view only renders the preview column on wide viewports.
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await page.goto("/");
+
+    const row = page.getByTestId(`workflow-card-${workflow.id}`);
+    await expect(row).toBeVisible();
+
+    // A single click selects rather than navigating; the URL must stay on the listing.
+    await row.click();
+    await expect(page).toHaveURL(/\/$/);
+    await expect(page.getByTestId("workflow-preview-title")).toHaveText(workflowName);
+    await expect(row).toHaveAttribute("data-selected", "true");
+
+    // Steps come from the workflow graph, in execution order.
+    await expect(page.getByTestId("workflow-preview-step-1")).toContainText("start");
+    await expect(page.getByTestId("workflow-preview-step-2")).toContainText("Result");
+
+    // Run Now hands the workflow to the quick drawer instead of navigating away.
+    await page.getByTestId("workflow-preview-run").click();
+    await expect(page.getByText("Selected workflow")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Run Workflow" })).toBeVisible();
+    await expect(page).toHaveURL(/\/$/);
+  } finally {
+    await deleteWorkflow(page, workflow.id);
+  }
+});
+
+test("opens a preview step on its node properties in the editor", async ({ page }) => {
+  const workflow = await createWorkflow(
+    page,
+    `Step Deep Link ${Date.now()}`,
+    [
+      {
+        id: "start-node",
+        type: "textInput",
+        position: { x: 0, y: 0 },
+        data: { label: "start", inputFields: [{ key: "text" }] },
+      },
+      {
+        id: "output-node",
+        type: "output",
+        position: { x: 300, y: 0 },
+        data: { label: "finalResult", message: "done" },
+      },
+    ],
+    [{ id: "e1", source: "start-node", target: "output-node" }],
+  );
+
+  try {
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await page.goto("/");
+    await page.getByTestId(`workflow-card-${workflow.id}`).click();
+    await expect(page.getByTestId("workflow-preview-title")).toBeVisible();
+
+    await page.getByTestId("workflow-preview-step-2").click();
+
+    await expect(page).toHaveURL(new RegExp(`/workflows/${workflow.id}$`));
+    // The properties tab must be showing that node, not the default Run tab.
+    // The label input is the selected node's, identified by its unique placeholder.
+    await expect(page.getByPlaceholder("camelCaseOnly")).toHaveValue("finalResult");
+  } finally {
+    await deleteWorkflow(page, workflow.id);
+  }
+});
+
+test("copies a runnable cURL for a webhook workflow", async ({ page, context }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const workflow = await createWorkflow(page, `Curl Workflow ${Date.now()}`, [
+    {
+      id: "start-node",
+      type: "textInput",
+      position: { x: 0, y: 0 },
+      data: { label: "start", inputFields: [{ key: "text" }] },
+    },
+  ]);
+
+  try {
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await page.goto("/");
+    await page.getByTestId(`workflow-card-${workflow.id}`).click();
+    await expect(page.getByTestId("workflow-preview-title")).toBeVisible();
+
+    // The raw endpoint is replaced by a copy action, so the panel must not print the path.
+    await expect(page.getByTestId("workflow-preview-panel")).not.toContainText("/execute");
+
+    await page.getByTestId("workflow-preview-copy-curl").click();
+    const copied = await page.evaluate(() => navigator.clipboard.readText());
+
+    expect(copied).toContain("curl -X POST");
+    expect(copied).toContain(`/api/workflows/${workflow.id}/execute`);
+    expect(copied).toContain('"text"');
+  } finally {
+    await deleteWorkflow(page, workflow.id);
+  }
+});
+
+test("shows the portal link in the preview only when a portal is published", async ({ page }) => {
+  const workflow = await createWorkflow(page, `Portal Workflow ${Date.now()}`, [
+    { id: "n1", type: "textInput", position: { x: 0, y: 0 }, data: { label: "start" } },
+  ]);
+  const slug = `e2e-portal-${Date.now()}`;
+
+  try {
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await page.goto("/");
+    await page.getByTestId(`workflow-card-${workflow.id}`).click();
+    await expect(page.getByTestId("workflow-preview-title")).toBeVisible();
+    await expect(page.getByTestId("workflow-preview-portal-link")).toHaveCount(0);
+
+    await expectOk(
+      await page.request.put(`/api/workflows/${workflow.id}/portal`, {
+        data: { portal_enabled: true, portal_slug: slug },
+      }),
+    );
+
+    await page.reload();
+    await page.getByTestId(`workflow-card-${workflow.id}`).click();
+
+    const portalLink = page.getByTestId("workflow-preview-portal-link");
+    await expect(portalLink).toBeVisible();
+    await expect(portalLink).toHaveAttribute("href", new RegExp(`/chat/${slug}$`));
+  } finally {
+    await deleteWorkflow(page, workflow.id);
+  }
+});
+
+test("filters the listing by trigger status", async ({ page }) => {
+  const scheduledName = `Scheduled Workflow ${Date.now()}`;
+  const manualName = `Manual Workflow ${Date.now()}`;
+  const scheduled = await createWorkflow(page, scheduledName, [
+    {
+      id: "n1",
+      type: "cron",
+      position: { x: 0, y: 0 },
+      data: { label: "schedule", cronExpression: "0 * * * *" },
+    },
+  ]);
+  const manual = await createWorkflow(page, manualName, [
+    { id: "n1", type: "textInput", position: { x: 0, y: 0 }, data: { label: "start" } },
+  ]);
+
+  try {
+    await page.goto("/");
+    await expect(page.getByTestId(`workflow-card-${scheduled.id}`)).toBeVisible();
+    await expect(page.getByTestId(`workflow-card-${manual.id}`)).toBeVisible();
+
+    await page.getByTestId("workflow-status-filter").click();
+    await page.getByTestId("workflow-status-filter-scheduled").click();
+
+    await expect(page.getByTestId(`workflow-card-${scheduled.id}`)).toBeVisible();
+    await expect(page.getByTestId(`workflow-card-${manual.id}`)).toBeHidden();
+
+    await page.getByTestId("workflow-status-filter").click();
+    await page.getByTestId("workflow-status-filter-all").click();
+    await expect(page.getByTestId(`workflow-card-${manual.id}`)).toBeVisible();
+  } finally {
+    await deleteWorkflow(page, scheduled.id);
+    await deleteWorkflow(page, manual.id);
+  }
+});
+
+test("keeps a folder description through create and edit", async ({ page }) => {
+  const folderName = `Described Folder ${Date.now()}`;
+  let folderId: string | undefined;
+
+  try {
+    await page.goto("/");
+    await page.getByRole("button", { name: "New Folder" }).first().click();
+    await page.getByLabel("Folder Name").fill(folderName);
+    await page.getByLabel("Description").fill("Monitoring and incident routing");
+
+    const folderResponsePromise = page.waitForResponse(
+      (response) =>
+        response.request().method() === "POST" &&
+        new URL(response.url()).pathname === "/api/folders",
+    );
+    await page.getByRole("button", { name: "Create", exact: true }).click();
+    folderId = ((await (await folderResponsePromise).json()) as { id: string }).id;
+
+    await expect(page.getByText("Monitoring and incident routing")).toBeVisible();
+
+    const header = page.getByTestId(`workflow-folder-header-${folderId}`);
+    await header.getByTitle("Rename folder").click();
+    await expect(page.getByRole("heading", { name: "Edit Folder" })).toBeVisible();
+    await page.getByLabel("Description").fill("Now about publishing");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+
+    await expect(page.getByText("Now about publishing")).toBeVisible();
+  } finally {
+    if (folderId) {
+      await expectOk(await page.request.delete(`/api/folders/${folderId}`));
+    }
+  }
+});

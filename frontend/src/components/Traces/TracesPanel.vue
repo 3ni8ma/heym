@@ -726,9 +726,10 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!-- The fixed quick workflows tab overlays the right edge on desktop, so the field and its clear button stop short of it. -->
     <div
       v-if="searchActive"
-      class="relative w-full min-w-0 flex-1"
+      class="relative w-full min-w-0 flex-1 md:pr-9"
     >
       <Search class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none z-[1]" />
       <input
@@ -742,7 +743,7 @@ onMounted(async () => {
       >
       <button
         v-if="searchQuery"
-        class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+        class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors md:right-11"
         type="button"
         @click="clearSearch"
       >

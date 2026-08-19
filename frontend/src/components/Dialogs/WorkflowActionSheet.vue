@@ -5,6 +5,8 @@ import {
   Copy,
   FolderInput,
   FolderOutput,
+  Pin,
+  PinOff,
   RotateCcw,
   Settings,
   Trash2,
@@ -19,9 +21,10 @@ interface Props {
   open: boolean;
   workflow: WorkflowListItem | null;
   folderTree: FolderTree[];
+  pinned?: boolean;
 }
 
-const props = defineProps<Props>();
+const props = withDefaults(defineProps<Props>(), { pinned: false });
 
 const emit = defineEmits<{
   close: [];
@@ -32,6 +35,7 @@ const emit = defineEmits<{
   copy: [event: Event];
   edit: [event: Event];
   delete: [event: Event];
+  "toggle-pin": [];
 }>();
 
 function flattenFolders(folders: FolderTree[], depth = 0): { folder: FolderTree; depth: number }[] {
@@ -101,6 +105,11 @@ function handleEdit(e: Event): void {
 function handleDelete(e: Event): void {
   e.stopPropagation();
   emit("delete", e);
+  close();
+}
+
+function handleTogglePin(): void {
+  emit("toggle-pin");
   close();
 }
 </script>
@@ -189,6 +198,23 @@ function handleDelete(e: Event): void {
       </button>
 
       <div class="border-t border-border/60 my-4" />
+
+      <button
+        v-if="!workflow.scheduled_for_deletion"
+        type="button"
+        class="flex items-center gap-3 w-full px-4 py-3 rounded-xl text-left text-sm hover:bg-muted/80 transition-colors min-h-[44px]"
+        @click="handleTogglePin"
+      >
+        <PinOff
+          v-if="pinned"
+          class="w-4 h-4 shrink-0"
+        />
+        <Pin
+          v-else
+          class="w-4 h-4 shrink-0"
+        />
+        {{ pinned ? "Unpin from quick drawer" : "Pin to quick drawer" }}
+      </button>
 
       <button
         type="button"

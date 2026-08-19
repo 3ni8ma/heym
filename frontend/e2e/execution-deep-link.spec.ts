@@ -140,7 +140,8 @@ test("brings a past execution onto the canvas via /workflows/:id/:executionId", 
 
     await page.locator('header a[href="/"]').first().click();
     await expect(page).toHaveURL(/\/$/);
-    await page.getByTestId(`workflow-card-${workflow.id}`).click();
+    // The listing is a master/detail view: a click selects, a double-click opens the editor.
+    await page.getByTestId(`workflow-card-${workflow.id}`).dblclick();
     await expect(page).toHaveURL(new RegExp(`/workflows/${workflow.id}$`));
     await expect(page.getByPlaceholder("Enter text...")).toHaveValue("");
 

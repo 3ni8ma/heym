@@ -7,8 +7,6 @@ import { useMediaQuery } from "@vueuse/core";
 import {
   AlertTriangle,
   Check,
-  Clock,
-  Copy,
   Download,
   Edit2,
   FileJson,
@@ -17,11 +15,8 @@ import {
   LayoutTemplate,
   Palette,
   Pin,
-  PinOff,
   Plus,
-  RotateCcw,
   Search,
-  Settings,
   Sparkles,
   Trash2,
   Workflow,
@@ -31,7 +26,15 @@ import {
 import type { DashboardShowcaseTab } from "@/features/showcase/showcase.types";
 import type { NodeTemplate, WorkflowTemplate } from "@/features/templates/types/template.types";
 import type { CredentialListItem } from "@/types/credential";
-import type { FolderTree, NodeData, WorkflowEdge, WorkflowListItem, WorkflowNode } from "@/types/workflow";
+import type {
+  FolderTree,
+  NodeData,
+  WorkflowEdge,
+  WorkflowListItem,
+  WorkflowNode,
+  WorkflowRowStatus,
+} from "@/types/workflow";
+import type { WorkflowStatusFilterValue } from "@/components/Workflows/WorkflowStatusFilter.vue";
 import AnalyticsDashboard from "@/components/Analytics/AnalyticsDashboard.vue";
 import BoardPanel from "@/components/Board/BoardPanel.vue";
 import DashboardChatComposer from "@/components/Chat/DashboardChatComposer.vue";
@@ -56,13 +59,17 @@ import ExecutionHistoryAllDialog from "@/components/Panels/ExecutionHistoryAllDi
 import TeamsPanel from "@/components/Teams/TeamsPanel.vue";
 import TracesPanel from "@/components/Traces/TracesPanel.vue";
 import Button from "@/components/ui/Button.vue";
-import Card from "@/components/ui/Card.vue";
 import Dialog from "@/components/ui/Dialog.vue";
 import Input from "@/components/ui/Input.vue";
 import Label from "@/components/ui/Label.vue";
 import Textarea from "@/components/ui/Textarea.vue";
 import VectorStoresPanel from "@/components/VectorStores/VectorStoresPanel.vue";
+import WorkflowListRow from "@/components/Workflows/WorkflowListRow.vue";
+import WorkflowPreviewPanel from "@/components/Workflows/WorkflowPreviewPanel.vue";
+import WorkflowStatusFilter from "@/components/Workflows/WorkflowStatusFilter.vue";
 import { useLongPress } from "@/composables/useLongPress";
+import { useWorkflowPreview } from "@/composables/useWorkflowPreview";
+import { useWorkflowRowStatus } from "@/composables/useWorkflowRowStatus";
 import { onDismissOverlays, pushOverlayState } from "@/composables/useOverlayBackHandler";
 import { useRecentWorkflows } from "@/composables/useRecentWorkflows";
 import { getDocPath } from "@/docs/manifest";
@@ -72,8 +79,7 @@ import TemplatesPage from "@/features/templates/components/TemplatesPage.vue";
 import { useRunbookPlayer } from "@/features/runbook/useRunbookPlayer";
 import { joinOriginAndPath } from "@/lib/appUrl";
 import { isPaletteOpenInNewTab } from "@/lib/paletteNavigate";
-import { isTileFillingIcon, nodeIcons } from "@/lib/nodeIcons";
-import { cn, formatDate } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 import { normalizeWorkflowEdges } from "@/lib/workflowEdges";
 import { credentialsApi, folderApi, templatesApi, workflowApi } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
@@ -201,6 +207,9 @@ function onDataTableNavigate(id: string | null): void {
 }
 
 const workflows = ref<WorkflowListItem[]>([]);
+const selectedWorkflowId = ref<string | null>(null);
+const statusFilter = ref<WorkflowStatusFilterValue>("all");
+const isPreviewSheetOpen = ref(false);
 const workflowSearchQuery = ref("");
 const workflowSearchInput = ref<HTMLInputElement | null>(null);
 const loading = ref(true);
@@ -223,12 +232,14 @@ const toastType = ref<"error" | "success">("error");
 
 const showFolderDialog = ref(false);
 const newFolderName = ref("");
+const newFolderDescription = ref("");
 const creatingFolder = ref(false);
 const parentFolderIdForNew = ref<string | null>(null);
 
 const showRenameFolderDialog = ref(false);
 const renamingFolder = ref<FolderTree | null>(null);
 const renameFolderName = ref("");
+const renameFolderDescription = ref("");
 const savingFolderRename = ref(false);
 
 const showFolderIconDialog = ref(false);
@@ -259,6 +270,8 @@ const canDropDraggedWorkflowToRoot = computed<boolean>(() => {
 const showCommandPalette = ref(false);
 
 const isMobile = useMediaQuery("(max-width: 767px)");
+/** Below this width the preview becomes a bottom sheet instead of a second column. */
+const isDesktopSplitView = useMediaQuery("(min-width: 1280px)");
 const showWorkflowActionSheet = ref(false);
 const workflowActionWorkflow = ref<WorkflowListItem | null>(null);
 const actionSheetConsumedId = ref<string | null>(null);
@@ -358,15 +371,11 @@ function matchesWorkflowSearch(workflow: WorkflowListItem, normalizedQuery: stri
   return `${workflow.name} ${workflow.description ?? ""}`.toLowerCase().includes(normalizedQuery);
 }
 
-function filterFolderTreeByWorkflowSearch(
-  folders: FolderTree[],
-  normalizedQuery: string,
-): FolderTree[] {
+/** Prunes folders with no visible workflow so a filter never leaves empty shells behind. */
+function filterFolderTree(folders: FolderTree[]): FolderTree[] {
   return folders.flatMap((folder): FolderTree[] => {
-    const children = filterFolderTreeByWorkflowSearch(folder.children, normalizedQuery);
-    const folderWorkflows = folder.workflows.filter((workflow) =>
-      matchesWorkflowSearch(workflow, normalizedQuery),
-    );
+    const children = filterFolderTree(folder.children);
+    const folderWorkflows = folder.workflows.filter(isWorkflowVisible);
 
     if (children.length === 0 && folderWorkflows.length === 0) {
       return [];
@@ -387,38 +396,116 @@ function collectFolderIds(folders: FolderTree[], folderIds: Set<string>): void {
   }
 }
 
-const displayedRootWorkflows = computed<WorkflowListItem[]>(() => {
-  return rootWorkflows.value.filter((workflow) =>
-    matchesWorkflowSearch(workflow, normalizedWorkflowSearchQuery.value),
+const { statusFor, runningWorkflowIds, refresh: refreshRunningWorkflows } = useWorkflowRowStatus();
+
+
+function matchesStatusFilter(workflow: WorkflowListItem): boolean {
+  if (statusFilter.value === "all") return true;
+  return statusFor(workflow) === statusFilter.value;
+}
+
+function isWorkflowVisible(workflow: WorkflowListItem): boolean {
+  return (
+    matchesWorkflowSearch(workflow, normalizedWorkflowSearchQuery.value) &&
+    matchesStatusFilter(workflow)
   );
+}
+
+const workflowStatusCounts = computed<Partial<Record<WorkflowStatusFilterValue, number>>>(() => {
+  const counts: Partial<Record<WorkflowStatusFilterValue, number>> = {
+    all: workflows.value.length,
+  };
+  for (const workflow of workflows.value) {
+    const status: WorkflowRowStatus = statusFor(workflow);
+    counts[status] = (counts[status] ?? 0) + 1;
+  }
+  return counts;
+});
+
+const displayedRootWorkflows = computed<WorkflowListItem[]>(() => {
+  return rootWorkflows.value.filter(isWorkflowVisible);
 });
 
 const displayedPinnedDrawerWorkflows = computed<WorkflowListItem[]>(() => {
-  return pinnedDrawerWorkflows.value.filter((workflow) =>
-    matchesWorkflowSearch(workflow, normalizedWorkflowSearchQuery.value),
-  );
+  return pinnedDrawerWorkflows.value.filter(isWorkflowVisible);
 });
 
 const displayedScheduledWorkflows = computed<WorkflowListItem[]>(() => {
-  return scheduledWorkflows.value.filter((workflow) =>
-    matchesWorkflowSearch(workflow, normalizedWorkflowSearchQuery.value),
-  );
+  return scheduledWorkflows.value.filter(isWorkflowVisible);
+});
+
+const selectedWorkflow = computed<WorkflowListItem | null>(() => {
+  if (!selectedWorkflowId.value) return null;
+  return workflows.value.find((workflow) => workflow.id === selectedWorkflowId.value) ?? null;
+});
+
+const {
+  detail: selectedWorkflowDetail,
+  lastRun: selectedWorkflowLastRun,
+  loading: previewLoading,
+  error: previewError,
+} = useWorkflowPreview(selectedWorkflowId);
+
+const isSelectedWorkflowRunning = computed((): boolean => {
+  return selectedWorkflowId.value !== null && runningWorkflowIds.value.has(selectedWorkflowId.value);
+});
+
+function selectWorkflow(workflow: WorkflowListItem): void {
+  selectedWorkflowId.value = workflow.id;
+  if (!isDesktopSplitView.value) {
+    isPreviewSheetOpen.value = true;
+    pushOverlayState();
+  }
+}
+
+function closePreviewSheet(): void {
+  isPreviewSheetOpen.value = false;
+}
+
+/** The Run action hands the workflow to the quick drawer, where inputs and output live. */
+async function runWorkflowInQuickDrawer(workflowId: string): Promise<void> {
+  closePreviewSheet();
+  quickDrawerStore.openDrawer();
+  await quickDrawerStore.ensureWorkflows();
+  quickDrawerStore.selectWorkflow(workflowId, true);
+}
+
+function openWorkflowFromPreview(id: string, event: MouseEvent): void {
+  closePreviewSheet();
+  openWorkflow(id, event);
+}
+
+/** Opens the workflow with that node selected, so the editor lands on its properties panel. */
+function openSelectedWorkflowFromStep(nodeId: string): void {
+  const workflowId = selectedWorkflowId.value;
+  if (!workflowId) return;
+  closePreviewSheet();
+  addRecent(workflowId, selectedWorkflow.value?.name ?? "Workflow");
+  void router.push({ name: "editor", params: { id: workflowId }, query: { node: nodeId } });
+}
+
+/** True when search or the status filter leaves the whole listing empty. */
+const hasNoVisibleWorkflows = computed((): boolean => {
+  if (workflows.value.length === 0) return false;
+  return !workflows.value.some(isWorkflowVisible);
+});
+
+/** Search or a status other than "all" - both prune the tree and force matches open. */
+const isWorkflowFilterActive = computed((): boolean => {
+  return isWorkflowSearchActive.value || statusFilter.value !== "all";
 });
 
 const displayedFolderTree = computed<FolderTree[]>(() => {
-  if (!isWorkflowSearchActive.value) {
+  if (!isWorkflowFilterActive.value) {
     return folderStore.folderTree;
   }
 
-  return filterFolderTreeByWorkflowSearch(
-    folderStore.folderTree,
-    normalizedWorkflowSearchQuery.value,
-  );
+  return filterFolderTree(folderStore.folderTree);
 });
 
 const workflowSearchExpandedFolderIds = computed<Set<string>>(() => {
   const folderIds = new Set<string>();
-  if (isWorkflowSearchActive.value) {
+  if (isWorkflowFilterActive.value) {
     collectFolderIds(displayedFolderTree.value, folderIds);
   }
   return folderIds;
@@ -638,6 +725,7 @@ onMounted(async () => {
     showWorkflowActionSheet.value = false;
     workflowActionWorkflow.value = null;
     actionSheetConsumedId.value = null;
+    isPreviewSheetOpen.value = false;
     clearWorkflowSearch();
   });
 });
@@ -655,9 +743,31 @@ async function loadWorkflows(): Promise<void> {
   loading.value = true;
   try {
     workflows.value = await workflowApi.list();
+    syncSelectionWithWorkflows();
+    void refreshRunningWorkflows();
   } finally {
     loading.value = false;
   }
+}
+
+/**
+ * Keeps the preview pointed at something real: drops a selection whose workflow is gone and,
+ * on the split-view layout, falls back to the first visible row so the panel is never empty
+ * for no reason.
+ */
+function syncSelectionWithWorkflows(): void {
+  if (
+    selectedWorkflowId.value &&
+    !workflows.value.some((workflow) => workflow.id === selectedWorkflowId.value)
+  ) {
+    selectedWorkflowId.value = null;
+    isPreviewSheetOpen.value = false;
+  }
+
+  if (selectedWorkflowId.value || !isDesktopSplitView.value) return;
+
+  const firstVisible = workflows.value.find(isWorkflowVisible);
+  if (firstVisible) selectedWorkflowId.value = firstVisible.id;
 }
 
 async function createWorkflow(): Promise<void> {
@@ -686,6 +796,7 @@ async function deleteWorkflow(id: string, event: Event): Promise<void> {
   try {
     await workflowApi.delete(id);
     workflows.value = workflows.value.filter((w) => w.id !== id);
+    syncSelectionWithWorkflows();
     await folderStore.fetchFolderTree();
     showToast("Workflow deleted successfully", "success");
   } catch (error) {
@@ -776,6 +887,7 @@ async function copyWorkflow(id: string, event: Event, scheduleAfterCopy = false)
 function openCreateFolderDialog(parentId: string | null = null): void {
   parentFolderIdForNew.value = parentId;
   newFolderName.value = "";
+  newFolderDescription.value = "";
   showFolderDialog.value = true;
   pushOverlayState();
   closeContextMenu();
@@ -786,9 +898,14 @@ async function createFolder(): Promise<void> {
 
   creatingFolder.value = true;
   try {
-    await folderStore.createFolder(newFolderName.value.trim(), parentFolderIdForNew.value);
+    await folderStore.createFolder(
+      newFolderName.value.trim(),
+      parentFolderIdForNew.value,
+      newFolderDescription.value.trim() || null,
+    );
     showFolderDialog.value = false;
     newFolderName.value = "";
+    newFolderDescription.value = "";
     parentFolderIdForNew.value = null;
     showToast("Folder created successfully", "success");
   } catch (error) {
@@ -803,6 +920,7 @@ async function createFolder(): Promise<void> {
 function openRenameFolderDialog(folder: FolderTree): void {
   renamingFolder.value = folder;
   renameFolderName.value = folder.name;
+  renameFolderDescription.value = folder.description ?? "";
   showRenameFolderDialog.value = true;
   pushOverlayState();
   closeContextMenu();
@@ -814,7 +932,11 @@ async function renameFolder(): Promise<void> {
 
   savingFolderRename.value = true;
   try {
-    await folderStore.renameFolder(renamingFolder.value.id, renameFolderName.value.trim());
+    await folderStore.renameFolder(
+      renamingFolder.value.id,
+      renameFolderName.value.trim(),
+      renameFolderDescription.value.trim() || null,
+    );
     showRenameFolderDialog.value = false;
     renamingFolder.value = null;
     showToast("Folder renamed successfully", "success");
@@ -1492,6 +1614,10 @@ function onActionSheetDelete(e: Event): void {
   if (workflowActionWorkflow.value) deleteWorkflow(workflowActionWorkflow.value.id, e);
 }
 
+function onActionSheetTogglePin(): void {
+  if (workflowActionWorkflow.value) quickDrawerStore.togglePin(workflowActionWorkflow.value.id);
+}
+
 async function restoreFromTrash(workflowId: string, event: Event): Promise<void> {
   event.stopPropagation();
   try {
@@ -1515,7 +1641,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
     :enabled="true"
     :showcase-context="showcaseContext"
   >
-    <div class="min-h-screen bg-background overflow-x-hidden">
+    <div class="min-h-screen bg-background overflow-x-clip">
       <AppHeader :on-open-command-palette="() => { showCommandPalette = true; pushOverlayState(); }">
         <template #before-docs>
           <div
@@ -1591,7 +1717,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                   </span>
                 </div>
                 <p class="text-muted-foreground mt-0.5 text-sm">
-                  Create and manage your AI workflows
+                  Create, orchestrate and run your modular autonomous agents
                   <span class="sm:hidden"> · Long press for move/delete</span>
                 </p>
               </div>
@@ -1632,6 +1758,12 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                     <X class="h-4 w-4" />
                   </button>
                 </div>
+                <WorkflowStatusFilter
+                  v-if="!loading && workflows.length > 0"
+                  v-model="statusFilter"
+                  :counts="workflowStatusCounts"
+                  class="order-4 sm:order-none"
+                />
                 <Button
                   variant="outline"
                   size="sm"
@@ -1665,25 +1797,20 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
 
             <div
               v-if="loading"
-              class="relative z-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"
+              class="relative z-10 space-y-2"
             >
-              <Card
-                v-for="i in 3"
+              <div
+                v-for="i in 5"
                 :key="i"
-                class="p-3.5"
+                class="flex items-center gap-3 rounded-xl border border-border/50 bg-card px-3 py-3 sm:px-4"
               >
-                <div class="flex items-start gap-3 mb-2.5">
-                  <div class="w-9 h-9 rounded-lg bg-muted animate-pulse shrink-0" />
-                  <div class="flex-1">
-                    <div class="h-5 bg-muted rounded-lg w-3/4 mb-2.5 animate-pulse" />
-                    <div class="h-3.5 bg-muted rounded-md w-1/3 animate-pulse" />
-                  </div>
+                <div class="h-9 w-9 shrink-0 animate-pulse rounded-lg bg-muted sm:h-10 sm:w-10" />
+                <div class="flex-1 space-y-2">
+                  <div class="h-4 w-1/3 animate-pulse rounded bg-muted" />
+                  <div class="h-3 w-2/3 animate-pulse rounded bg-muted" />
+                  <div class="h-3 w-24 animate-pulse rounded bg-muted" />
                 </div>
-                <div class="ml-[48px] pt-2 border-t border-border/30">
-                  <div class="h-3.5 bg-muted rounded-md w-full mb-2 animate-pulse" />
-                  <div class="h-3.5 bg-muted rounded-md w-2/3 animate-pulse" />
-                </div>
-              </Card>
+              </div>
             </div>
 
             <div
@@ -1749,432 +1876,243 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
 
             <div
               v-else
-              class="relative z-10 space-y-1.5"
+              class="relative z-10 flex flex-col gap-4 xl:flex-row xl:items-start"
             >
               <div
-                v-if="isWorkflowSearchActive && workflowSearchMatchCount === 0"
-                class="flex flex-col items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/10 px-4 py-16 text-center"
+                class="min-w-0 flex-1 space-y-1.5"
+                data-testid="workflow-master-list"
               >
-                <Search class="mb-3 h-8 w-8 text-muted-foreground/60" />
-                <p class="text-sm font-medium text-foreground">
-                  No workflows found
-                </p>
-                <p class="mt-1 max-w-md text-xs text-muted-foreground">
-                  Try a different title or description.
-                </p>
-              </div>
-
-              <div
-                v-if="displayedPinnedDrawerWorkflows.length > 0"
-                class="mb-6 space-y-4"
-              >
-                <div class="flex items-center gap-2 px-1 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                  <Pin class="h-3.5 w-3.5 text-primary" />
-                  Pinned
+                <div
+                  v-if="hasNoVisibleWorkflows"
+                  class="flex flex-col items-center justify-center rounded-xl border border-dashed border-border/70 bg-muted/10 px-4 py-16 text-center"
+                >
+                  <Search class="mb-3 h-8 w-8 text-muted-foreground/60" />
+                  <p class="text-sm font-medium text-foreground">
+                    No workflows found
+                  </p>
+                  <p class="mt-1 max-w-md text-xs text-muted-foreground">
+                    {{ statusFilter === 'all'
+                      ? 'Try a different title or description.'
+                      : 'Try a different title, description or status filter.' }}
+                  </p>
+                  <Button
+                    v-if="statusFilter !== 'all'"
+                    variant="ghost"
+                    size="sm"
+                    class="mt-3"
+                    @click="statusFilter = 'all'"
+                  >
+                    Clear status filter
+                  </Button>
                 </div>
 
-                <div class="px-3">
-                  <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    <Card
-                      v-for="(workflow, index) in displayedPinnedDrawerWorkflows"
-                      :key="workflow.id"
-                      :data-testid="`workflow-card-${workflow.id}`"
-                      variant="interactive"
-                      :class="cn(
-                        'workflow-card cursor-pointer group relative p-3.5',
-                        draggedWorkflowId === workflow.id && 'workflow-card--dragging'
-                      )"
-                      :style="{ animationDelay: `${index * 60}ms` }"
-                      :hover="false"
-                      draggable="true"
-                      @click="openWorkflow(workflow.id, $event)"
-                      @touchstart.passive="isMobile && onWorkflowCardTouchStart($event, workflow)"
-                      @touchend="isMobile && onWorkflowCardTouchEnd()"
-                      @touchmove="isMobile && onWorkflowCardTouchMove()"
-                      @dragstart="onDragStartWorkflow($event, workflow.id)"
-                      @dragend="onDragEndWorkflow"
-                    >
-                      <div class="flex items-start justify-between mb-2 gap-1.5">
-                        <div class="flex items-start gap-3 min-w-0 flex-1">
-                          <div
-                            class="workflow-icon relative flex items-center justify-center w-9 h-9 rounded-lg text-primary shrink-0"
-                          >
-                            <div
-                              class="absolute inset-0 rounded-lg bg-gradient-to-br from-primary/15 via-primary/10 to-primary/5"
-                            />
-                            <div class="absolute inset-0 rounded-lg ring-1 ring-inset ring-primary/20" />
-                            <component
-                              :is="workflow.first_node_type && nodeIcons[workflow.first_node_type] ? nodeIcons[workflow.first_node_type] : Workflow"
-                              :class="workflow.first_node_type && isTileFillingIcon(workflow.first_node_type) ? 'relative z-10 w-full h-full' : 'relative z-10 h-4 w-4'"
-                            />
-                          </div>
-                          <div class="min-w-0">
-                            <h3
-                              class="workflow-card-title font-semibold text-sm line-clamp-2 leading-snug transition-colors duration-200"
-                            >
-                              {{ workflow.name }}
-                            </h3>
-                            <div class="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
-                              <Clock class="w-3 h-3" />
-                              <span>{{ formatDate(workflow.updated_at) }}</span>
-                            </div>
-                          </div>
-                        </div>
-                        <div class="flex items-center gap-0.5 shrink-0">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg"
-                            title="Copy workflow"
-                            :disabled="copyingId === workflow.id"
-                            @click="copyWorkflow(workflow.id, $event)"
-                          >
-                            <Copy
-                              class="w-3.5 h-3.5"
-                              :class="{ 'animate-spin-slow': copyingId === workflow.id }"
-                            />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 text-primary hover:text-primary hover:bg-primary/10 rounded-lg"
-                            title="Unpin workflow"
-                            @click.stop="quickDrawerStore.togglePin(workflow.id)"
-                          >
-                            <PinOff class="w-3.5 h-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg"
-                            title="Edit workflow"
-                            @click="openEditDialog(workflow, $event)"
-                          >
-                            <Settings class="w-3.5 h-3.5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            :data-testid="`workflow-delete-${workflow.id}`"
-                            class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg"
-                            title="Delete workflow"
-                            @click="deleteWorkflow(workflow.id, $event)"
-                          >
-                            <Trash2 class="w-3.5 h-3.5" />
-                          </Button>
-                        </div>
-                      </div>
-                      <div
-                        v-if="workflow.description"
-                        class="mt-0.5 pt-2 border-t border-border/40 ml-[48px]"
-                      >
-                        <p class="text-muted-foreground text-xs line-clamp-2 leading-relaxed">
-                          {{ workflow.description }}
-                        </p>
-                      </div>
-                    </Card>
+                <div
+                  v-if="displayedPinnedDrawerWorkflows.length > 0"
+                  class="mb-4 space-y-2"
+                >
+                  <div class="flex items-center gap-2 px-1 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    <Pin class="h-3.5 w-3.5 text-primary" />
+                    Pinned
                   </div>
-                </div>
-              </div>
 
-              <div
-                v-for="folder in displayedFolderTree"
-                :key="folder.id"
-                class="folder-item"
-              >
-                <FolderTreeItem
-                  :folder="folder"
-                  :is-expanded="isFolderExpandedForDisplay(folder.id)"
-                  :force-expanded-folder-ids="workflowSearchExpandedFolderIds"
-                  :drag-over-folder-id="dragOverFolderId"
-                  :dragged-workflow-id="draggedWorkflowId"
-                  :dragged-workflow-folder-id="draggedWorkflow?.folder_id ?? null"
-                  :dragged-workflow-name="draggedWorkflow?.name ?? 'Workflow'"
-                  :copying-id="copyingId"
-                  :is-mobile="isMobile"
-                  :on-workflow-touch-start="onWorkflowCardTouchStart"
-                  :on-workflow-touch-end="onWorkflowCardTouchEnd"
-                  :on-workflow-touch-move="onWorkflowCardTouchMove"
-                  @toggle="toggleFolder"
-                  @expand="folderStore.expandFolder"
-                  @drag-over="onDragOverFolder"
-                  @drag-leave="onDragLeaveFolder"
-                  @drop="onDropToFolder"
-                  @context-menu="openContextMenu"
-                  @create-subfolder="openCreateFolderDialog"
-                  @open-workflow="(id, e) => openWorkflow(id, e)"
-                  @edit-workflow="openEditDialog"
-                  @copy-workflow="copyWorkflow"
-                  @delete-workflow="deleteWorkflow"
-                  @drag-start-workflow="onDragStartWorkflow"
-                  @drag-end-workflow="onDragEndWorkflow"
-                />
-              </div>
-
-              <div
-                v-if="!isWorkflowSearchActive || displayedRootWorkflows.length > 0 || draggedWorkflowId"
-                data-testid="workflow-root-drop-zone"
-                :data-drop-active="String(dragOverRoot)"
-                :class="cn(
-                  'rounded-xl border-2 border-dashed p-3 transition-all',
-                  dragOverRoot ? 'border-primary bg-primary/5' : 'border-transparent'
-                )"
-                @dragenter="onDragEnterDropZone"
-                @dragover="onDragOverRoot"
-                @dragleave="onDragLeaveRoot"
-                @drop="onDropToRoot"
-              >
-                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                  <WorkflowFolderDropPlaceholder
-                    v-if="dragOverRoot && draggedWorkflow"
-                    target-id="root"
-                    target-kind="Root"
-                    target-label="Workflows / Root"
-                    :workflow-name="draggedWorkflow.name"
-                    :valid="true"
+                  <WorkflowListRow
+                    v-for="(workflow, index) in displayedPinnedDrawerWorkflows"
+                    :key="workflow.id"
+                    :workflow="workflow"
+                    :status="statusFor(workflow)"
+                    :selected="selectedWorkflowId === workflow.id"
+                    :pinned="true"
+                    :index="index"
+                    :copying-id="copyingId"
+                    :is-dragging="draggedWorkflowId === workflow.id"
+                    :is-mobile="isMobile"
+                    :on-touch-start-row="onWorkflowCardTouchStart"
+                    :on-touch-end-row="onWorkflowCardTouchEnd"
+                    :on-touch-move-row="onWorkflowCardTouchMove"
+                    @select="selectWorkflow"
+                    @open="(id, event) => openWorkflow(id, event)"
+                    @edit="openEditDialog"
+                    @copy="copyWorkflow"
+                    @delete="deleteWorkflow"
+                    @toggle-pin="quickDrawerStore.togglePin"
+                    @drag-start="onDragStartWorkflow"
+                    @drag-end="onDragEndWorkflow"
                   />
-                  <Card
-                    v-for="(workflow, index) in displayedRootWorkflows"
-                    :key="workflow.id"
-                    :data-testid="`workflow-card-${workflow.id}`"
-                    variant="interactive"
-                    :class="cn(
-                      'workflow-card p-3.5 cursor-pointer group relative',
-                      draggedWorkflowId === workflow.id && 'workflow-card--dragging'
-                    )"
-                    :style="{ animationDelay: `${index * 60}ms` }"
-                    :hover="false"
-                    draggable="true"
-                    @click="openWorkflow(workflow.id, $event)"
-                    @touchstart.passive="isMobile && onWorkflowCardTouchStart($event, workflow)"
-                    @touchend="isMobile && onWorkflowCardTouchEnd()"
-                    @touchmove="isMobile && onWorkflowCardTouchMove()"
-                    @dragstart="onDragStartWorkflow($event, workflow.id)"
-                    @dragend="onDragEndWorkflow"
+                </div>
+
+                <div
+                  v-for="folder in displayedFolderTree"
+                  :key="folder.id"
+                  class="folder-item"
+                >
+                  <FolderTreeItem
+                    :folder="folder"
+                    :is-expanded="isFolderExpandedForDisplay(folder.id)"
+                    :force-expanded-folder-ids="workflowSearchExpandedFolderIds"
+                    :drag-over-folder-id="dragOverFolderId"
+                    :dragged-workflow-id="draggedWorkflowId"
+                    :dragged-workflow-folder-id="draggedWorkflow?.folder_id ?? null"
+                    :dragged-workflow-name="draggedWorkflow?.name ?? 'Workflow'"
+                    :copying-id="copyingId"
+                    :selected-workflow-id="selectedWorkflowId"
+                    :pinned-workflow-ids="quickDrawerPinnedWorkflowIds"
+                    :status-for="statusFor"
+                    :is-mobile="isMobile"
+                    :on-workflow-touch-start="onWorkflowCardTouchStart"
+                    :on-workflow-touch-end="onWorkflowCardTouchEnd"
+                    :on-workflow-touch-move="onWorkflowCardTouchMove"
+                    @toggle="toggleFolder"
+                    @expand="folderStore.expandFolder"
+                    @drag-over="onDragOverFolder"
+                    @drag-leave="onDragLeaveFolder"
+                    @drop="onDropToFolder"
+                    @context-menu="openContextMenu"
+                    @create-subfolder="openCreateFolderDialog"
+                    @rename-folder="openRenameFolderDialog"
+                    @change-folder-icon="openFolderIconDialog"
+                    @download-folder="downloadFolderAsZip"
+                    @delete-folder="deleteFolder"
+                    @select-workflow="selectWorkflow"
+                    @open-workflow="(id, e) => openWorkflow(id, e)"
+                    @edit-workflow="openEditDialog"
+                    @copy-workflow="copyWorkflow"
+                    @delete-workflow="deleteWorkflow"
+                    @toggle-pin-workflow="quickDrawerStore.togglePin"
+                    @drag-start-workflow="onDragStartWorkflow"
+                    @drag-end-workflow="onDragEndWorkflow"
+                  />
+                </div>
+
+                <div
+                  v-if="!isWorkflowFilterActive || displayedRootWorkflows.length > 0 || draggedWorkflowId"
+                  data-testid="workflow-root-drop-zone"
+                  :data-drop-active="String(dragOverRoot)"
+                  :class="cn(
+                    'rounded-xl border-2 border-dashed p-1 transition-all',
+                    dragOverRoot ? 'border-primary bg-primary/5' : 'border-transparent'
+                  )"
+                  @dragenter="onDragEnterDropZone"
+                  @dragover="onDragOverRoot"
+                  @dragleave="onDragLeaveRoot"
+                  @drop="onDropToRoot"
+                >
+                  <div class="space-y-1.5">
+                    <WorkflowFolderDropPlaceholder
+                      v-if="dragOverRoot && draggedWorkflow"
+                      target-id="root"
+                      target-kind="Root"
+                      target-label="Workflows / Root"
+                      :workflow-name="draggedWorkflow.name"
+                      :valid="true"
+                    />
+                    <WorkflowListRow
+                      v-for="(workflow, index) in displayedRootWorkflows"
+                      :key="workflow.id"
+                      :workflow="workflow"
+                      :status="statusFor(workflow)"
+                      :selected="selectedWorkflowId === workflow.id"
+                      :pinned="quickDrawerPinnedWorkflowIds.includes(workflow.id)"
+                      :index="index"
+                      :copying-id="copyingId"
+                      :is-dragging="draggedWorkflowId === workflow.id"
+                      :is-mobile="isMobile"
+                      :on-touch-start-row="onWorkflowCardTouchStart"
+                      :on-touch-end-row="onWorkflowCardTouchEnd"
+                      :on-touch-move-row="onWorkflowCardTouchMove"
+                      @select="selectWorkflow"
+                      @open="(id, event) => openWorkflow(id, event)"
+                      @edit="openEditDialog"
+                      @copy="copyWorkflow"
+                      @delete="deleteWorkflow"
+                      @toggle-pin="quickDrawerStore.togglePin"
+                      @drag-start="onDragStartWorkflow"
+                      @drag-end="onDragEndWorkflow"
+                    />
+                  </div>
+                </div>
+
+                <div
+                  v-if="!isWorkflowFilterActive || displayedScheduledWorkflows.length > 0 || draggedWorkflowId"
+                  :class="cn(
+                    'mt-6 rounded-xl border-2 border-dashed p-3 transition-all duration-300',
+                    dragOverTrash ? 'border-destructive bg-destructive/5 dark:border-red-400/70 dark:bg-red-400/[0.06]' : 'border-border/40 bg-muted/5'
+                  )"
+                  @dragenter="onDragEnterDropZone"
+                  @dragover="onDragOverTrash"
+                  @dragleave="onDragLeaveTrash"
+                  @drop="onDropToTrash"
+                >
+                  <div
+                    class="flex items-center gap-2"
+                    :class="{ 'mb-3': displayedScheduledWorkflows.length > 0 || draggedWorkflowId }"
                   >
-                    <div class="flex items-start justify-between mb-2 gap-1.5">
-                      <div class="flex items-start gap-3 min-w-0 flex-1">
-                        <div
-                          class="workflow-icon relative flex items-center justify-center w-9 h-9 rounded-lg text-primary shrink-0"
-                        >
-                          <div
-                            class="absolute inset-0 rounded-lg bg-gradient-to-br from-primary/15 via-primary/10 to-primary/5"
-                          />
-                          <div class="absolute inset-0 rounded-lg ring-1 ring-inset ring-primary/20" />
-                          <component
-                            :is="workflow.first_node_type && nodeIcons[workflow.first_node_type] ? nodeIcons[workflow.first_node_type] : Workflow"
-                            :class="workflow.first_node_type && isTileFillingIcon(workflow.first_node_type) ? 'relative z-10 w-full h-full' : 'w-4 h-4 relative z-10'"
-                          />
-                        </div>
-                        <div class="min-w-0">
-                          <h3 class="workflow-card-title font-semibold text-sm line-clamp-2 leading-snug transition-colors duration-200">
-                            {{ workflow.name }}
-                          </h3>
-                          <div class="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
-                            <Clock class="w-3 h-3" />
-                            <span>{{ formatDate(workflow.updated_at) }}</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div class="flex items-center gap-0.5 shrink-0">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg"
-                          title="Copy workflow"
-                          :disabled="copyingId === workflow.id"
-                          @click="copyWorkflow(workflow.id, $event)"
-                        >
-                          <Copy
-                            class="w-3.5 h-3.5"
-                            :class="{ 'animate-spin-slow': copyingId === workflow.id }"
-                          />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 hover:bg-primary/10 rounded-lg"
-                          :class="quickDrawerPinnedWorkflowIds.includes(workflow.id) ? 'text-primary' : 'text-muted-foreground hover:text-primary'"
-                          :title="quickDrawerPinnedWorkflowIds.includes(workflow.id) ? 'Unpin workflow' : 'Pin workflow'"
-                          @click.stop="quickDrawerStore.togglePin(workflow.id)"
-                        >
-                          <PinOff
-                            v-if="quickDrawerPinnedWorkflowIds.includes(workflow.id)"
-                            class="w-3.5 h-3.5"
-                          />
-                          <Pin
-                            v-else
-                            class="w-3.5 h-3.5"
-                          />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg"
-                          title="Edit workflow"
-                          @click="openEditDialog(workflow, $event)"
-                        >
-                          <Settings class="w-3.5 h-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          :data-testid="`workflow-delete-${workflow.id}`"
-                          class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg"
-                          title="Delete workflow"
-                          @click="deleteWorkflow(workflow.id, $event)"
-                        >
-                          <Trash2 class="w-3.5 h-3.5" />
-                        </Button>
-                      </div>
+                    <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-destructive/10 text-destructive dark:bg-red-400/10 dark:text-red-300">
+                      <Trash2 class="h-4 w-4" />
                     </div>
-                    <div
-                      v-if="workflow.description"
-                      class="mt-0.5 pt-2 border-t border-border/40 ml-[48px]"
-                    >
-                      <p class="text-muted-foreground text-xs line-clamp-2 leading-relaxed">
-                        {{ workflow.description }}
+                    <div>
+                      <h3 class="text-sm font-semibold text-muted-foreground">
+                        Scheduled for Deletion
+                      </h3>
+                      <p class="hidden text-xs text-muted-foreground/70 sm:block">
+                        Drag workflows here - they will be deleted at 23:59 if all start nodes are deactivated
                       </p>
                     </div>
-                  </Card>
+                  </div>
+
+                  <div
+                    v-if="draggedWorkflowId && !workflows.find((w) => w.id === draggedWorkflowId)?.scheduled_for_deletion"
+                    class="mb-4 mt-4 rounded-xl border border-dashed border-destructive/30 py-4 text-center text-sm text-destructive dark:border-red-400/30 dark:text-red-300"
+                  >
+                    Drop here to schedule for deletion
+                  </div>
+
+                  <div
+                    v-if="displayedScheduledWorkflows.length > 0"
+                    class="space-y-1.5"
+                  >
+                    <WorkflowListRow
+                      v-for="(workflow, index) in displayedScheduledWorkflows"
+                      :key="workflow.id"
+                      :workflow="workflow"
+                      :status="statusFor(workflow)"
+                      :selected="selectedWorkflowId === workflow.id"
+                      :index="index"
+                      :copying-id="copyingId"
+                      :is-dragging="draggedWorkflowId === workflow.id"
+                      :is-mobile="isMobile"
+                      :on-touch-start-row="onWorkflowCardTouchStart"
+                      :on-touch-end-row="onWorkflowCardTouchEnd"
+                      :on-touch-move-row="onWorkflowCardTouchMove"
+                      @select="selectWorkflow"
+                      @open="(id, event) => openWorkflow(id, event)"
+                      @edit="openEditDialog"
+                      @copy="(id, event) => copyWorkflow(id, event, true)"
+                      @delete="deleteWorkflow"
+                      @restore="restoreFromTrash"
+                      @drag-start="onDragStartWorkflow"
+                      @drag-end="onDragEndWorkflow"
+                    />
+                  </div>
                 </div>
               </div>
 
-              <div
-                v-if="!isWorkflowSearchActive || displayedScheduledWorkflows.length > 0 || draggedWorkflowId"
-                :class="cn(
-                  'mt-6 rounded-xl border-2 border-dashed p-3 transition-all duration-300',
-                  dragOverTrash ? 'border-destructive bg-destructive/5' : 'border-border/40 bg-muted/5'
-                )"
-                @dragenter="onDragEnterDropZone"
-                @dragover="onDragOverTrash"
-                @dragleave="onDragLeaveTrash"
-                @drop="onDropToTrash"
+              <aside
+                v-if="isDesktopSplitView"
+                class="sticky top-[4.5rem] flex max-h-[calc(100vh-5.25rem)] w-full shrink-0 flex-col overflow-hidden rounded-2xl border border-border/60 bg-card/60 shadow-sm backdrop-blur-sm xl:w-[44%] xl:max-w-[640px]"
+                data-testid="workflow-preview-aside"
               >
-                <div
-                  class="flex items-center gap-2"
-                  :class="{ 'mb-3': displayedScheduledWorkflows.length > 0 || draggedWorkflowId }"
-                >
-                  <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-destructive/10 text-destructive">
-                    <Trash2 class="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 class="font-semibold text-sm text-muted-foreground">
-                      Scheduled for Deletion
-                    </h3>
-                    <p class="text-xs text-muted-foreground/70 hidden sm:block">
-                      Drag workflows here - they will be deleted at 23:59 if all start nodes are deactivated
-                    </p>
-                  </div>
-                </div>
-
-                <div
-                  v-if="draggedWorkflowId && !workflows.find((w) => w.id === draggedWorkflowId)?.scheduled_for_deletion"
-                  class="text-center text-sm text-destructive py-4 border border-dashed border-destructive/30 rounded-xl mb-4 mt-4"
-                >
-                  Drop here to schedule for deletion
-                </div>
-
-                <div
-                  v-if="displayedScheduledWorkflows.length > 0"
-                  class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"
-                >
-                  <Card
-                    v-for="(workflow, index) in displayedScheduledWorkflows"
-                    :key="workflow.id"
-                    variant="interactive"
-                    :class="cn(
-                      'workflow-card p-3.5 cursor-pointer group relative border-destructive/20 bg-destructive/5 hover:border-destructive/40',
-                      draggedWorkflowId === workflow.id && 'workflow-card--dragging'
-                    )"
-                    :style="{ animationDelay: `${index * 60}ms` }"
-                    :hover="false"
-                    draggable="true"
-                    @click="openWorkflow(workflow.id, $event)"
-                    @touchstart.passive="isMobile && onWorkflowCardTouchStart($event, workflow)"
-                    @touchend="isMobile && onWorkflowCardTouchEnd()"
-                    @touchmove="isMobile && onWorkflowCardTouchMove()"
-                    @dragstart="onDragStartWorkflow($event, workflow.id)"
-                    @dragend="onDragEndWorkflow"
-                  >
-                    <div class="flex items-start justify-between mb-2 gap-1.5">
-                      <div class="flex items-start gap-3 min-w-0 flex-1">
-                        <div
-                          class="workflow-icon relative flex items-center justify-center w-9 h-9 rounded-lg text-destructive shrink-0"
-                        >
-                          <div
-                            class="absolute inset-0 rounded-lg bg-gradient-to-br from-destructive/15 via-destructive/10 to-destructive/5"
-                          />
-                          <div class="absolute inset-0 rounded-lg ring-1 ring-inset ring-destructive/20" />
-                          <component
-                            :is="workflow.first_node_type && nodeIcons[workflow.first_node_type] ? nodeIcons[workflow.first_node_type] : Workflow"
-                            :class="workflow.first_node_type && isTileFillingIcon(workflow.first_node_type) ? 'relative z-10 w-full h-full' : 'w-4 h-4 relative z-10'"
-                          />
-                        </div>
-                        <div class="min-w-0">
-                          <h3 class="workflow-card-title font-semibold text-sm line-clamp-2 leading-snug transition-colors duration-200 group-hover:text-destructive">
-                            {{ workflow.name }}
-                          </h3>
-                          <div class="flex items-center gap-1.5 mt-1 text-xs text-muted-foreground">
-                            <Clock class="w-3 h-3" />
-                            <span>Scheduled {{ formatDate(workflow.scheduled_for_deletion!) }}</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div class="flex items-center gap-0.5 shrink-0">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg"
-                          title="Edit workflow"
-                          @click="openEditDialog(workflow, $event)"
-                        >
-                          <Settings class="w-3.5 h-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg"
-                          title="Copy workflow"
-                          :disabled="copyingId === workflow.id"
-                          @click="copyWorkflow(workflow.id, $event, true)"
-                        >
-                          <Copy
-                            class="w-3.5 h-3.5"
-                            :class="{ 'animate-spin-slow': copyingId === workflow.id }"
-                          />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg"
-                          title="Restore workflow"
-                          @click="restoreFromTrash(workflow.id, $event)"
-                        >
-                          <RotateCcw class="w-3.5 h-3.5" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          class="h-8 w-8 md:h-7 md:w-7 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-all duration-200 text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg"
-                          title="Delete immediately"
-                          @click="deleteWorkflow(workflow.id, $event)"
-                        >
-                          <Trash2 class="w-3.5 h-3.5" />
-                        </Button>
-                      </div>
-                    </div>
-                    <div
-                      v-if="workflow.description"
-                      class="mt-0.5 pt-2 border-t border-border/40 ml-[48px]"
-                    >
-                      <p class="text-muted-foreground text-xs line-clamp-2 leading-relaxed">
-                        {{ workflow.description }}
-                      </p>
-                    </div>
-                  </Card>
-                </div>
-              </div>
+                <WorkflowPreviewPanel
+                  :summary="selectedWorkflow"
+                  :detail="selectedWorkflowDetail"
+                  :last-run="selectedWorkflowLastRun"
+                  :loading="previewLoading"
+                  :error="previewError"
+                  :running="isSelectedWorkflowRunning"
+                  @go-to-workflow="openWorkflowFromPreview"
+                  @run="runWorkflowInQuickDrawer"
+                  @open-step="openSelectedWorkflowFromStep"
+                />
+              </aside>
             </div>
           </div>
 
@@ -2336,6 +2274,16 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
               required
             />
           </div>
+          <div class="space-y-2">
+            <Label for="folder-description">Description</Label>
+            <Textarea
+              id="folder-description"
+              v-model="newFolderDescription"
+              placeholder="What lives in this folder? (optional)"
+              :rows="2"
+              maxlength="500"
+            />
+          </div>
           <div class="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-4">
             <Button
               variant="outline"
@@ -2357,7 +2305,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
 
       <Dialog
         :open="showRenameFolderDialog"
-        title="Rename Folder"
+        title="Edit Folder"
         @close="showRenameFolderDialog = false"
       >
         <form
@@ -2371,6 +2319,16 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
               v-model="renameFolderName"
               placeholder="Folder name"
               required
+            />
+          </div>
+          <div class="space-y-2">
+            <Label for="rename-folder-description">Description</Label>
+            <Textarea
+              id="rename-folder-description"
+              v-model="renameFolderDescription"
+              placeholder="What lives in this folder? (optional)"
+              :rows="2"
+              maxlength="500"
             />
           </div>
           <div class="flex flex-col-reverse sm:flex-row justify-end gap-3 pt-4">
@@ -2474,10 +2432,68 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
         @close="showCommandPalette = false"
       />
 
+      <Teleport to="body">
+        <Transition
+          enter-active-class="transition-opacity duration-200"
+          leave-active-class="transition-opacity duration-150"
+          enter-from-class="opacity-0"
+          leave-to-class="opacity-0"
+        >
+          <div
+            v-if="isPreviewSheetOpen && !isDesktopSplitView"
+            class="fixed inset-0 z-[120] bg-background/70 backdrop-blur-sm"
+            @click="closePreviewSheet"
+          />
+        </Transition>
+        <Transition
+          enter-active-class="transition-transform duration-250 ease-out"
+          leave-active-class="transition-transform duration-200 ease-in"
+          enter-from-class="translate-y-full"
+          leave-to-class="translate-y-full"
+        >
+          <div
+            v-if="isPreviewSheetOpen && !isDesktopSplitView"
+            class="fixed inset-x-0 bottom-0 z-[121] flex max-h-[88vh] flex-col rounded-t-2xl border-t border-border bg-card shadow-2xl"
+            role="dialog"
+            aria-label="Workflow preview"
+            data-testid="workflow-preview-sheet"
+          >
+            <div class="flex items-center justify-between px-4 pb-1 pt-2.5">
+              <span
+                class="mx-auto h-1 w-10 rounded-full bg-border"
+                aria-hidden="true"
+              />
+              <button
+                type="button"
+                class="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+                aria-label="Close preview"
+                @click="closePreviewSheet"
+              >
+                <X class="h-4 w-4" />
+              </button>
+            </div>
+            <div class="flex min-h-0 flex-1 flex-col overflow-hidden pb-[env(safe-area-inset-bottom)]">
+              <WorkflowPreviewPanel
+                :summary="selectedWorkflow"
+                :detail="selectedWorkflowDetail"
+                :last-run="selectedWorkflowLastRun"
+                :loading="previewLoading"
+                :error="previewError"
+                :running="isSelectedWorkflowRunning"
+                @go-to-workflow="openWorkflowFromPreview"
+                @run="runWorkflowInQuickDrawer"
+                @open-step="openSelectedWorkflowFromStep"
+              />
+            </div>
+          </div>
+        </Transition>
+      </Teleport>
+
       <WorkflowActionSheet
         :open="showWorkflowActionSheet"
         :workflow="workflowActionWorkflow"
         :folder-tree="folderStore.folderTree"
+        :pinned="workflowActionWorkflow ? quickDrawerPinnedWorkflowIds.includes(workflowActionWorkflow.id) : false"
         @close="closeWorkflowActionSheet"
         @move-to-folder="onActionSheetMoveToFolder"
         @move-to-root="onActionSheetMoveToRoot"
@@ -2486,6 +2502,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
         @copy="onActionSheetCopy"
         @edit="onActionSheetEdit"
         @delete="onActionSheetDelete"
+        @toggle-pin="onActionSheetTogglePin"
       />
 
       <Transition
@@ -2568,32 +2585,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
     0 0 120px hsl(var(--primary) / 0.08);
 }
 
-/* ── Workflow Card ── */
-
-.workflow-card {
-  animation: fade-in-card 0.35s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-.workflow-card:hover {
-  box-shadow:
-    0 6px 20px hsl(var(--primary) / 0.08),
-    0 2px 8px hsl(0 0% 0% / 0.03);
-}
-
-.dark .workflow-card:hover {
-  box-shadow:
-    0 6px 20px hsl(var(--primary) / 0.12),
-    0 2px 8px hsl(0 0% 0% / 0.15);
-}
-
-.workflow-icon {
-  transition: all 0.35s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.workflow-card:hover .workflow-icon {
-  transform: scale(1.05);
-  box-shadow: 0 4px 14px hsl(var(--primary) / 0.25);
-}
+/* ── Workflow row drag affordances ── */
 
 :global(.workflow-card--dragging) {
   border-style: dashed !important;
@@ -2632,18 +2624,6 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
 }
 
 /* ── Animations ── */
-
-@keyframes fade-in-card {
-  from {
-    opacity: 0;
-    transform: translateY(10px) scale(0.97);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
 
 @keyframes toast-enter {
   from {

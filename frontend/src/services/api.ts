@@ -1179,6 +1179,7 @@ export const folderApi = {
 
   create: async (data: {
     name: string;
+    description?: string | null;
     parent_id?: string | null;
   }): Promise<Folder> => {
     const response = await api.post<Folder>("/folders", data);
@@ -1187,7 +1188,12 @@ export const folderApi = {
 
   update: async (
     id: string,
-    data: { name?: string; parent_id?: string | null; icon?: string | null },
+    data: {
+      name?: string;
+      description?: string | null;
+      parent_id?: string | null;
+      icon?: string | null;
+    },
   ): Promise<Folder> => {
     const response = await api.put<Folder>(`/folders/${id}`, data);
     return response.data;

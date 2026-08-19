@@ -19,6 +19,7 @@ from app.models.schemas import (
     FolderWithContentsResponse,
     WorkflowListResponse,
 )
+from app.services.workflow_status import compute_trigger_status
 
 router = APIRouter(prefix="/folders", tags=["folders"])
 
@@ -131,6 +132,24 @@ def _get_first_node_type(workflow: Workflow) -> str | None:
     return None
 
 
+def _workflow_list_response(
+    workflow: Workflow,
+    folder_id: uuid.UUID | None,
+    scheduled_for_deletion=None,
+) -> WorkflowListResponse:
+    return WorkflowListResponse(
+        id=workflow.id,
+        name=workflow.name,
+        description=workflow.description,
+        folder_id=folder_id,
+        first_node_type=_get_first_node_type(workflow),
+        trigger_status=compute_trigger_status(workflow.nodes),
+        scheduled_for_deletion=scheduled_for_deletion,
+        created_at=workflow.created_at,
+        updated_at=workflow.updated_at,
+    )
+
+
 @router.get("", response_model=list[FolderResponse])
 async def list_root_folders(
     db: AsyncSession = Depends(get_db),
@@ -173,20 +192,12 @@ async def get_folder_tree(
         folder_map[folder.id] = FolderTreeResponse(
             id=folder.id,
             name=folder.name,
+            description=folder.description,
             parent_id=folder.parent_id,
             icon=folder.icon,
             children=[],
             workflows=[
-                WorkflowListResponse(
-                    id=w.id,
-                    name=w.name,
-                    description=w.description,
-                    folder_id=w.folder_id,
-                    first_node_type=_get_first_node_type(w),
-                    scheduled_for_deletion=w.scheduled_for_deletion,
-                    created_at=w.created_at,
-                    updated_at=w.updated_at,
-                )
+                _workflow_list_response(w, w.folder_id, w.scheduled_for_deletion)
                 for w in folder.workflows
             ],
         )
@@ -195,16 +206,7 @@ async def get_folder_tree(
         if share.folder_id and share.folder_id in folder_map:
             w = share.workflow
             folder_map[share.folder_id].workflows.append(
-                WorkflowListResponse(
-                    id=w.id,
-                    name=w.name,
-                    description=w.description,
-                    folder_id=share.folder_id,
-                    first_node_type=_get_first_node_type(w),
-                    scheduled_for_deletion=None,
-                    created_at=w.created_at,
-                    updated_at=w.updated_at,
-                )
+                _workflow_list_response(w, share.folder_id, None)
             )
 
     root_folders: list[FolderTreeResponse] = []
@@ -286,6 +288,7 @@ async def get_folder(
     return FolderWithContentsResponse(
         id=folder.id,
         name=folder.name,
+        description=folder.description,
         parent_id=folder.parent_id,
         icon=folder.icon,
         owner_id=folder.owner_id,
@@ -295,6 +298,7 @@ async def get_folder(
             FolderResponse(
                 id=c.id,
                 name=c.name,
+                description=c.description,
                 parent_id=c.parent_id,
                 icon=c.icon,
                 owner_id=c.owner_id,
@@ -304,16 +308,7 @@ async def get_folder(
             for c in folder.children
         ],
         workflows=[
-            WorkflowListResponse(
-                id=w.id,
-                name=w.name,
-                description=w.description,
-                folder_id=w.folder_id,
-                first_node_type=_get_first_node_type(w),
-                scheduled_for_deletion=w.scheduled_for_deletion,
-                created_at=w.created_at,
-                updated_at=w.updated_at,
-            )
+            _workflow_list_response(w, w.folder_id, w.scheduled_for_deletion)
             for w in folder.workflows
         ],
     )
@@ -339,6 +334,7 @@ async def create_folder(
 
     folder = Folder(
         name=data.name,
+        description=(data.description or "").strip() or None,
         parent_id=data.parent_id,
         icon=data.icon or None,
         owner_id=current_user.id,
@@ -365,6 +361,9 @@ async def update_folder(
 
     if data.name is not None:
         folder.name = data.name
+
+    if "description" in data.model_fields_set:
+        folder.description = (data.description or "").strip() or None
 
     if "icon" in data.model_fields_set:
         folder.icon = data.icon or None
@@ -470,28 +469,12 @@ async def move_workflow_to_folder(
         workflow.folder_id = folder_id
         await db.commit()
         await db.refresh(workflow)
-        return WorkflowListResponse(
-            id=workflow.id,
-            name=workflow.name,
-            description=workflow.description,
-            folder_id=workflow.folder_id,
-            first_node_type=_get_first_node_type(workflow),
-            scheduled_for_deletion=workflow.scheduled_for_deletion,
-            created_at=workflow.created_at,
-            updated_at=workflow.updated_at,
+        return _workflow_list_response(
+            workflow, workflow.folder_id, workflow.scheduled_for_deletion
         )
 
     await _set_shared_workflow_folder(db, workflow_id, current_user.id, folder_id)
-    return WorkflowListResponse(
-        id=workflow.id,
-        name=workflow.name,
-        description=workflow.description,
-        folder_id=folder_id,
-        first_node_type=_get_first_node_type(workflow),
-        scheduled_for_deletion=None,
-        created_at=workflow.created_at,
-        updated_at=workflow.updated_at,
-    )
+    return _workflow_list_response(workflow, folder_id, None)
 
 
 @router.delete("/workflows/{workflow_id}/folder", response_model=WorkflowListResponse)
@@ -514,25 +497,9 @@ async def remove_workflow_from_folder(
         workflow.folder_id = None
         await db.commit()
         await db.refresh(workflow)
-        return WorkflowListResponse(
-            id=workflow.id,
-            name=workflow.name,
-            description=workflow.description,
-            folder_id=workflow.folder_id,
-            first_node_type=_get_first_node_type(workflow),
-            scheduled_for_deletion=workflow.scheduled_for_deletion,
-            created_at=workflow.created_at,
-            updated_at=workflow.updated_at,
+        return _workflow_list_response(
+            workflow, workflow.folder_id, workflow.scheduled_for_deletion
         )
 
     await _set_shared_workflow_folder(db, workflow_id, current_user.id, None)
-    return WorkflowListResponse(
-        id=workflow.id,
-        name=workflow.name,
-        description=workflow.description,
-        folder_id=None,
-        first_node_type=_get_first_node_type(workflow),
-        scheduled_for_deletion=None,
-        created_at=workflow.created_at,
-        updated_at=workflow.updated_at,
-    )
+    return _workflow_list_response(workflow, None, None)

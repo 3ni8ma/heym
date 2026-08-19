@@ -8,7 +8,7 @@ useOverlayBackHandler();
 </script>
 
 <template>
-  <div class="overflow-x-hidden">
+  <div class="overflow-x-clip">
     <RouterView />
     <ToastNotification />
   </div>

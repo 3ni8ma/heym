@@ -17,11 +17,46 @@ Click the **x** to hide the box. An **Ask AI** button then appears next to the W
 
 ## Workflow List
 
-- View all workflows in a card grid or list
-- Workflows can be in the root or inside folders
-- Click a workflow to open it in the [editor](../getting-started/quick-start.md)
+The list is a two-pane view: workflows and folders on the left, a preview of the selected workflow on the right.
+
+- Each row shows the workflow icon, name, description, when it was last updated, and a [status chip](#workflow-status)
+- Workflows can be in the root or inside folders, and pinned workflows appear in their own **Pinned** group at the top
+- **Click** a row to select it and load its preview on the right
+- **Double-click** a row, or press **Enter** while it is focused, to open it in the [editor](../getting-started/quick-start.md)
 - Use **Ctrl+click** (or **Cmd+click**) to open in a new tab
+- Every row carries its edit, copy, pin, and delete actions on the right. On phones they are hidden so the name keeps the full width; **long press** a row there to open the actions sheet
 - Pin frequently used workflows in the [Quick Drawer](../reference/quick-drawer.md) so you can run them quickly from the Workflows tab and other internal pages
+
+## Workflow Preview
+
+Selecting a workflow fills the preview panel beside the list. On screens narrower than 1280px the same panel opens as a sheet from the bottom of the screen instead.
+
+The panel shows:
+
+- The workflow name, who created it and when, and when it was last edited
+- **Open Workflow** – opens the workflow in the editor
+- **Run Now** – opens the workflow in the [Quick Drawer](../reference/quick-drawer.md), where you fill in its inputs and start the run without leaving the list
+- **Description** – the workflow description
+- **Trigger Configuration** – the schedule for a cron workflow, or the listening trigger for an event workflow. Workflows that are invoked over HTTP show a **Copy cURL** button instead of the raw endpoint and auth prose: it copies a complete request with the right URL, headers, auth placeholder, and a body built from the workflow's input fields. When the workflow publishes a [portal](../reference/portal.md), its public chat link appears here too
+- **Last Run Details** – the outcome and duration of the most recent run, or a note that the workflow has never run
+- **Workflow Steps & Sub-agents** – the nodes in execution order, each with its model, operation, or schedule and a dot showing whether it is active. Selecting a step opens that node in the editor with its properties panel already open
+
+The panel stays pinned beside the list while you scroll, so it remains readable in a long workflow list.
+
+## Workflow Status
+
+Every row carries a status chip derived from the workflow's trigger nodes and its live run state:
+
+| Status | Meaning |
+| --- | --- |
+| **Running** | The workflow has an execution in progress right now |
+| **Scheduled** | It has an active [cron](../nodes/cron-node.md) trigger |
+| **Listening** | It has an active event trigger, such as a Slack, Telegram, IMAP, or WebSocket trigger |
+| **Paused** | It has trigger nodes, but every one of them is deactivated |
+| **Manual** | It has no trigger nodes and runs only when you start it or call it |
+| **Remove Scheduled** | It is [scheduled for deletion](../reference/workflow-organization.md) |
+
+Use the **Status** dropdown beside the search field to show only one status. The dropdown lists how many workflows currently match each one. A status filter also reaches inside folders: folders with a match are expanded automatically, and folders without one are hidden until you clear the filter.
 
 ## Active Workflows
 
@@ -33,19 +68,20 @@ badge is hidden on mobile screens.
 
 ## Search
 
-Use the workflow search field beside **New Folder**, or press **Ctrl+F** (or **Cmd+F**), to filter workflows by title or description. Matching workflows inside folders are shown with their folder branches expanded. Press **Escape** to clear the search.
+Use the workflow search field beside **Status**, or press **Ctrl+F** (or **Cmd+F**), to filter workflows by title or description. Matching workflows inside folders are shown with their folder branches expanded. Press **Escape** to clear the search.
 
 ## Folders
 
 - Organize workflows into [folders and sub-folders](../reference/workflow-organization.md)
-- Create folders with the **New Folder** button
+- Create folders with the **New Folder** button, giving each one a name and an optional description shown under its name in the list
+- Every folder row shows how many workflows it holds, counting sub-folders, alongside its new-subfolder, rename, change-icon, download-as-ZIP, and delete actions. On phones the row shows a single menu button instead
 - Drag a workflow over a folder or sub-folder to see a card-sized destination preview. The
   highlighted preview shows the full folder path before you drop, and hovering a collapsed
   folder briefly expands it so you can reach nested folders.
 - Drag workflows between folders or to the root. The dragged card stays visible as a ghost,
   and the active destination remains highlighted while you scroll.
 - Dropping a workflow back into its current folder is disabled and marked **Already in Folder**.
-- Rename folders from the context menu
+- Rename a folder, or change its description, from its rename action or the right-click context menu
 
 ## Creating Workflows
 
@@ -63,7 +99,7 @@ Open a workflow in the editor and click **Share** to invite users by email or sh
 
 ## Editing and Deleting
 
-- **Edit** – Change workflow name and description from the card menu
+- **Edit** – Change workflow name and description from the row's edit action
 - **Delete** – Workflows are [scheduled for deletion](../reference/workflow-organization.md); they move to a trash area before permanent removal
 
 ## Concurrent Edits

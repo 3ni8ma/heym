@@ -6,12 +6,23 @@ import type {
 } from "@/features/release-tour/releaseTour.types";
 
 /**
- * Bump when an already-announced release's tour changes enough to be worth
- * re-showing. Everyone's stored ids keep the old revision, so the tour reopens.
+ * Derives a release's tour revision from the slides it actually contains, so adding,
+ * removing, or reordering a section changes the stored id on its own and the tour
+ * reopens (and the "New in Heym" dot lights up) without anyone bumping a constant.
+ *
+ * djb2, chosen because it is short, stable across runs, and never leaves the client -
+ * a collision would only mean one tour is not re-shown, so cryptographic strength is
+ * not the requirement here.
  */
-export const TOUR_REVISION = 1;
+export function computeTourRevision(slideIds: readonly string[]): string {
+  let hash = 5381;
+  for (const char of slideIds.join("|")) {
+    hash = ((hash << 5) + hash + char.charCodeAt(0)) >>> 0;
+  }
+  return hash.toString(36);
+}
 
-export function toVersionedReleaseId(releaseId: string, revision: number = TOUR_REVISION): string {
+export function toVersionedReleaseId(releaseId: string, revision: string): string {
   return `${releaseId}@r${revision}`;
 }
 
@@ -45,7 +56,7 @@ export function buildTourSlides(entry: ReleaseEntry): ReleaseTourSlide[] {
 /** Returns null for releases with no tour, a disabled tour, or no usable slides. */
 export function buildReleaseTour(
   entry: ReleaseEntry,
-  revision: number = TOUR_REVISION,
+  revision?: string,
 ): ReleaseTour | null {
   const meta = entry.releaseTour;
   if (!meta) return null;
@@ -54,9 +65,11 @@ export function buildReleaseTour(
   const slides = buildTourSlides(entry);
   if (slides.length === 0) return null;
 
+  const resolvedRevision = revision ?? computeTourRevision(slides.map((slide) => slide.id));
+
   return {
     releaseId: entry.releaseId,
-    versionedReleaseId: toVersionedReleaseId(entry.releaseId, revision),
+    versionedReleaseId: toVersionedReleaseId(entry.releaseId, resolvedRevision),
     publishedAt: entry.publishedAt,
     headline: entry.headline,
     label: meta.label,
@@ -70,7 +83,7 @@ export function buildReleaseTour(
 /** Every tourable release, newest `publishedAt` first. */
 export function buildReleaseTours(
   entries: ReleaseEntry[],
-  revision: number = TOUR_REVISION,
+  revision?: string,
 ): ReleaseTour[] {
   return entries
     .flatMap((entry) => {

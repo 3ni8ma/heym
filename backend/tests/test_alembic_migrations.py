@@ -15,13 +15,19 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["112_add_folder_icon"])
+        self.assertEqual(self.script.get_heads(), ["113_add_folder_description"])
 
     def test_folder_icon_revision_follows_oauth_token_hashes(self) -> None:
         folder_icon_revision = self.script.get_revision("112_add_folder_icon")
 
         self.assertIsNotNone(folder_icon_revision)
         self.assertEqual(folder_icon_revision.down_revision, "111_backfill_oauth_token_hashes")
+
+    def test_folder_description_revision_follows_folder_icon(self) -> None:
+        folder_description_revision = self.script.get_revision("113_add_folder_description")
+
+        self.assertIsNotNone(folder_description_revision)
+        self.assertEqual(folder_description_revision.down_revision, "112_add_folder_icon")
 
     def test_capability_secret_revisions_form_one_chain(self) -> None:
         chain = {

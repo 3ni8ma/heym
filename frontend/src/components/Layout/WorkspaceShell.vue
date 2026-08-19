@@ -109,7 +109,7 @@ function toggleQuickDrawer(): void {
 
 <template>
   <div
-    class="workspace-shell relative overflow-x-hidden"
+    class="workspace-shell relative overflow-x-clip"
     :style="{
       '--quick-drawer-width': 'min(420px, 32vw)',
       '--showcase-width': 'min(390px, 31vw)',

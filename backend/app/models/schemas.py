@@ -280,6 +280,10 @@ class WorkflowResponse(BaseModel):
     error_workflow_id: uuid.UUID | None = None
     minutes_saved_per_run: float | None = None
     workflow_timeout_seconds: int | None = None
+    owner_name: str | None = None
+    # Same audience as the portal settings endpoint: anyone who can read the workflow.
+    portal_enabled: bool = False
+    portal_slug: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -364,6 +368,8 @@ class WorkflowListResponse(BaseModel):
     description: str | None
     folder_id: uuid.UUID | None = None
     first_node_type: str | None = None
+    # scheduled | listening | paused | manual - see app/services/workflow_status.py
+    trigger_status: str = "manual"
     scheduled_for_deletion: datetime | None = None
     shared_by_team: str | None = None
     created_at: datetime
@@ -853,12 +859,14 @@ class LLMModel(BaseModel):
 
 class FolderCreate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
+    description: str | None = Field(None, max_length=500)
     parent_id: uuid.UUID | None = None
     icon: str | None = Field(None, max_length=64)
 
 
 class FolderUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=255)
+    description: str | None = Field(None, max_length=500)
     parent_id: uuid.UUID | None = None
     icon: str | None = Field(None, max_length=64)
 
@@ -866,6 +874,7 @@ class FolderUpdate(BaseModel):
 class FolderResponse(BaseModel):
     id: uuid.UUID
     name: str
+    description: str | None = None
     parent_id: uuid.UUID | None = None
     icon: str | None = None
     owner_id: uuid.UUID
@@ -879,6 +888,7 @@ class FolderResponse(BaseModel):
 class FolderWithContentsResponse(BaseModel):
     id: uuid.UUID
     name: str
+    description: str | None = None
     parent_id: uuid.UUID | None = None
     icon: str | None = None
     owner_id: uuid.UUID
@@ -894,6 +904,7 @@ class FolderWithContentsResponse(BaseModel):
 class FolderTreeResponse(BaseModel):
     id: uuid.UUID
     name: str
+    description: str | None = None
     parent_id: uuid.UUID | None = None
     icon: str | None = None
     children: list["FolderTreeResponse"] = []

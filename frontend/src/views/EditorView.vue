@@ -718,8 +718,33 @@ onMounted(async () => {
   } finally {
     loading.value = false;
   }
+  await focusNodeFromQuery();
   await playRunbookFromQueryIfReady();
 });
+
+/**
+ * `?node=<id>` selects one node and opens its properties, used by the dashboard preview panel's
+ * step list. It runs after the canvas has rendered, because mounting Vue Flow syncs its own
+ * (empty) selection back into the store and would otherwise wipe the selection immediately.
+ */
+async function focusNodeFromQuery(): Promise<void> {
+  const focusNodeId = route.query.node;
+  if (typeof focusNodeId !== "string" || focusNodeId.length === 0) return;
+
+  const nextQuery = { ...route.query };
+  delete nextQuery.node;
+  await router.replace({
+    name: "editor",
+    params: { id: workflowId.value },
+    query: nextQuery,
+  });
+
+  await nextTick();
+  if (!workflowStore.nodes.some((node) => node.id === focusNodeId)) return;
+  workflowStore.selectNode(focusNodeId);
+  // The panel opens on the Run tab by default; a node deep link wants its configuration.
+  workflowStore.propertiesPanelTab = "properties";
+}
 
 onUnmounted(() => {
   window.removeEventListener("keydown", handleKeyDown);
