@@ -7,21 +7,47 @@ import type { ReleaseEntry } from "@/features/release-tour/releaseTour.types";
  * `tour` metadata with a unique `tourVisual` key, and register a matching
  * visual component in `tourVisuals.ts`. Keep `tourEnabled: false` while the
  * release is still in progress, then flip it on in the release commit.
+ *
+ * No revision to bump: the stored id is derived from the slide ids, so changing
+ * `sectionOrder` re-marks the release unseen and the tour reopens on its own.
  */
 export const RELEASE_REGISTRY: ReleaseEntry[] = [
   {
     releaseId: "2026.08",
     publishedAt: new Date("2026-08-18T00:00:00Z"),
-    headline: "Write Python on the canvas, brand your folders, and see what Playwright did",
+    headline:
+      "A rebuilt workflow list, Python on the canvas, branded folders, and readable Playwright runs",
     releaseTour: {
       label: "New in Heym",
-      introTitle: "Three new things in this release",
+      introTitle: "Four new things in this release",
       introDescription:
         "A quick look at what changed since your last update. Takes about a minute.",
       tourEnabled: true,
-      sectionOrder: ["code-node", "folder-icons", "playwright-ai-steps"],
+      sectionOrder: ["workflow-listing", "code-node", "folder-icons", "playwright-ai-steps"],
     },
     sections: [
+      {
+        id: "workflow-listing",
+        title: "The workflow list, rebuilt around what you were about to do",
+        blocks: [
+          {
+            type: "prose",
+            markdown:
+              "The Workflows tab is now a two-pane list. Rows carry a status chip - **Running**, **Scheduled**, **Listening**, **Paused**, **Manual** - and selecting one fills a preview beside it with the trigger, the last run, and every step in execution order. **Run Now** hands the workflow to the Quick Drawer so you can run it without opening the editor.",
+          },
+        ],
+        tour: {
+          description:
+            "Click a row to preview it, double-click to open the editor. Filter the whole list by status, copy a ready cURL for webhook workflows, or jump straight to a step's properties.",
+          useCases: [
+            "See which workflows are running or paused without opening any of them",
+            "Run a workflow from the list, inputs and all, and stay where you are",
+            "Copy a working cURL for a webhook workflow instead of assembling one",
+          ],
+          tourVisual: "workflow-listing",
+          docTarget: { categoryId: "tabs", slug: "workflows-tab", title: "Workflows Tab" },
+        },
+      },
       {
         id: "code-node",
         title: "Run Python right on the canvas",

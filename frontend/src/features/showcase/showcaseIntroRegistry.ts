@@ -35,7 +35,7 @@ export const SHOWCASE_INTRO_VIDEO_BY_CONTEXT: Record<ShowcaseContext, string> = 
 export const SHOWCASE_INTRO_CONTENT_BY_CONTEXT: Record<ShowcaseContext, ShowcaseIntroContent> = {
   "dashboard:workflows": {
     title: "Build faster in Workflows",
-    description: "Create, organize, and reopen workflows from one place. Use folders and quick actions to keep production automations clean.",
+    description: "Pick a workflow to preview its trigger, last run, and steps beside the list. Filter by status, run it without leaving the page, and use folders to keep production automations clean.",
   },
   "dashboard:board": {
     title: "Run work through an agentic board",

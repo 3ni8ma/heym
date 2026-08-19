@@ -255,7 +255,7 @@ onUnmounted(() => {
           <button
             v-if="currentSlide.docTarget"
             type="button"
-            class="mt-2.5 inline-flex items-center gap-1.5 rounded-md text-[11px] font-medium text-primary transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            class="mt-2.5 inline-flex items-center gap-1.5 rounded-md text-[11px] font-medium text-primary transition-colors hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:text-brand-primary-soft"
             @click="openDocs"
           >
             <BookOpen class="h-3 w-3" />

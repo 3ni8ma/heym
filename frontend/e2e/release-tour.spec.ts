@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
 
+import { RELEASE_REGISTRY } from "../src/features/release-tour/releaseRegistry";
+import { buildReleaseTours } from "../src/features/release-tour/releaseTourMapper";
 import { prepareAuthenticatedPage } from "./support";
+
+// Assert against the shipped registry so adding a section never breaks this spec.
+const RELEASE_TOUR = buildReleaseTours(RELEASE_REGISTRY)[0]!;
 
 test("auto-opens the release tour and can be dismissed", async ({ page }) => {
   await prepareAuthenticatedPage(page, { allowReleaseTour: true });
@@ -8,10 +13,14 @@ test("auto-opens the release tour and can be dismissed", async ({ page }) => {
 
   const tour = page.getByRole("dialog", { name: /New in Heym/ });
   await expect(tour).toBeVisible();
-  await expect(tour.getByRole("heading", { name: "Three new things in this release" })).toBeVisible();
+  await expect(
+    tour.getByRole("heading", { name: RELEASE_TOUR.introTitle }),
+  ).toBeVisible();
 
   await tour.getByRole("button", { name: "Start tour" }).click();
-  await expect(tour.getByRole("heading", { name: "Run Python right on the canvas" })).toBeVisible();
+  await expect(
+    tour.getByRole("heading", { name: RELEASE_TOUR.slides[0].title }),
+  ).toBeVisible();
 
   await tour.getByRole("button", { name: "Close what's new" }).click();
   await expect(tour).toBeHidden();

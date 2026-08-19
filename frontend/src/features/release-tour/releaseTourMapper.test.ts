@@ -4,6 +4,7 @@ import {
   buildReleaseTour,
   buildReleaseTours,
   buildTourSlides,
+  computeTourRevision,
   selectPendingReleaseTour,
   toVersionedReleaseId,
 } from "@/features/release-tour/releaseTourMapper";
@@ -42,8 +43,62 @@ function makeRelease(overrides: Partial<ReleaseEntry> = {}): ReleaseEntry {
 
 describe("toVersionedReleaseId", () => {
   it("versions the release id with the tour revision", () => {
-    expect(toVersionedReleaseId("2026.08", 1)).toBe("2026.08@r1");
-    expect(toVersionedReleaseId("2026.08", 2)).toBe("2026.08@r2");
+    expect(toVersionedReleaseId("2026.08", "abc")).toBe("2026.08@rabc");
+    expect(toVersionedReleaseId("2026.08", "def")).toBe("2026.08@rdef");
+  });
+});
+
+describe("computeTourRevision", () => {
+  it("is stable for the same slides", () => {
+    expect(computeTourRevision(["a", "b"])).toBe(computeTourRevision(["a", "b"]));
+  });
+
+  it("changes when a slide is added, removed, or reordered", () => {
+    const base = computeTourRevision(["a", "b"]);
+
+    expect(computeTourRevision(["a", "b", "c"])).not.toBe(base);
+    expect(computeTourRevision(["a"])).not.toBe(base);
+    expect(computeTourRevision(["b", "a"])).not.toBe(base);
+  });
+
+  it("makes an added section reopen an already-seen release", () => {
+    const before = buildReleaseTour(makeRelease());
+    const after = buildReleaseTour(
+      makeRelease({
+        releaseTour: {
+          label: "New in Heym",
+          introTitle: "Intro title",
+          introDescription: "Intro description",
+          sectionOrder: ["alpha", "beta", "gamma"],
+        },
+        sections: [
+          {
+            id: "alpha",
+            title: "Alpha",
+            blocks: [{ type: "prose", markdown: "alpha notes" }],
+            tour: { description: "alpha tour", useCases: ["a"], tourVisual: "alpha-visual" },
+          },
+          {
+            id: "beta",
+            title: "Beta",
+            blocks: [{ type: "prose", markdown: "beta notes" }],
+            tour: { description: "beta tour", useCases: ["b"], tourVisual: "beta-visual" },
+          },
+          {
+            id: "gamma",
+            title: "Gamma",
+            blocks: [{ type: "prose", markdown: "gamma notes" }],
+            tour: { description: "gamma tour", useCases: ["c"], tourVisual: "gamma-visual" },
+          },
+        ],
+      }),
+    );
+
+    expect(after?.versionedReleaseId).not.toBe(before?.versionedReleaseId);
+    // A viewer who already saw the old tour is pending again on the new one.
+    expect(
+      selectPendingReleaseTour([after!], [before!.versionedReleaseId])?.releaseId,
+    ).toBe("2026.08");
   });
 });
 
@@ -97,7 +152,7 @@ describe("buildTourSlides", () => {
 
 describe("buildReleaseTour", () => {
   it("builds a tour with versioned id and intro metadata", () => {
-    const tour = buildReleaseTour(makeRelease(), 1);
+    const tour = buildReleaseTour(makeRelease(), "1");
 
     expect(tour).not.toBeNull();
     expect(tour?.versionedReleaseId).toBe("2026.08@r1");
@@ -164,18 +219,22 @@ describe("selectPendingReleaseTour", () => {
     makeRelease({ releaseId: "2026.07", publishedAt: new Date("2026-07-01T00:00:00Z") }),
     makeRelease({ releaseId: "2026.08", publishedAt: new Date("2026-08-18T00:00:00Z") }),
   ]);
+  const seenId = (releaseId: string): string =>
+    tours.find((tour) => tour.releaseId === releaseId)!.versionedReleaseId;
 
   it("returns the newest release when nothing has been seen", () => {
     expect(selectPendingReleaseTour(tours, [])?.releaseId).toBe("2026.08");
   });
 
   it("returns null once the newest release is seen", () => {
-    expect(selectPendingReleaseTour(tours, ["2026.08@r1"])).toBeNull();
+    expect(selectPendingReleaseTour(tours, [seenId("2026.08")])).toBeNull();
   });
 
   it("does not queue older unseen releases behind the newest", () => {
-    expect(selectPendingReleaseTour(tours, ["2026.08@r1", "2026.07@r1"])).toBeNull();
-    expect(selectPendingReleaseTour(tours, ["2026.07@r1"])?.releaseId).toBe("2026.08");
+    expect(
+      selectPendingReleaseTour(tours, [seenId("2026.08"), seenId("2026.07")]),
+    ).toBeNull();
+    expect(selectPendingReleaseTour(tours, [seenId("2026.07")])?.releaseId).toBe("2026.08");
   });
 
   it("treats a different revision of the same release as unseen", () => {

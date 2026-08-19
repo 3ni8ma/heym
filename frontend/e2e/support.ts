@@ -1,5 +1,7 @@
 import { expect, type APIResponse, type Page } from "@playwright/test";
 
+import { RELEASE_REGISTRY } from "../src/features/release-tour/releaseRegistry";
+import { buildReleaseTours } from "../src/features/release-tour/releaseTourMapper";
 import { RELEASE_TOUR_STORAGE_KEY } from "../src/features/release-tour/releaseTourStorage";
 
 export const E2E_USER = {
@@ -30,6 +32,13 @@ export async function mockVersionCheck(page: Page): Promise<void> {
   });
 }
 
+/**
+ * The newest tour's stored id, derived from the registry itself. Adding a section changes
+ * this automatically, so E2E never drifts from what the app considers "seen".
+ */
+const NEWEST_SEEN_RELEASE_ID: string =
+  buildReleaseTours(RELEASE_REGISTRY)[0]?.versionedReleaseId ?? "";
+
 export interface PrepareAuthenticatedPageOptions {
   /**
    * Leave the current release tour unseen so the auto-open popup can appear.
@@ -45,7 +54,10 @@ export async function prepareAuthenticatedPage(
   await mockVersionCheck(page);
   const allowReleaseTour = options.allowReleaseTour === true;
   await page.addInitScript(
-    ({ showTour, storageKey }: { showTour: boolean; storageKey: string }) => {
+    (
+      { showTour, storageKey, seenReleaseId }:
+        { showTour: boolean; storageKey: string; seenReleaseId: string },
+    ) => {
       const showcaseKeys = [
         "dashboard_workflows",
         "dashboard_board",
@@ -70,12 +82,15 @@ export async function prepareAuthenticatedPage(
       for (const key of showcaseKeys) {
         window.localStorage.setItem(`showcase_seen_${key}`, "1");
       }
-      // Keep in sync with RELEASE_REGISTRY's newest enabled releaseId + TOUR_REVISION.
       if (!showTour) {
-        window.localStorage.setItem(storageKey, JSON.stringify(["2026.08@r1"]));
+        window.localStorage.setItem(storageKey, JSON.stringify([seenReleaseId]));
       }
     },
-    { showTour: allowReleaseTour, storageKey: RELEASE_TOUR_STORAGE_KEY },
+    {
+      showTour: allowReleaseTour,
+      storageKey: RELEASE_TOUR_STORAGE_KEY,
+      seenReleaseId: NEWEST_SEEN_RELEASE_ID,
+    },
   );
 }
 
