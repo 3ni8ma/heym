@@ -667,6 +667,7 @@ heym/
 | `POSTGRES_HOST` | Database host used when `DATABASE_URL` is empty | `localhost` |
 | `POSTGRES_PORT` | Database port used when `DATABASE_URL` is empty | `6543` |
 | `SECRET_KEY` | JWT signing key | — |
+| `ENCRYPTION_KEY` | Encrypts stored credentials at rest. Required at startup; generate with `python -c "import secrets; print(secrets.token_hex(32))"` | — |
 | `BACKEND_PORT` | Backend server port | `10105` |
 | `FRONTEND_PORT` | Frontend server port | `4017` |
 | `ALLOW_REGISTER` | Enable user registration | `true` |
