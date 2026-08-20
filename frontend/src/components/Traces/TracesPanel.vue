@@ -471,7 +471,7 @@ function goNext(): void {
 }
 
 function getStatusClass(status: string): string {
-  if (status === "error") return "text-destructive bg-destructive/10";
+  if (status === "error") return "bg-destructive/10 text-destructive dark:bg-red-500/15 dark:text-red-200";
   return "text-emerald-600 bg-emerald-500/10";
 }
 
@@ -829,7 +829,7 @@ onMounted(async () => {
 
     <div
       v-else-if="error && traces.length === 0"
-      class="text-sm text-destructive text-center py-10"
+      class="text-sm text-destructive text-center py-10 dark:text-red-300"
     >
       {{ error }}
     </div>
@@ -987,7 +987,7 @@ onMounted(async () => {
 
       <div
         v-else-if="detailError"
-        class="text-sm text-destructive text-center py-8"
+        class="text-sm text-destructive text-center py-8 dark:text-red-300"
       >
         {{ detailError }}
       </div>
@@ -1014,7 +1014,7 @@ onMounted(async () => {
             </div>
             <div
               class="mt-1 text-sm font-medium"
-              :class="cn(selectedTrace.status === 'error' ? 'text-destructive' : 'text-emerald-600')"
+              :class="cn(selectedTrace.status === 'error' ? 'text-destructive dark:text-red-300' : 'text-emerald-600')"
             >
               {{ selectedTrace.status }}
             </div>
@@ -1070,13 +1070,13 @@ onMounted(async () => {
           </span>
           <span
             v-if="(selectedToolMetrics.error ?? 0) > 0"
-            class="text-destructive"
+            class="text-destructive dark:text-red-300"
           >
             {{ selectedToolMetrics.error }} error
           </span>
           <span
             v-if="(selectedToolMetrics.timeout ?? 0) > 0"
-            class="text-destructive"
+            class="text-destructive dark:text-red-300"
           >
             {{ selectedToolMetrics.timeout }} timeout
           </span>
@@ -1144,7 +1144,7 @@ onMounted(async () => {
 
         <div
           v-if="selectedTrace.error"
-          class="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive"
+          class="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive dark:border-red-400/40 dark:bg-red-500/15 dark:text-red-200"
         >
           {{ selectedTrace.error }}
         </div>
