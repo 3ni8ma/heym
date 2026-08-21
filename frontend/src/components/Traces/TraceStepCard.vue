@@ -61,7 +61,7 @@ const jsonText = computed(() => getTraceJsonContent(props.step.json).rawText);
     >
       <span
         class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted"
-        :class="step.isError ? 'text-destructive dark:text-red-300' : 'text-muted-foreground'"
+        :class="step.isError ? 'text-destructive' : 'text-muted-foreground'"
       >
         <component
           :is="iconComponent"
@@ -73,7 +73,7 @@ const jsonText = computed(() => getTraceJsonContent(props.step.json).rawText);
       </span>
       <span
         class="min-w-0 flex-1 truncate text-sm"
-        :class="step.isError ? 'text-destructive dark:text-red-300' : ''"
+        :class="step.isError ? 'text-destructive' : ''"
       >
         {{ step.summary }}
       </span>

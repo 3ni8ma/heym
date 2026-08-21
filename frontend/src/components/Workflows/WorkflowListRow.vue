@@ -101,7 +101,7 @@ function handleRowKeydown(event: KeyboardEvent): void {
       'workflow-row group relative flex w-full cursor-pointer items-center gap-3 rounded-xl border transition-all duration-200',
       compact ? 'px-2.5 py-2' : 'px-3 py-2.5 sm:px-4 sm:py-3',
       isTrashed
-        ? 'border-destructive/25 bg-destructive/[0.04] hover:border-destructive/45 dark:border-red-400/25 dark:bg-red-400/[0.05] dark:hover:border-red-400/45'
+        ? 'border-destructive/25 bg-destructive/[0.04] hover:border-destructive/45'
         : selected
           ? 'border-primary bg-primary/[0.07] shadow-sm dark:border-primary/55 dark:bg-primary/[0.09]'
           : 'border-border/50 bg-card hover:border-border hover:bg-muted/40',
@@ -123,21 +123,21 @@ function handleRowKeydown(event: KeyboardEvent): void {
       :class="cn(
         'workflow-row-icon relative flex shrink-0 items-center justify-center rounded-lg',
         compact ? 'h-8 w-8' : 'h-9 w-9 sm:h-10 sm:w-10',
-        isTrashed ? 'text-destructive dark:text-red-300' : 'text-primary dark:text-brand-primary-soft',
+        isTrashed ? 'text-destructive' : 'text-primary dark:text-brand-primary-soft',
       )"
     >
       <div
         :class="cn(
           'absolute inset-0 rounded-lg bg-gradient-to-br',
           isTrashed
-            ? 'from-destructive/15 via-destructive/10 to-destructive/5 dark:from-red-400/[0.14] dark:via-red-400/[0.08] dark:to-transparent'
+            ? 'from-destructive/15 via-destructive/10 to-destructive/5'
             : 'from-primary/15 via-primary/10 to-primary/5 dark:from-primary/[0.14] dark:via-primary/[0.08] dark:to-transparent',
         )"
       />
       <div
         :class="cn(
           'absolute inset-0 rounded-lg ring-1 ring-inset',
-          isTrashed ? 'ring-destructive/20 dark:ring-red-400/25' : 'ring-primary/20 dark:ring-primary/25',
+          isTrashed ? 'ring-destructive/20' : 'ring-primary/20 dark:ring-primary/25',
         )"
       />
       <component

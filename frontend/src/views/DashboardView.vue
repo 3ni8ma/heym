@@ -2035,7 +2035,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                   v-if="!isWorkflowFilterActive || displayedScheduledWorkflows.length > 0 || draggedWorkflowId"
                   :class="cn(
                     'mt-6 rounded-xl border-2 border-dashed p-3 transition-all duration-300',
-                    dragOverTrash ? 'border-destructive bg-destructive/5 dark:border-red-400/70 dark:bg-red-400/[0.06]' : 'border-border/40 bg-muted/5'
+                    dragOverTrash ? 'border-destructive bg-destructive/5' : 'border-border/40 bg-muted/5'
                   )"
                   @dragenter="onDragEnterDropZone"
                   @dragover="onDragOverTrash"
@@ -2046,7 +2046,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
                     class="flex items-center gap-2"
                     :class="{ 'mb-3': displayedScheduledWorkflows.length > 0 || draggedWorkflowId }"
                   >
-                    <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-destructive/10 text-destructive dark:bg-red-400/10 dark:text-red-300">
+                    <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
                       <Trash2 class="h-4 w-4" />
                     </div>
                     <div>
@@ -2061,7 +2061,7 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
 
                   <div
                     v-if="draggedWorkflowId && !workflows.find((w) => w.id === draggedWorkflowId)?.scheduled_for_deletion"
-                    class="mb-4 mt-4 rounded-xl border border-dashed border-destructive/30 py-4 text-center text-sm text-destructive dark:border-red-400/30 dark:text-red-300"
+                    class="mb-4 mt-4 rounded-xl border border-dashed border-destructive/30 py-4 text-center text-sm text-destructive"
                   >
                     Drop here to schedule for deletion
                   </div>

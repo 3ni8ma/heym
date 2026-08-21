@@ -53,8 +53,8 @@ const STATUS_STYLES: Record<WorkflowRowStatus, StatusStyle> = {
   removeScheduled: {
     label: "Remove Scheduled",
     badge:
-      "bg-destructive/10 text-destructive ring-destructive/20 dark:bg-red-400/10 dark:text-red-300 dark:ring-red-400/25",
-    dot: "bg-destructive dark:bg-red-400",
+      "bg-destructive/10 text-destructive ring-destructive/20",
+    dot: "bg-destructive",
     pulse: false,
   },
 };
