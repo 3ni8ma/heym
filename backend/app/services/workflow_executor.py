@@ -7105,19 +7105,27 @@ class WorkflowExecutor:
         return normalize_playwright_auth_state(resolved)
 
     def _playwright_subprocess_inputs(self, inputs: dict) -> dict:
-        """Copy of node inputs plus ``vars`` so step fields like ``$vars.searchUrl`` resolve in subprocess.
+        """Copy of node inputs plus ``vars``/``global`` so step fields resolve in the subprocess.
 
-        Template/expression evaluation uses ``_build_context``, which already exposes ``vars`` from
-        ``self.vars``. Generated Playwright code reads a flat ``inputs`` dict only, so variable
-        node outputs must be injected under the ``vars`` key before serializing to the runner.
+        Template/expression evaluation uses ``_build_context``, which already exposes ``vars``
+        from ``self.vars`` and ``global`` from the global variables merged with ``self.vars``.
+        Generated Playwright code reads a flat ``inputs`` dict only, so both namespaces must be
+        injected before serializing to the runner. Without them a field like
+        ``$global.secondPage`` compiles to a lookup that misses and silently falls back to the
+        generator's placeholder default. Credentials stay out on purpose.
         """
         out = copy.deepcopy(inputs)
-        vars_ns = copy.deepcopy(self.vars)
-        existing = out.get("vars")
-        if isinstance(existing, dict):
-            out["vars"] = {**existing, **vars_ns}
-        else:
-            out["vars"] = vars_ns
+        self._refresh_vars_context_cache()
+        namespaces = {
+            "vars": copy.deepcopy(self.vars),
+            "global": copy.deepcopy(self._merged_global_context_cache or {}),
+        }
+        for name, values in namespaces.items():
+            existing = out.get(name)
+            if isinstance(existing, dict):
+                out[name] = {**existing, **values}
+            else:
+                out[name] = values
         return out
 
     def _execute_playwright_node(
