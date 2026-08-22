@@ -631,7 +631,8 @@ def _build_playwright_script(
     heym_execution_token: str = "",
 ) -> str:
     """Wrap user Playwright code with imports and inputs."""
-    inputs_json = json.dumps(inputs)
+    # ascii() keeps JSON's true/false/null out of the script: they are not Python literals.
+    inputs_py = ascii(json.loads(json.dumps(inputs)))
     headless_py = repr(headless)  # True/False for Python, not json true/false
     capture_network_py = repr(capture_network)
     api_url_py = repr(heym_api_url)
@@ -639,7 +640,7 @@ def _build_playwright_script(
     return f"""import json
 import sys
 
-inputs = {inputs_json}
+inputs = {inputs_py}
 headless = {headless_py}
 timeout_ms = {timeout_ms}
 capture_network = {capture_network_py}

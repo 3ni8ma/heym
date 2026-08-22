@@ -11,7 +11,7 @@ import re
 import unittest
 
 from app.services.playwright_code_generator import generate_playwright_code
-from app.services.workflow_executor import WorkflowExecutor
+from app.services.workflow_executor import WorkflowExecutor, _build_playwright_script
 
 
 def _executor(global_variables_context: dict[str, object] | None = None) -> WorkflowExecutor:
@@ -75,3 +75,59 @@ class PlaywrightGlobalNamespaceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlaywrightScriptInputsLiteralTests(unittest.TestCase):
+    """``inputs`` is baked into the generated script as source text, so it has to be a
+    Python literal. ``json.dumps`` emits ``true``/``false``/``null``, which parse fine and
+    then raise ``NameError`` the moment the script runs. A ``cookies.json`` value held in a
+    global variable is full of booleans, so storing one broke every run that used it.
+    """
+
+    def _inputs_line(self, inputs: dict) -> str:
+        script = _build_playwright_script("pass", inputs)
+        line = next(ln for ln in script.splitlines() if ln.startswith("inputs = "))
+        return line
+
+    def _roundtrip(self, inputs: dict) -> object:
+        namespace: dict[str, object] = {}
+        exec(self._inputs_line(inputs), namespace)  # noqa: S102
+        return namespace["inputs"]
+
+    def test_booleans_and_null_in_inputs_do_not_raise_name_error(self) -> None:
+        cookies = [
+            {
+                "name": "session",
+                "value": "redacted",
+                "domain": ".example.com",
+                "httpOnly": True,
+                "secure": True,
+                "sameSite": None,
+                "expires": 1787425345.00176,
+            }
+        ]
+        inputs = {"vars": {}, "global": {"exchangeAuth": cookies}}
+        self.assertEqual(self._roundtrip(inputs), inputs)
+
+    def test_generated_literal_contains_no_json_keywords(self) -> None:
+        line = self._inputs_line({"global": {"a": True, "b": False, "c": None}})
+        for json_keyword in ("true", "false", "null"):
+            self.assertNotIn(json_keyword, line)
+        for python_literal in ("True", "False", "None"):
+            self.assertIn(python_literal, line)
+
+    def test_nested_booleans_survive_at_every_depth(self) -> None:
+        inputs = {"global": {"a": [{"b": {"c": [True, None, False]}}]}}
+        self.assertEqual(self._roundtrip(inputs), inputs)
+
+    def test_script_stays_ascii_so_the_temp_file_write_cannot_fail(self) -> None:
+        # The script is written with tempfile's default encoding, so the inputs literal
+        # must not be the thing that introduces non-ASCII bytes.
+        script = _build_playwright_script(
+            "pass", {"global": {"note": "calisti mi \u00e7\u015f\u011f"}}
+        )
+        script.encode("ascii")
+
+    def test_non_ascii_values_still_round_trip(self) -> None:
+        inputs = {"global": {"note": "\u00e7\u015f\u011f\u0131\u00f6\u00fc"}}
+        self.assertEqual(self._roundtrip(inputs), inputs)
