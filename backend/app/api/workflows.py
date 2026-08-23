@@ -118,7 +118,11 @@ from app.services.workflow_executor import (
     execute_workflow,
     execute_workflow_streaming,
 )
-from app.services.workflow_status import compute_trigger_status
+from app.services.workflow_last_trigger import (
+    fetch_last_trigger_source,
+    fetch_last_trigger_sources,
+)
+from app.services.workflow_status import compute_trigger_status, refine_manual_status
 from app.services.workflow_version import calculate_workflow_diff
 
 _SENSITIVE_HEADERS: frozenset[str] = frozenset(
@@ -733,6 +737,8 @@ async def list_workflows(
     )
     shares_map = {s.workflow_id: s for s in shares_result.scalars().all()}
 
+    last_trigger_sources = await fetch_last_trigger_sources(db, [w.id for w in workflows])
+
     response_list = []
     for w in workflows:
         if w.owner_id == current_user.id:
@@ -749,7 +755,9 @@ async def list_workflows(
             description=w.description,
             folder_id=folder_id,
             first_node_type=get_first_node_type(w),
-            trigger_status=compute_trigger_status(w.nodes),
+            trigger_status=refine_manual_status(
+                compute_trigger_status(w.nodes), last_trigger_sources.get(w.id)
+            ),
             scheduled_for_deletion=scheduled_for_deletion,
             created_at=w.created_at,
             updated_at=w.updated_at,
@@ -1758,7 +1766,10 @@ async def schedule_workflow_for_deletion(
         description=workflow.description,
         folder_id=workflow.folder_id,
         first_node_type=get_first_node_type(workflow),
-        trigger_status=compute_trigger_status(workflow.nodes),
+        trigger_status=refine_manual_status(
+            compute_trigger_status(workflow.nodes),
+            await fetch_last_trigger_source(db, workflow.id),
+        ),
         scheduled_for_deletion=workflow.scheduled_for_deletion,
         created_at=workflow.created_at,
         updated_at=workflow.updated_at,
@@ -1795,7 +1806,10 @@ async def unschedule_workflow_for_deletion(
         description=workflow.description,
         folder_id=workflow.folder_id,
         first_node_type=get_first_node_type(workflow),
-        trigger_status=compute_trigger_status(workflow.nodes),
+        trigger_status=refine_manual_status(
+            compute_trigger_status(workflow.nodes),
+            await fetch_last_trigger_source(db, workflow.id),
+        ),
         scheduled_for_deletion=workflow.scheduled_for_deletion,
         created_at=workflow.created_at,
         updated_at=workflow.updated_at,

@@ -45,7 +45,8 @@ The panel stays pinned beside the list while you scroll, so it remains readable 
 
 ## Workflow Status
 
-Every row carries a status chip derived from the workflow's trigger nodes and its live run state:
+Every row carries a status chip derived from the workflow's trigger nodes, its live run state,
+and — for workflows with no trigger node — how its most recent run was started:
 
 | Status | Meaning |
 | --- | --- |
@@ -53,8 +54,16 @@ Every row carries a status chip derived from the workflow's trigger nodes and it
 | **Scheduled** | It has an active [cron](../nodes/cron-node.md) trigger |
 | **Listening** | It has an active event trigger, such as a Slack, Telegram, IMAP, or WebSocket trigger |
 | **Paused** | It has trigger nodes, but every one of them is deactivated |
-| **Manual** | It has no trigger nodes and runs only when you start it or call it |
+| **API** | It has no trigger nodes and was last run by an HTTP call to its execute endpoint |
+| **SubWorker** | It has no trigger nodes and was last run as a sub-workflow by a parent workflow |
+| **Portal** | It has no trigger nodes and was last run from its [portal](../reference/portal.md) |
+| **Manual** | It has no trigger nodes and has never run, or its last run came from somewhere else |
 | **Remove Scheduled** | It is [scheduled for deletion](../reference/workflow-organization.md) |
+
+The API, SubWorker, and Portal chips read the single most recent entry in the workflow's
+[execution history](./logs-tab.md), so a workflow that is called two ways shows whichever came
+last. Trigger nodes always win: a cron workflow that someone also calls over HTTP stays
+**Scheduled**.
 
 Use the **Status** dropdown beside the search field to show only one status. The dropdown lists how many workflows currently match each one. A status filter also reaches inside folders: folders with a match are expanded automatically, and folders without one are hidden until you clear the filter.
 

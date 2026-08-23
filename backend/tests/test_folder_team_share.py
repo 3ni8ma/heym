@@ -13,6 +13,13 @@ def make_result(value: object) -> Mock:
     return result
 
 
+def make_rows_result(rows: list | None = None) -> Mock:
+    """Result for the latest-trigger-source lookup every workflow list response makes."""
+    result = Mock()
+    result.all.return_value = rows or []
+    return result
+
+
 class FolderTeamShareTests(unittest.IsolatedAsyncioTestCase):
     async def test_move_team_shared_workflow_creates_folder_placement_share(self) -> None:
         user_id = uuid.uuid4()
@@ -49,6 +56,7 @@ class FolderTeamShareTests(unittest.IsolatedAsyncioTestCase):
                 make_result(folder),
                 make_result(workflow),
                 make_result(None),
+                make_rows_result(),
             ]
         )
 
@@ -110,6 +118,7 @@ class FolderTeamShareTests(unittest.IsolatedAsyncioTestCase):
                 make_result(folder),
                 make_result(workflow),
                 make_result(existing_share),
+                make_rows_result(),
             ]
         )
 

@@ -14,6 +14,13 @@ def make_result(value: object) -> Mock:
     return result
 
 
+def make_rows_result(rows: list | None = None) -> Mock:
+    """Result for the latest-trigger-source lookup every workflow list response makes."""
+    result = Mock()
+    result.all.return_value = rows or []
+    return result
+
+
 def make_user() -> User:
     return User(
         id=uuid.uuid4(),
@@ -124,8 +131,8 @@ class FolderIconTreeTests(unittest.IsolatedAsyncioTestCase):
         shares_result = Mock()
         shares_result.scalars.return_value.all.return_value = []
 
-        # First call returns the folder list, second the (empty) share list.
-        db.execute = AsyncMock(side_effect=[folders_result, shares_result])
+        # Folder list, then the (empty) share list, then the latest-trigger-source lookup.
+        db.execute = AsyncMock(side_effect=[folders_result, shares_result, make_rows_result()])
 
         # Attach the workflow relationship so selectinload has something to iterate.
         folder.workflows = [workflow]

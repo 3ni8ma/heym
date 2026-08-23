@@ -32,6 +32,9 @@ const OPTIONS: { value: WorkflowStatusFilterValue; label: string }[] = [
   { value: "listening", label: "Listening" },
   { value: "paused", label: "Paused" },
   { value: "manual", label: "Manual" },
+  { value: "api", label: "API" },
+  { value: "subWorkflow", label: "SubWorker" },
+  { value: "portal", label: "Portal" },
   { value: "removeScheduled", label: "Remove Scheduled" },
 ];
 

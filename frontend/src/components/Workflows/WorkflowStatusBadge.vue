@@ -50,6 +50,24 @@ const STATUS_STYLES: Record<WorkflowRowStatus, StatusStyle> = {
     dot: "bg-muted-foreground/50",
     pulse: false,
   },
+  api: {
+    label: "API",
+    badge: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 ring-indigo-500/20",
+    dot: "bg-indigo-500",
+    pulse: false,
+  },
+  subWorkflow: {
+    label: "SubWorker",
+    badge: "bg-violet-500/10 text-violet-600 dark:text-violet-400 ring-violet-500/20",
+    dot: "bg-violet-500",
+    pulse: false,
+  },
+  portal: {
+    label: "Portal",
+    badge: "bg-teal-500/10 text-teal-600 dark:text-teal-400 ring-teal-500/20",
+    dot: "bg-teal-500",
+    pulse: false,
+  },
   removeScheduled: {
     label: "Remove Scheduled",
     badge:

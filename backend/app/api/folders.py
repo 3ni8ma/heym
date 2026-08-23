@@ -19,7 +19,11 @@ from app.models.schemas import (
     FolderWithContentsResponse,
     WorkflowListResponse,
 )
-from app.services.workflow_status import compute_trigger_status
+from app.services.workflow_last_trigger import (
+    fetch_last_trigger_source,
+    fetch_last_trigger_sources,
+)
+from app.services.workflow_status import compute_trigger_status, refine_manual_status
 
 router = APIRouter(prefix="/folders", tags=["folders"])
 
@@ -136,6 +140,7 @@ def _workflow_list_response(
     workflow: Workflow,
     folder_id: uuid.UUID | None,
     scheduled_for_deletion=None,
+    last_trigger_source: str | None = None,
 ) -> WorkflowListResponse:
     return WorkflowListResponse(
         id=workflow.id,
@@ -143,7 +148,9 @@ def _workflow_list_response(
         description=workflow.description,
         folder_id=folder_id,
         first_node_type=_get_first_node_type(workflow),
-        trigger_status=compute_trigger_status(workflow.nodes),
+        trigger_status=refine_manual_status(
+            compute_trigger_status(workflow.nodes), last_trigger_source
+        ),
         scheduled_for_deletion=scheduled_for_deletion,
         created_at=workflow.created_at,
         updated_at=workflow.updated_at,
@@ -187,6 +194,12 @@ async def get_folder_tree(
     )
     shares_with_folders = list(shares_result.scalars().all())
 
+    last_trigger_sources = await fetch_last_trigger_sources(
+        db,
+        [w.id for folder in folders for w in folder.workflows]
+        + [share.workflow.id for share in shares_with_folders if share.workflow],
+    )
+
     folder_map: dict[uuid.UUID, FolderTreeResponse] = {}
     for folder in folders:
         folder_map[folder.id] = FolderTreeResponse(
@@ -197,7 +210,9 @@ async def get_folder_tree(
             icon=folder.icon,
             children=[],
             workflows=[
-                _workflow_list_response(w, w.folder_id, w.scheduled_for_deletion)
+                _workflow_list_response(
+                    w, w.folder_id, w.scheduled_for_deletion, last_trigger_sources.get(w.id)
+                )
                 for w in folder.workflows
             ],
         )
@@ -206,7 +221,7 @@ async def get_folder_tree(
         if share.folder_id and share.folder_id in folder_map:
             w = share.workflow
             folder_map[share.folder_id].workflows.append(
-                _workflow_list_response(w, share.folder_id, None)
+                _workflow_list_response(w, share.folder_id, None, last_trigger_sources.get(w.id))
             )
 
     root_folders: list[FolderTreeResponse] = []
@@ -285,6 +300,8 @@ async def get_folder(
     if not folder:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Folder not found")
 
+    last_trigger_sources = await fetch_last_trigger_sources(db, [w.id for w in folder.workflows])
+
     return FolderWithContentsResponse(
         id=folder.id,
         name=folder.name,
@@ -308,7 +325,9 @@ async def get_folder(
             for c in folder.children
         ],
         workflows=[
-            _workflow_list_response(w, w.folder_id, w.scheduled_for_deletion)
+            _workflow_list_response(
+                w, w.folder_id, w.scheduled_for_deletion, last_trigger_sources.get(w.id)
+            )
             for w in folder.workflows
         ],
     )
@@ -470,11 +489,16 @@ async def move_workflow_to_folder(
         await db.commit()
         await db.refresh(workflow)
         return _workflow_list_response(
-            workflow, workflow.folder_id, workflow.scheduled_for_deletion
+            workflow,
+            workflow.folder_id,
+            workflow.scheduled_for_deletion,
+            await fetch_last_trigger_source(db, workflow.id),
         )
 
     await _set_shared_workflow_folder(db, workflow_id, current_user.id, folder_id)
-    return _workflow_list_response(workflow, folder_id, None)
+    return _workflow_list_response(
+        workflow, folder_id, None, await fetch_last_trigger_source(db, workflow.id)
+    )
 
 
 @router.delete("/workflows/{workflow_id}/folder", response_model=WorkflowListResponse)
@@ -498,8 +522,13 @@ async def remove_workflow_from_folder(
         await db.commit()
         await db.refresh(workflow)
         return _workflow_list_response(
-            workflow, workflow.folder_id, workflow.scheduled_for_deletion
+            workflow,
+            workflow.folder_id,
+            workflow.scheduled_for_deletion,
+            await fetch_last_trigger_source(db, workflow.id),
         )
 
     await _set_shared_workflow_folder(db, workflow_id, current_user.id, None)
-    return _workflow_list_response(workflow, None, None)
+    return _workflow_list_response(
+        workflow, None, None, await fetch_last_trigger_source(db, workflow.id)
+    )

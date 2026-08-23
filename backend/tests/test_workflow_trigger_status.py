@@ -7,7 +7,11 @@ from unittest.mock import AsyncMock, Mock, patch
 from app.api.folders import _workflow_list_response
 from app.api.workflows import get_workflow
 from app.db.models import User, Workflow
-from app.services.workflow_status import compute_trigger_status
+from app.services.workflow_last_trigger import (
+    fetch_last_trigger_source,
+    fetch_last_trigger_sources,
+)
+from app.services.workflow_status import compute_trigger_status, refine_manual_status
 
 
 def make_workflow(nodes: list[dict]) -> Workflow:
@@ -97,6 +101,65 @@ class ComputeTriggerStatusTests(unittest.TestCase):
         self.assertEqual(compute_trigger_status(["nonsense", None]), "manual")
 
 
+class RefineManualStatusTests(unittest.TestCase):
+    def test_last_api_run_becomes_api(self) -> None:
+        self.assertEqual(refine_manual_status("manual", "API"), "api")
+
+    def test_last_sub_workflow_run_becomes_sub_workflow(self) -> None:
+        self.assertEqual(refine_manual_status("manual", "SUB_WORKFLOW"), "subWorkflow")
+
+    def test_last_portal_run_becomes_portal(self) -> None:
+        self.assertEqual(refine_manual_status("manual", "portal"), "portal")
+
+    def test_surrounding_whitespace_is_ignored(self) -> None:
+        self.assertEqual(refine_manual_status("manual", "  api  "), "api")
+
+    def test_never_run_workflow_stays_manual(self) -> None:
+        self.assertEqual(refine_manual_status("manual", None), "manual")
+        self.assertEqual(refine_manual_status("manual", ""), "manual")
+
+    def test_unknown_trigger_source_stays_manual(self) -> None:
+        self.assertEqual(refine_manual_status("manual", "board"), "manual")
+        self.assertEqual(refine_manual_status("manual", "AI Agents"), "manual")
+
+    def test_trigger_nodes_win_over_the_last_run(self) -> None:
+        """A cron workflow called once over HTTP is still a scheduled workflow."""
+        self.assertEqual(refine_manual_status("scheduled", "API"), "scheduled")
+        self.assertEqual(refine_manual_status("listening", "SUB_WORKFLOW"), "listening")
+        self.assertEqual(refine_manual_status("paused", "portal"), "paused")
+
+
+class FetchLastTriggerSourcesTests(unittest.IsolatedAsyncioTestCase):
+    async def test_maps_rows_by_workflow_id(self) -> None:
+        first, second = uuid.uuid4(), uuid.uuid4()
+        result = Mock()
+        result.all.return_value = [
+            SimpleNamespace(workflow_id=first, trigger_source="API"),
+            SimpleNamespace(workflow_id=second, trigger_source="SUB_WORKFLOW"),
+        ]
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=result)
+
+        sources = await fetch_last_trigger_sources(db, [first, second])
+
+        self.assertEqual(sources, {first: "API", second: "SUB_WORKFLOW"})
+
+    async def test_no_workflow_ids_skips_the_query(self) -> None:
+        db = AsyncMock()
+
+        self.assertEqual(await fetch_last_trigger_sources(db, []), {})
+        db.execute.assert_not_awaited()
+
+    async def test_single_lookup_returns_none_when_never_run(self) -> None:
+        workflow_id = uuid.uuid4()
+        result = Mock()
+        result.all.return_value = []
+        db = AsyncMock()
+        db.execute = AsyncMock(return_value=result)
+
+        self.assertIsNone(await fetch_last_trigger_source(db, workflow_id))
+
+
 class WorkflowListResponseTriggerStatusTests(unittest.TestCase):
     def test_folder_list_response_carries_trigger_status(self) -> None:
         workflow = make_workflow([{"type": "cron", "data": {}}])
@@ -104,6 +167,19 @@ class WorkflowListResponseTriggerStatusTests(unittest.TestCase):
         response = _workflow_list_response(workflow, None, None)
 
         self.assertEqual(response.trigger_status, "scheduled")
+
+    def test_folder_list_response_refines_manual_with_last_trigger_source(self) -> None:
+        workflow = make_workflow([{"type": "llm", "data": {}}])
+
+        self.assertEqual(_workflow_list_response(workflow, None, None, "API").trigger_status, "api")
+        self.assertEqual(
+            _workflow_list_response(workflow, None, None, "SUB_WORKFLOW").trigger_status,
+            "subWorkflow",
+        )
+        self.assertEqual(
+            _workflow_list_response(workflow, None, None, "portal").trigger_status, "portal"
+        )
+        self.assertEqual(_workflow_list_response(workflow, None, None).trigger_status, "manual")
 
 
 class WorkflowDetailOwnerNameTests(unittest.IsolatedAsyncioTestCase):

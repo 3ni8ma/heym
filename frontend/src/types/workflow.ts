@@ -46,8 +46,18 @@ export interface Workflow {
   updated_at: string;
 }
 
-/** How a workflow starts, derived from its nodes by the backend. */
-export type WorkflowTriggerStatus = "scheduled" | "listening" | "paused" | "manual";
+/**
+ * How a workflow starts, derived by the backend from its nodes and, for workflows with no
+ * trigger node, from the trigger source of their most recent run.
+ */
+export type WorkflowTriggerStatus =
+  | "scheduled"
+  | "listening"
+  | "paused"
+  | "manual"
+  | "api"
+  | "subWorkflow"
+  | "portal";
 
 /** Trigger status plus the two states only the client knows about. */
 export type WorkflowRowStatus = WorkflowTriggerStatus | "running" | "removeScheduled";
