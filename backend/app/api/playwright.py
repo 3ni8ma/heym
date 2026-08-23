@@ -58,6 +58,7 @@ Each step must have an "action" field. Supported actions (do not use "aiStep"):
 - type: requires "selector" and "text"
 - fill: requires "selector" and "value"
 - wait: optional "timeout" (ms, default 2000)
+- refresh: reloads the current page; optional "timeout" (ms) for the reload navigation
 - hover: requires "selector"
 - selectOption: requires "selector" and "value"
 - scrollDown: optional "amount" (pixels, default 300); optional "timeout" for post-scroll wait
@@ -233,6 +234,7 @@ async def ai_step(
                                         "type",
                                         "fill",
                                         "wait",
+                                        "refresh",
                                         "hover",
                                         "selectOption",
                                         "scrollDown",

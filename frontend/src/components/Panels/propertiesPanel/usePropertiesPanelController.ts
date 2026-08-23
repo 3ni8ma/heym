@@ -6762,6 +6762,7 @@ export function usePropertiesPanelController() {
 
   const playwrightStepActionOptions: { value: PlaywrightStepAction; label: string }[] = [
     { value: "navigate", label: "Navigate" },
+    { value: "refresh", label: "Refresh" },
     { value: "click", label: "Click" },
     { value: "type", label: "Type" },
     { value: "fill", label: "Fill" },
@@ -6899,6 +6900,14 @@ export function usePropertiesPanelController() {
     return `${stepListKey}-${stepIndex}-${savedStepIndex}`;
   }
 
+  function scrollToLastPlaywrightStep(stepListKey: PlaywrightStepListKey): void {
+    nextTick(() => {
+      const els = document.querySelectorAll(`[data-playwright-step="${stepListKey}"]`);
+      const last = els[els.length - 1];
+      if (last) last.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+  }
+
   function addPlaywrightStep(stepListKey: PlaywrightStepListKey = "playwrightSteps"): void {
     const node = workflowStore.selectedNode;
     if (!node) return;
@@ -6906,11 +6915,23 @@ export function usePropertiesPanelController() {
     const steps = getPlaywrightSteps(stepListKey);
     steps.push({ action: "navigate", url: "https://example.com" });
     updateNodeData(stepListKey, steps);
-    nextTick(() => {
-      const els = document.querySelectorAll(`[data-playwright-step="${stepListKey}"]`);
-      const last = els[els.length - 1];
-      if (last) last.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    });
+    scrollToLastPlaywrightStep(stepListKey);
+  }
+
+  function duplicatePlaywrightStep(
+    stepListKey: PlaywrightStepListKey,
+    index: number,
+  ): void {
+    const node = workflowStore.selectedNode;
+    if (!node) return;
+
+    const steps = getPlaywrightSteps(stepListKey);
+    const source = steps[index];
+    if (!source) return;
+
+    steps.push(JSON.parse(JSON.stringify(source)) as PlaywrightStep);
+    updateNodeData(stepListKey, steps);
+    scrollToLastPlaywrightStep(stepListKey);
   }
 
   function removePlaywrightStep(
@@ -9516,6 +9537,7 @@ export function usePropertiesPanelController() {
     getPlaywrightSteps,
     savedStepKey,
     addPlaywrightStep,
+    duplicatePlaywrightStep,
     removePlaywrightStep,
     movePlaywrightStepUp,
     movePlaywrightStepDown,

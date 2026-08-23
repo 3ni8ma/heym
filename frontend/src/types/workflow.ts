@@ -351,6 +351,7 @@ export interface CrawlerSelector {
 
 export type PlaywrightStepAction =
   | "navigate"
+  | "refresh"
   | "click"
   | "type"
   | "fill"
