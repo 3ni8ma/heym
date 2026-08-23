@@ -96,6 +96,14 @@ const tokenVisibility = ref<Record<string, boolean>>({});
 const tokenCreating = ref(false);
 const tokenRevoking = ref<string | null>(null);
 const sseEnabled = ref(false);
+const httpMethod = ref("POST");
+const HTTP_METHOD_OPTIONS = ["GET", "POST", "PUT", "DELETE"].map((method) => ({
+  value: method,
+  label: method,
+}));
+const sendsRequestBody = computed(
+  () => httpMethod.value !== "GET" && httpMethod.value !== "DELETE",
+);
 const simpleResponse = ref(true);
 const sseNodeConfig = ref<Record<string, SseNodeConfig>>({});
 const editingNodeId = ref<string | null>(null);
@@ -865,6 +873,7 @@ watch(curlOpen, async (open) => {
   const workflow = workflowStore.currentWorkflow;
   if (!workflow) {
     sseEnabled.value = false;
+    httpMethod.value = "POST";
     sseNodeConfig.value = {};
     editingNodeId.value = null;
     editingNodeMessage.value = "";
@@ -877,6 +886,7 @@ watch(curlOpen, async (open) => {
     rateLimitRequests.value = workflow.rate_limit_requests || 0;
     rateLimitWindowSeconds.value = workflow.rate_limit_window_seconds || 60;
     sseEnabled.value = workflow.sse_enabled ?? false;
+    httpMethod.value = workflow.http_method ?? "POST";
     sseNodeConfig.value = { ...(workflow.sse_node_config ?? {}) };
     editingNodeId.value = null;
     editingNodeMessage.value = "";
@@ -956,6 +966,14 @@ async function saveSseEnabled(): Promise<void> {
   workflowStore.currentWorkflow.sse_enabled = sseEnabled.value;
 }
 
+async function saveHttpMethod(value: string | undefined): Promise<void> {
+  if (!value) return;
+  httpMethod.value = value;
+  if (!workflowStore.currentWorkflow) return;
+  await workflowApi.update(workflowId.value, { http_method: value });
+  workflowStore.currentWorkflow.http_method = value;
+}
+
 async function saveSseNodeConfig(): Promise<void> {
   if (!workflowStore.currentWorkflow) return;
   await workflowApi.update(workflowId.value, { sse_node_config: sseNodeConfig.value });
@@ -1029,8 +1047,10 @@ const curlPayload = computed(() => {
   return parseWebhookJson(curlInput.value).value;
 });
 
+const curlCommandBlocked = computed(() => !!curlBodyError.value && sendsRequestBody.value);
+
 const curlCommand = computed(() => {
-  if (curlBodyError.value) {
+  if (curlCommandBlocked.value) {
     return "Fix JSON body to generate the cURL command.";
   }
 
@@ -1038,17 +1058,11 @@ const curlCommand = computed(() => {
     ? `/api/workflows/${workflowId.value}/execute/stream`
     : `/api/workflows/${workflowId.value}/execute`;
   const url = joinOriginAndPath(window.location.origin, basePath);
-  const payload = stringifyWebhookJson(curlPayload.value);
-  const escapedPayload = payload.replace(/'/g, "'\\''");
-  const indentedPayload = escapedPayload
-    .split("\n")
-    .map((line, index) => (index === 0 ? line : `  ${line}`))
-    .join("\n");
 
-  const headerLines = [
-    '  -H "Content-Type: application/json" \\',
-    '  -H "X-Trigger-Source: API" \\',
-  ];
+  const headerLines: string[] = ['  -H "X-Trigger-Source: API" \\'];
+  if (sendsRequestBody.value) {
+    headerLines.unshift('  -H "Content-Type: application/json" \\');
+  }
   if (!simpleResponse.value) {
     headerLines.push('  -H "X-Simple-Response: false" \\');
   }
@@ -1066,16 +1080,27 @@ const curlCommand = computed(() => {
   }
 
   const commandLines = [
-    `curl -X POST${sseEnabled.value ? " --no-buffer" : ""} \\`,
+    `curl -X ${httpMethod.value}${sseEnabled.value ? " --no-buffer" : ""} \\`,
     ...headerLines,
-    `  "${url}" \\`,
-    `  -d '${indentedPayload}'`,
   ];
+
+  if (sendsRequestBody.value) {
+    const payload = stringifyWebhookJson(curlPayload.value);
+    const escapedPayload = payload.replace(/'/g, "'\\''");
+    const indentedPayload = escapedPayload
+      .split("\n")
+      .map((line, index) => (index === 0 ? line : `  ${line}`))
+      .join("\n");
+    commandLines.push(`  "${url}" \\`, `  -d '${indentedPayload}'`);
+  } else {
+    commandLines.push(`  "${url}"`);
+  }
+
   return commandLines.join("\n");
 });
 
 async function copyCurlCommand(): Promise<void> {
-  if (curlBodyError.value) return;
+  if (curlCommandBlocked.value) return;
   await navigator.clipboard.writeText(curlCommand.value);
   curlCopied.value = true;
   setTimeout(() => {
@@ -2198,6 +2223,24 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
         <div class="border-t pt-4">
           <div class="flex items-center justify-between gap-3 pr-4">
             <div>
+              <Label class="text-sm font-medium">Request Method</Label>
+              <p class="mt-0.5 text-xs text-muted-foreground">
+                The verb this workflow accepts. Other methods are rejected with 405.
+              </p>
+            </div>
+            <Select
+              :model-value="httpMethod"
+              :options="HTTP_METHOD_OPTIONS"
+              placeholder=""
+              class="w-32 shrink-0"
+              @update:model-value="saveHttpMethod"
+            />
+          </div>
+        </div>
+
+        <div class="border-t pt-4">
+          <div class="flex items-center justify-between gap-3 pr-4">
+            <div>
               <Label class="text-sm font-medium">Simple Response</Label>
               <p class="mt-0.5 text-xs text-muted-foreground">
                 Return only the final <code class="rounded bg-muted px-1 text-xs">outputs</code> object. Uncheck for the full response with status, node results, and metadata.
@@ -2213,7 +2256,10 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
           </div>
         </div>
 
-        <div class="space-y-2">
+        <div
+          v-if="sendsRequestBody"
+          class="space-y-2"
+        >
           <div class="flex items-center justify-between gap-3">
             <Label>{{ isGenericWebhookBodyMode ? "Raw JSON Body" : "Defined Request Body" }}</Label>
             <Button
@@ -2244,7 +2290,7 @@ function onDocSelectFromPalette(categoryId: string, slug: string, event?: MouseE
               variant="outline"
               size="sm"
               class="gap-2"
-              :disabled="!!curlBodyError"
+              :disabled="curlCommandBlocked"
               @click="copyCurlCommand"
             >
               <Copy class="w-4 h-4" />

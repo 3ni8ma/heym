@@ -32,6 +32,8 @@ export interface Workflow {
   cache_ttl_seconds: number | null;
   rate_limit_requests: number | null;
   rate_limit_window_seconds: number | null;
+  /** The one HTTP verb this workflow accepts. Absent on older payloads; treat as POST. */
+  http_method?: string;
   sse_enabled: boolean;
   sse_node_config: Record<string, SseNodeConfig>;
   auto_recover_runs: boolean;
@@ -57,7 +59,8 @@ export type WorkflowTriggerStatus =
   | "manual"
   | "api"
   | "subWorkflow"
-  | "portal";
+  | "portal"
+  | "web";
 
 /** Trigger status plus the two states only the client knows about. */
 export type WorkflowRowStatus = WorkflowTriggerStatus | "running" | "removeScheduled";
@@ -178,6 +181,7 @@ export type NodeType =
   | "converter"
   | "code"
   | "jsonOutputMapper"
+  | "htmlOutputMapper"
   | "telegram"
   | "slack"
   | "discord"
@@ -458,6 +462,10 @@ export interface NodeData {
   outputSchema?: OutputSchemaField[];
   inputCount?: number;
   mappings?: MappingField[];
+  /** htmlOutputMapper: the page template, with $node.field spans interpolated in place. */
+  html?: string;
+  statusCode?: number;
+  contentType?: string;
   conversion?: string;
   source?: string;
   delimiter?: string;

@@ -108,6 +108,7 @@ from app.services.hitl_service import (
     build_public_base_url,
     persist_pending_hitl_execution,
 )
+from app.services.html_response import build_html_response, find_sole_html_terminal
 from app.services.workflow_access import workflow_access_clause
 from app.services.workflow_executor import (
     ExecutionResult,
@@ -756,7 +757,7 @@ async def list_workflows(
             folder_id=folder_id,
             first_node_type=get_first_node_type(w),
             trigger_status=refine_manual_status(
-                compute_trigger_status(w.nodes), last_trigger_sources.get(w.id)
+                compute_trigger_status(w.nodes, w.edges), last_trigger_sources.get(w.id)
             ),
             scheduled_for_deletion=scheduled_for_deletion,
             created_at=w.created_at,
@@ -1538,6 +1539,14 @@ async def update_workflow(
             if workflow_data.rate_limit_window_seconds > 0
             else None
         )
+    if workflow_data.http_method is not None:
+        method = workflow_data.http_method.strip().upper()
+        if method not in ALLOWED_WORKFLOW_HTTP_METHODS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"http_method must be one of {sorted(ALLOWED_WORKFLOW_HTTP_METHODS)}",
+            )
+        workflow.http_method = method
     if workflow_data.sse_enabled is not None:
         workflow.sse_enabled = workflow_data.sse_enabled
     if workflow_data.sse_node_config is not None:
@@ -1767,7 +1776,7 @@ async def schedule_workflow_for_deletion(
         folder_id=workflow.folder_id,
         first_node_type=get_first_node_type(workflow),
         trigger_status=refine_manual_status(
-            compute_trigger_status(workflow.nodes),
+            compute_trigger_status(workflow.nodes, workflow.edges),
             await fetch_last_trigger_source(db, workflow.id),
         ),
         scheduled_for_deletion=workflow.scheduled_for_deletion,
@@ -1807,7 +1816,7 @@ async def unschedule_workflow_for_deletion(
         folder_id=workflow.folder_id,
         first_node_type=get_first_node_type(workflow),
         trigger_status=refine_manual_status(
-            compute_trigger_status(workflow.nodes),
+            compute_trigger_status(workflow.nodes, workflow.edges),
             await fetch_last_trigger_source(db, workflow.id),
         ),
         scheduled_for_deletion=workflow.scheduled_for_deletion,
@@ -2661,7 +2670,32 @@ async def parse_execute_body(request: Request) -> tuple[object, bool, str | None
     return raw_body, test_run, trigger_source or "API", simple_response
 
 
-@router.post("/{workflow_id}/execute", response_model=WorkflowExecuteResponse)
+#: The verbs a workflow's execute endpoint can be configured to accept.
+ALLOWED_WORKFLOW_HTTP_METHODS: frozenset[str] = frozenset({"GET", "POST", "PUT", "DELETE"})
+
+
+def enforce_workflow_http_method(workflow: Workflow, request: Request, test_run: bool) -> None:
+    """Reject a verb the workflow is not configured for.
+
+    ``test_run`` requests are exempt: the editor's Run button and the debug panel always POST,
+    and a workflow set to GET would otherwise be untestable from inside the product.
+    """
+    if test_run:
+        return
+    configured = (getattr(workflow, "http_method", None) or "POST").upper()
+    if request.method.upper() != configured:
+        raise HTTPException(
+            status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+            detail=f"This workflow accepts {configured} requests only",
+            headers={"Allow": configured},
+        )
+
+
+@router.api_route(
+    "/{workflow_id}/execute",
+    methods=["GET", "POST", "PUT", "DELETE"],
+    response_model=WorkflowExecuteResponse,
+)
 async def execute_workflow_endpoint(
     workflow_id: uuid.UUID,
     request: Request,
@@ -2681,6 +2715,7 @@ async def execute_workflow_endpoint(
         )
 
     await validate_workflow_auth(workflow, request, current_user, db)
+    enforce_workflow_http_method(workflow, request, test_run)
 
     enriched_inputs = {
         "headers": _sanitize_headers(dict(request.headers), _webhook_secret_names(workflow)),
@@ -2988,7 +3023,16 @@ async def execute_workflow_endpoint(
                 execution_result=execution_result,
             )
             if simple_response:
+                html_node_id = find_sole_html_terminal(workflow.nodes, workflow.edges)
+                html_response = (
+                    build_html_response(execution_result.node_results, html_node_id)
+                    if html_node_id
+                    else None
+                )
                 await db.commit()
+                if html_response is not None:
+                    html_response.background = background_tasks
+                    return html_response
                 return JSONResponse(
                     content=execution_result.outputs,
                     background=background_tasks,
@@ -3067,6 +3111,11 @@ async def execute_workflow_endpoint(
             )
 
     if simple_response:
+        html_node_id = find_sole_html_terminal(workflow.nodes, workflow.edges)
+        if html_node_id:
+            html_response = build_html_response(execution_result.node_results, html_node_id)
+            if html_response is not None:
+                return html_response
         return JSONResponse(content=execution_result.outputs)
     return WorkflowExecuteResponse(
         workflow_id=execution_result.workflow_id,
@@ -3300,7 +3349,7 @@ async def clear_execution_history(
     )
 
 
-@router.post("/{workflow_id}/execute/stream")
+@router.api_route("/{workflow_id}/execute/stream", methods=["GET", "POST", "PUT", "DELETE"])
 async def execute_workflow_stream(
     workflow_id: uuid.UUID,
     request: Request,
@@ -3319,6 +3368,7 @@ async def execute_workflow_stream(
         )
 
     await validate_workflow_auth(workflow, request, current_user, db)
+    enforce_workflow_http_method(workflow, request, test_run)
 
     if not workflow.sse_enabled and trigger_source not in _INTERNAL_STREAM_TRIGGER_SOURCES:
         raise HTTPException(
