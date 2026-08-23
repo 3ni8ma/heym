@@ -368,7 +368,8 @@ class WorkflowListResponse(BaseModel):
     description: str | None
     folder_id: uuid.UUID | None = None
     first_node_type: str | None = None
-    # scheduled | listening | paused | manual - see app/services/workflow_status.py
+    # scheduled | listening | paused | manual | api | subWorkflow | portal
+    # - see app/services/workflow_status.py
     trigger_status: str = "manual"
     scheduled_for_deletion: datetime | None = None
     shared_by_team: str | None = None

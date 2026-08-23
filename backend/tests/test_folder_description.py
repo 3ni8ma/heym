@@ -14,6 +14,13 @@ def make_result(value: object) -> Mock:
     return result
 
 
+def make_rows_result(rows: list | None = None) -> Mock:
+    """Result for the latest-trigger-source lookup every workflow list response makes."""
+    result = Mock()
+    result.all.return_value = rows or []
+    return result
+
+
 def make_user() -> User:
     return User(
         id=uuid.uuid4(),
@@ -130,7 +137,7 @@ class FolderDescriptionReadTests(unittest.IsolatedAsyncioTestCase):
         folders_result.scalars.return_value.unique.return_value.all.return_value = [folder]
         shares_result = Mock()
         shares_result.scalars.return_value.all.return_value = []
-        db.execute = AsyncMock(side_effect=[folders_result, shares_result])
+        db.execute = AsyncMock(side_effect=[folders_result, shares_result, make_rows_result()])
 
         tree = await get_folder_tree(db, current_user)
 
@@ -154,7 +161,7 @@ class FolderDescriptionReadTests(unittest.IsolatedAsyncioTestCase):
         ]
 
         db = AsyncMock()
-        db.execute = AsyncMock(return_value=make_result(folder))
+        db.execute = AsyncMock(side_effect=[make_result(folder), make_rows_result()])
 
         response = await get_folder(folder.id, db, current_user)
 
