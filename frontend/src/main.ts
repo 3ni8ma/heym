@@ -1,3 +1,6 @@
+// Must be first: rewrite origin+undefined history URLs before vue-router boots.
+import "./lib/historyUrlGuardInstall";
+
 import { createApp } from "vue";
 import { createPinia } from "pinia";
 import VueApexCharts from "vue3-apexcharts";
