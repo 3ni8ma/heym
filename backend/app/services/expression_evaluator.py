@@ -11,6 +11,8 @@ from typing import Any, Callable, Literal
 
 from pydantic import BaseModel
 
+from app.services.expression_syntax import alias_reserved_context_names
+
 EXPRESSION_MAX_LENGTH = 10_000
 
 ExpressionResultType = Literal["string", "number", "boolean", "array", "object", "null"]
@@ -245,7 +247,7 @@ def is_single_dollar_expression(
         if start == 0 and end == len(trimmed):
             return True
 
-    transformed = transform(expr_body)
+    transformed = alias_reserved_context_names(transform(expr_body))
     try:
         ast.parse(transformed, mode="eval")
     except SyntaxError:

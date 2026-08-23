@@ -35,6 +35,7 @@ from app.api.data_tables import (
 )
 from app.http_identity import HEYM_USER_AGENT
 from app.observability import tracing
+from app.services import expression_syntax
 from app.services.agent_tool_policy import is_blocked_as_tool
 from app.services.chart_payload import (
     build_chart_payload,  # noqa: F401 - public patch alias for node handlers
@@ -718,7 +719,7 @@ HTTP_TIMEOUT = 300.0
 @lru_cache(maxsize=2048)
 def _parse_expression_tree(expr: str) -> ast.AST:
     """Cache parsed ASTs for repeated workflow expressions."""
-    return SimpleEval.parse(expr)
+    return SimpleEval.parse(expression_syntax.alias_reserved_context_names(expr))
 
 
 def _is_valid_expression_syntax(expr: str) -> bool:
@@ -1601,6 +1602,9 @@ class HeymExpressionEval(EvalWithCompoundTypes):
 
     def eval(self, expr: str, previously_parsed: ast.AST | None = None) -> object:
         """Evaluate while exposing names to nested ``map``/``filter`` item expressions."""
+        if previously_parsed is None:
+            # Route every parse through the shared helper so reserved names stay aliased.
+            previously_parsed = _parse_expression_tree(expr)
         context = _ExpressionEvalContext(
             names=dict(self.names) if isinstance(self.names, dict) else {},
             functions=dict(self.functions),
@@ -1612,6 +1616,12 @@ class HeymExpressionEval(EvalWithCompoundTypes):
             return super().eval(expr, previously_parsed=previously_parsed)
         finally:
             stack.pop()
+
+    def _eval_name(self, node: ast.Name):
+        source = expression_syntax.RESERVED_CONTEXT_NAMES_BY_ALIAS.get(node.id)
+        if source is not None and isinstance(self.names, dict) and source in self.names:
+            return self.names[source]
+        return super()._eval_name(node)
 
     def _eval_attribute(self, node: ast.Attribute):
         if node.attr == "orEmpty":
