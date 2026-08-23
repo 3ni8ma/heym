@@ -3237,8 +3237,9 @@ This returns: `["news/my-article.html", "blog/another-post.html", ...]`
   - `playwrightAuthFallbackSteps`: Array of step definitions that run only if cookie/storageState restore did not authenticate the page
 
 **Step structure** (each item in `playwrightSteps` or `playwrightAuthFallbackSteps`):
-- `action`: One of `navigate`, `click`, `type`, `fill`, `wait`, `screenshot`, `getText`, `getAttribute`, `getHTML`, `getVisibleTextOnPage`, `hover`, `selectOption`, `scrollDown`, `scrollUp`, `aiStep`
+- `action`: One of `navigate`, `refresh`, `click`, `type`, `fill`, `wait`, `screenshot`, `getText`, `getAttribute`, `getHTML`, `getVisibleTextOnPage`, `hover`, `selectOption`, `scrollDown`, `scrollUp`, `aiStep`
 - `url`: For navigate - URL (supports expressions like `$userInput.body.url`)
+- `refresh`: Reloads the current page (no url/selector); optional `timeout` ms for the reload navigation
 - `selector`: For click/type/fill/getText/getAttribute/getHTML/hover/selectOption - CSS selector (supports expressions). Not used for `getVisibleTextOnPage` (full-page visible text from `document.body.innerText`; optional `timeout` ms waits before capture).
 - `amount`: For scrollDown/scrollUp - pixels to scroll (default 300). A 1000ms wait is automatically added after each scroll to allow content to load.
 - `text`: For type - text to type (supports expressions)
@@ -3246,7 +3247,7 @@ This returns: `["news/my-article.html", "blog/another-post.html", ...]`
 - `attribute`: For getAttribute - attribute name (e.g. `href`, `data-id`)
 - `timeout`: Optional step timeout in ms
 - `outputKey`: For getText/getAttribute/getHTML/getVisibleTextOnPage/screenshot - key to store result in `$nodeLabel.results.outputKey`
-- For `aiStep`: `instructions` (what to do), `credentialId`, `model`, `logStepsToConsole`, `saveStepsForFuture`, `autoHealMode`, `sendScreenshot`, `aiStepTimeout` (optional, ms, default 30000) - LLM analyzes page HTML and returns the same action set as manual steps (including `navigate`, `getText`, `getHTML`, `getAttribute`, `getVisibleTextOnPage`, etc.; not nested `aiStep`). `autoHealMode`: if a selector-based step fails 2x, ask LLM for an alternative locator (heal supports click/type/fill/hover/selectOption only).
+- For `aiStep`: `instructions` (what to do), `credentialId`, `model`, `logStepsToConsole`, `saveStepsForFuture`, `autoHealMode`, `sendScreenshot`, `aiStepTimeout` (optional, ms, default 30000) - LLM analyzes page HTML and returns the same action set as manual steps (including `navigate`, `refresh`, `getText`, `getHTML`, `getAttribute`, `getVisibleTextOnPage`, etc.; not nested `aiStep`). `autoHealMode`: if a selector-based step fails 2x, ask LLM for an alternative locator (heal supports click/type/fill/hover/selectOption only).
 
 **Output properties**:
 - `$nodeLabel.status`: "ok" on success

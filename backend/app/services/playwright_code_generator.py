@@ -447,6 +447,9 @@ def _generate_step_lines(
         url_val = _expr_to_python(url, '"https://example.com"')
         goto_args = f"{url_val}" + (f", {to_kw}" if to_kw else "")
         lines.append(f"page.goto({goto_args})")
+    elif action == "refresh":
+        reload_args = f"({to_kw})" if to_kw else "()"
+        lines.append(f"page.reload{reload_args}")
     elif action == "click":
         sel_val = _expr_to_python(selector, '"button"')
         lines.append(f"_pw_click_loc = page.locator({sel_val})")
@@ -609,6 +612,10 @@ def _generate_step_lines(
                 "        page.mouse.wheel(0, -_amt)",
                 "        page.wait_for_timeout(1000)",
                 "        _step_done = True",
+                "    elif _a == 'refresh':",
+                "        _rtmo = _s.get('timeout')",
+                "        page.reload(timeout=int(_rtmo)) if _rtmo is not None else page.reload()",
+                "        _step_done = True",
                 "    elif _a == 'navigate':",
                 "        _nurl = str(_s.get('url', '') or '')",
                 "        if not _nurl:",
@@ -729,7 +736,7 @@ def _generate_step_lines(
                 "                if _attempt == 1:",
                 "                    raise",
                 "    if not _step_done and _a not in (",
-                "        'wait', 'scrollDown', 'scrollUp', 'screenshot', 'navigate',",
+                "        'wait', 'scrollDown', 'scrollUp', 'screenshot', 'navigate', 'refresh',",
                 "        'getText', 'getAttribute', 'getHTML', 'getVisibleTextOnPage',",
                 "    ):",
                 "        raise RuntimeError(f'AI step {_i} ({_a}) failed and auto heal disabled')",

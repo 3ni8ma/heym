@@ -30,6 +30,7 @@ The **Playwright** node automates browser interactions with configurable steps. 
 ## Step Types
 
 - **navigate** – Go to URL
+- **refresh** – Reload the current page (optional step `timeout` in ms for the reload navigation)
 - **click** – Click element by selector
 - **type** – Type text into input (character-by-character)
 - **fill** – Fill input value
@@ -46,7 +47,7 @@ The **Playwright** node automates browser interactions with configurable steps. 
 
 ## AI Step
 
-The **aiStep** action uses an LLM to analyze the page HTML (and optionally a screenshot) and generate Playwright actions from natural-language instructions. The API accepts the same action names as manual steps (including `navigate`, `getText`, `getHTML`, `getAttribute`, `getVisibleTextOnPage`, `screenshot`, scrolls, etc.). **Auto heal** only replaces failed selector-based steps with alternatives for click, type, fill, hover, and selectOption.
+The **aiStep** action uses an LLM to analyze the page HTML (and optionally a screenshot) and generate Playwright actions from natural-language instructions. The API accepts the same action names as manual steps (including `navigate`, `refresh`, `getText`, `getHTML`, `getAttribute`, `getVisibleTextOnPage`, `screenshot`, scrolls, etc.). **Auto heal** only replaces failed selector-based steps with alternatives for click, type, fill, hover, and selectOption.
 
 | Option | Description |
 |--------|-------------|

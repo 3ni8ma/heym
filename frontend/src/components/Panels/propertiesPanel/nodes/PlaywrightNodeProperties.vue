@@ -27,6 +27,7 @@ const {
   getPlaywrightSteps,
   savedStepKey,
   addPlaywrightStep,
+  duplicatePlaywrightStep,
   removePlaywrightStep,
   movePlaywrightStepUp,
   movePlaywrightStepDown,
@@ -235,12 +236,41 @@ with sync_playwright() as p:
             class="space-y-2 p-3 border rounded-md bg-muted/30"
           >
             <div class="flex items-center justify-between gap-2">
-              <span class="text-xs font-medium">Step {{ index + 1 }}</span>
-              <div class="flex items-center gap-1">
+              <span class="text-xs font-medium shrink-0 whitespace-nowrap">Step {{ index + 1 }}</span>
+              <div class="flex items-center gap-1 shrink-0">
                 <Button
                   variant="outline"
                   size="sm"
-                  class="h-7 w-7 p-0 shrink-0 text-base font-semibold leading-none text-muted-foreground hover:text-foreground"
+                  class="!h-7 !min-h-0 !w-7 !p-0 shrink-0 text-muted-foreground hover:text-foreground"
+                  aria-label="Copy step"
+                  title="Copy step to the end"
+                  @click="duplicatePlaywrightStep(section.key, index)"
+                >
+                  <svg
+                    class="h-3.5 w-3.5 shrink-0"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    aria-hidden="true"
+                  >
+                    <rect
+                      x="8"
+                      y="8"
+                      width="14"
+                      height="14"
+                      rx="2"
+                      ry="2"
+                    />
+                    <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+                  </svg>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  class="!h-7 !min-h-0 !w-7 !p-0 shrink-0 text-base font-semibold leading-none text-muted-foreground hover:text-foreground"
                   aria-label="Move step up"
                   :disabled="index === 0"
                   @click="movePlaywrightStepUp(section.key, index)"
@@ -250,7 +280,7 @@ with sync_playwright() as p:
                 <Button
                   variant="outline"
                   size="sm"
-                  class="h-7 w-7 p-0 shrink-0 text-base font-semibold leading-none text-muted-foreground hover:text-foreground"
+                  class="!h-7 !min-h-0 !w-7 !p-0 shrink-0 text-base font-semibold leading-none text-muted-foreground hover:text-foreground"
                   aria-label="Move step down"
                   :disabled="index >= getPlaywrightSteps(section.key).length - 1"
                   @click="movePlaywrightStepDown(section.key, index)"
@@ -260,7 +290,7 @@ with sync_playwright() as p:
                 <Button
                   variant="ghost"
                   size="sm"
-                  class="h-7 gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  class="!h-7 !min-h-0 !px-2 gap-1 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
                   aria-label="Remove step"
                   @click="removePlaywrightStep(section.key, index)"
                 >
@@ -425,6 +455,22 @@ with sync_playwright() as p:
                   min="0"
                   @update:model-value="updatePlaywrightStep(section.key, index, 'timeout', $event ? parseInt($event as string) : 4000)"
                 />
+              </div>
+            </template>
+
+            <template v-if="step.action === 'refresh'">
+              <div class="space-y-1">
+                <Label class="text-xs">Reload timeout (ms, optional)</Label>
+                <Input
+                  type="number"
+                  :model-value="step.timeout || ''"
+                  placeholder="30000"
+                  min="0"
+                  @update:model-value="updatePlaywrightStep(section.key, index, 'timeout', $event ? parseInt($event as string) : undefined)"
+                />
+                <p class="text-xs text-muted-foreground">
+                  Reloads the current page. Leave empty to use the node timeout.
+                </p>
               </div>
             </template>
 
