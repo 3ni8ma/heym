@@ -67,6 +67,7 @@ from app.models.schemas import (
 )
 from app.services import file_intake_service
 from app.services.active_execution_overview import collect_active_executions_for_user
+from app.services.audit_log import OUTCOME_DENIED, audit
 from app.services.auth import create_workflow_execution_token, decode_token
 from app.services.cache_rate_limit import rate_limiter, response_cache
 from app.services.codex_followup_service import (
@@ -1398,6 +1399,15 @@ async def create_workflow(
         workflow_id=workflow.id,
         dedupe_key=f"{EVENT_WORKFLOW_CREATED}:{workflow.id}",
     )
+    audit(
+        action="workflow.create",
+        actor=current_user,
+        target_type="workflow",
+        target_id=workflow.id,
+        target_name=workflow.name,
+        kind=getattr(workflow, "kind", "workflow"),
+        nodes=len(workflow.nodes or []),
+    )
     return _build_workflow_response(workflow, current_user.id)
 
 
@@ -1660,6 +1670,16 @@ async def update_workflow(
             workflow_id=workflow.id,
             dedupe_key=f"{EVENT_WORKFLOW_UPDATED}:{workflow.id}:{updated_payload['updated_at']}",
         )
+    audit(
+        action="workflow.update",
+        actor=current_user,
+        target_type="workflow",
+        target_id=workflow.id,
+        target_name=workflow.name,
+        owned=workflow.owner_id == current_user.id,
+        versioned=should_create_version,
+        nodes=len(workflow.nodes or []),
+    )
     return _build_workflow_response(workflow, current_user.id)
 
 
@@ -1695,10 +1715,28 @@ async def delete_workflow(
         )
 
     if workflow.owner_id != current_user.id:
+        audit(
+            action="workflow.delete",
+            outcome=OUTCOME_DENIED,
+            actor=current_user,
+            target_type="workflow",
+            target_id=workflow.id,
+            target_name=workflow.name,
+            reason="not_owner",
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the owner can delete this workflow",
         )
+
+    audit(
+        action="workflow.delete",
+        actor=current_user,
+        target_type="workflow",
+        target_id=workflow.id,
+        target_name=workflow.name,
+        kind=getattr(workflow, "kind", "workflow"),
+    )
 
     # Capture the identity before the row goes away; the event reports a workflow
     # that no longer exists by the time anyone reads it.
@@ -2045,6 +2083,14 @@ async def revert_workflow_to_version(
     await db.flush()
     await db.refresh(workflow)
 
+    audit(
+        action="workflow.version_revert",
+        actor=current_user,
+        target_type="workflow",
+        target_id=workflow.id,
+        target_name=workflow.name,
+        version_id=version_id,
+    )
     return _build_workflow_response(workflow, current_user.id)
 
 
@@ -2164,6 +2210,15 @@ async def create_workflow_share(
         db.add(share)
         await db.flush()
         await db.refresh(share)
+        audit(
+            action="workflow.share_add",
+            actor=current_user,
+            target_type="workflow",
+            target_id=workflow.id,
+            target_name=workflow.name,
+            grantee_id=target_user.id,
+            grantee_email=target_user.email,
+        )
 
     return WorkflowShareResponse(
         id=share.id,
@@ -2205,6 +2260,14 @@ async def remove_workflow_share(
             detail="Share not found",
         )
 
+    audit(
+        action="workflow.share_remove",
+        actor=current_user,
+        target_type="workflow",
+        target_id=workflow_id,
+        target_name=workflow.name,
+        grantee_id=user_id,
+    )
     await db.delete(share)
     await db.commit()
 
@@ -2291,6 +2354,15 @@ async def create_workflow_team_share(
     await db.flush()
     await db.refresh(share)
     await db.commit()
+    audit(
+        action="workflow.team_share_add",
+        actor=current_user,
+        target_type="workflow",
+        target_id=workflow_id,
+        target_name=workflow.name,
+        team_id=team.id,
+        team_name=team.name,
+    )
     return TeamShareResponse(
         id=share.id,
         team_id=team.id,
@@ -2329,6 +2401,14 @@ async def remove_workflow_team_share(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Team share not found",
         )
+    audit(
+        action="workflow.team_share_remove",
+        actor=current_user,
+        target_type="workflow",
+        target_id=workflow_id,
+        target_name=workflow.name,
+        team_id=team_id,
+    )
     await db.delete(share)
     await db.commit()
 
@@ -2423,6 +2503,15 @@ async def create_execution_token_endpoint(
     db.add(row)
     await db.commit()
     await db.refresh(row)
+    audit(
+        action="workflow.execution_token_create",
+        actor=current_user,
+        target_type="workflow",
+        target_id=workflow_id,
+        target_name=workflow.name,
+        jti=jti,
+        expires_at=expires_at,
+    )
     return ExecutionTokenResponse.model_validate(row)
 
 
@@ -2466,6 +2555,13 @@ async def revoke_execution_token_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Token not found")
     row.revoked = True
     await db.commit()
+    audit(
+        action="workflow.execution_token_revoke",
+        actor=current_user,
+        target_type="workflow",
+        target_id=workflow_id,
+        jti=row.jti,
+    )
 
 
 async def validate_workflow_auth(
@@ -3327,6 +3423,16 @@ async def get_execution_history(
         )
         for h in history
     ]
+    audit(
+        action="workflow.history_view",
+        actor=current_user,
+        target_type="workflow",
+        target_id=workflow_id,
+        target_name=workflow.name,
+        owned=workflow.owner_id == current_user.id,
+        returned=len(items),
+        total=total,
+    )
     return HistoryListResponse(total=total, items=items)
 
 
@@ -3344,6 +3450,13 @@ async def clear_execution_history(
             detail="Workflow not found",
         )
 
+    audit(
+        action="workflow.history_clear",
+        actor=current_user,
+        target_type="workflow",
+        target_id=workflow_id,
+        target_name=workflow.name,
+    )
     await db.execute(
         ExecutionHistory.__table__.delete().where(ExecutionHistory.workflow_id == workflow_id)
     )
