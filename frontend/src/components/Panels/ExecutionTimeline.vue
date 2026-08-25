@@ -13,6 +13,7 @@ import {
   buildTimelineModel,
   formatTimelineMs,
   getTimelineRowKey,
+  summarizeTimelineModel,
 } from "@/components/Panels/executionTimeline";
 
 interface Props {
@@ -109,6 +110,9 @@ const fullTimelineModel = computed(() =>
     props.subAgentLabelToParentId,
     { nowMs: timelineNowMs.value },
   ),
+);
+const timelineSummary = computed(() =>
+  summarizeTimelineModel(fullTimelineModel.value.rows, fullTimelineModel.value.timeWindow),
 );
 
 const rows = computed(() => fullTimelineModel.value.rows);
@@ -219,6 +223,29 @@ function showAllRows(): void {
 
 <template>
   <div class="border-t bg-muted/5 select-none overflow-hidden">
+    <div class="flex items-center gap-3 px-2 py-1.5 border-b border-border/20 bg-background/40 text-[10px] text-muted-foreground">
+      <span class="font-medium text-foreground/80">Execution summary</span>
+      <span>{{ formatTimelineMs(timelineSummary.totalDurationMs) }}</span>
+      <span>{{ timelineSummary.spanCount }} spans</span>
+      <span
+        v-if="timelineSummary.failedSpanCount > 0"
+        class="text-destructive"
+      >
+        {{ timelineSummary.failedSpanCount }} failed
+      </span>
+      <span
+        v-if="timelineSummary.retryCount > 0"
+        class="text-amber-600"
+      >
+        {{ timelineSummary.retryCount }} retries
+      </span>
+      <span
+        v-if="timelineSummary.failedSpanCount === 0 && timelineSummary.retryCount === 0"
+        class="text-emerald-600"
+      >
+        Healthy
+      </span>
+    </div>
     <div class="flex h-5 border-b border-border/30 overflow-hidden">
       <div class="w-[176px] shrink-0 border-r border-border/20" />
       <div class="flex-1 relative overflow-hidden">

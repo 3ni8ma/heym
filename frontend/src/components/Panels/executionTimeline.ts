@@ -64,6 +64,13 @@ export interface SpanRow {
   spans: SpanItem[];
 }
 
+export interface TimelineSummary {
+  totalDurationMs: number;
+  spanCount: number;
+  failedSpanCount: number;
+  retryCount: number;
+}
+
 interface RawSpanItem {
   key: string;
   nodeId: string;
@@ -460,4 +467,18 @@ export function buildTimelineModel(
     });
 
   return { rows, timeWindow };
+}
+
+/** Return a compact health summary for the complete execution timeline. */
+export function summarizeTimelineModel(
+  rows: SpanRow[],
+  timeWindow: TimeWindow,
+): TimelineSummary {
+  const spans = rows.flatMap((row) => row.spans);
+  return {
+    totalDurationMs: timeWindow.totalMs,
+    spanCount: spans.length,
+    failedSpanCount: spans.filter((span) => span.status === "error").length,
+    retryCount: spans.reduce((total, span) => total + span.retryFailedAttempts, 0),
+  };
 }
