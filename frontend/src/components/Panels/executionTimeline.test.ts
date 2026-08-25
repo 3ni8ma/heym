@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { TimelineEntry } from "@/components/Panels/executionTimeline";
-import { buildTimelineModel } from "@/components/Panels/executionTimeline";
+import {
+  buildTimelineModel,
+  summarizeTimelineModel,
+} from "@/components/Panels/executionTimeline";
 
 function entry(
   partial: Partial<TimelineEntry> &
@@ -138,5 +141,49 @@ describe("buildTimelineModel HITL wait spans", () => {
     expect(rows[0].spans).toHaveLength(2);
     expect(rows[0].spans[1].isHitlWait).toBe(true);
     expect(rows[0].spans[1].durationMs).toBe(3000);
+  });
+});
+
+describe("summarizeTimelineModel", () => {
+  it("returns a neutral summary for an empty execution", () => {
+    const model = buildTimelineModel([], 0, new Map());
+
+    expect(summarizeTimelineModel(model.rows, model.timeWindow)).toEqual({
+      totalDurationMs: 1,
+      spanCount: 0,
+      failedSpanCount: 0,
+      retryCount: 0,
+    });
+  });
+
+  it("summarizes failures and retries across all rows", () => {
+    const results: TimelineEntry[] = [
+      entry({
+        node_id: "llm-1",
+        node_label: "LLM",
+        node_type: "llm",
+        status: "error",
+        execution_time_ms: 120,
+        retryFailedAttempts: 2,
+        metadata: { started_at_ms: 100, ended_at_ms: 220 },
+      }),
+      entry({
+        node_id: "agent-1",
+        node_label: "Agent",
+        node_type: "agent",
+        status: "success",
+        execution_time_ms: 80,
+        retryFailedAttempts: 1,
+        metadata: { started_at_ms: 220, ended_at_ms: 300 },
+      }),
+    ];
+
+    const model = buildTimelineModel(results, 200, new Map());
+    expect(summarizeTimelineModel(model.rows, model.timeWindow)).toEqual({
+      totalDurationMs: 200,
+      spanCount: 2,
+      failedSpanCount: 1,
+      retryCount: 3,
+    });
   });
 });
