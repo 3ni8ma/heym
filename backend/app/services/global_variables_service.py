@@ -31,7 +31,11 @@ async def get_global_variables_context(db: AsyncSession, owner_id: uuid.UUID) ->
         )
         .join(TeamMember, TeamMember.team_id == GlobalVariableTeamShare.team_id)
         .where(TeamMember.user_id == owner_id)
-        .order_by(GlobalVariable.name.asc(), GlobalVariable.id.asc())
+        .order_by(
+            GlobalVariable.name.asc(),
+            GlobalVariableTeamShare.created_at.asc(),
+            GlobalVariable.id.asc(),
+        )
     )
     for v in team_shared_result.scalars().all():
         out[v.name] = _extract_value(v.value)
@@ -41,7 +45,11 @@ async def get_global_variables_context(db: AsyncSession, owner_id: uuid.UUID) ->
         select(GlobalVariable)
         .join(GlobalVariableShare, GlobalVariableShare.global_variable_id == GlobalVariable.id)
         .where(GlobalVariableShare.user_id == owner_id)
-        .order_by(GlobalVariable.name.asc(), GlobalVariable.id.asc())
+        .order_by(
+            GlobalVariable.name.asc(),
+            GlobalVariableShare.created_at.asc(),
+            GlobalVariable.id.asc(),
+        )
     )
     for v in shared_result.scalars().all():
         out[v.name] = _extract_value(v.value)
@@ -50,7 +58,7 @@ async def get_global_variables_context(db: AsyncSession, owner_id: uuid.UUID) ->
     owned_result = await db.execute(
         select(GlobalVariable)
         .where(GlobalVariable.owner_id == owner_id)
-        .order_by(GlobalVariable.name.asc(), GlobalVariable.id.asc())
+        .order_by(GlobalVariable.name.asc())
     )
     for v in owned_result.scalars().all():
         out[v.name] = _extract_value(v.value)

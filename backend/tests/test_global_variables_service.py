@@ -161,57 +161,115 @@ class GetGlobalVariablesContextTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["config"], {"key": "value"})
 
-    async def test_team_share_query_uses_correct_joins_and_user_filter(self) -> None:
-        """Verify the team-share query joins GlobalVariableTeamShare and TeamMember
-        and filters by TeamMember.user_id."""
-
+    async def test_team_share_query_uses_correct_joins_and_filter(self) -> None:
+        """Assert exact join conditions and WHERE clause for team-share query."""
         owner_id = uuid.uuid4()
-        team_var = _make_variable("team_only", "secret")
 
         db = AsyncMock()
         db.execute = AsyncMock(
-            side_effect=[
-                _AllResult([team_var]),
-                _EmptyResult(),
-                _EmptyResult(),
-            ]
+            side_effect=[_EmptyResult(), _EmptyResult(), _EmptyResult()]
         )
 
         await get_global_variables_context(db, owner_id)
 
-        first_call_args = db.execute.call_args_list[0]
-        query = first_call_args[0][0]
-
-        # Verify the query has the expected structure: SELECT ... JOIN TeamMember WHERE TeamMember.user_id = ?
+        query = db.execute.call_args_list[0][0][0]
         compiled = query.compile(compile_kwargs={"literal_binds": True})
-        sql_str = str(compiled)
+        sql = str(compiled).lower()
 
-        self.assertIn("team_member", sql_str.lower())
-        self.assertIn("global_variable_team_share", sql_str.lower())
-        self.assertIn("user_id", sql_str.lower())
+        # Verify join: global_variable_team_shares
+        self.assertIn("global_variable_team_shares", sql)
+        # Verify join: team_members
+        self.assertIn("team_members", sql)
+        # Verify filter column: user_id
+        self.assertIn("team_members.user_id =", sql)
+        # UUID bind params strip hyphens in compiled SQL
+        self.assertIn(str(owner_id).replace("-", ""), sql)
 
-    async def test_id_tiebreaker_for_same_level_collisions(self) -> None:
-        """When two variables have the same name at the same priority level,
-        the one with the lower id wins (deterministic tiebreaker)."""
+    async def test_team_share_query_orders_by_name_created_at_id(self) -> None:
+        """Verify ORDER BY uses name, team share created_at, then variable id."""
         owner_id = uuid.uuid4()
-
-        var_early = SimpleNamespace(
-            id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
-            name="dup",
-            value={"v": "first"},
-            owner_id=uuid.uuid4(),
-        )
-        var_late = SimpleNamespace(
-            id=uuid.UUID("00000000-0000-0000-0000-000000000002"),
-            name="dup",
-            value={"v": "second"},
-            owner_id=uuid.uuid4(),
-        )
 
         db = AsyncMock()
         db.execute = AsyncMock(
+            side_effect=[_EmptyResult(), _EmptyResult(), _EmptyResult()]
+        )
+
+        await get_global_variables_context(db, owner_id)
+
+        query = db.execute.call_args_list[0][0][0]
+        compiled = query.compile(compile_kwargs={"literal_binds": True})
+        sql = str(compiled).lower()
+
+        # Extract the ORDER BY clause
+        order_pos = sql.rindex("order by")
+        order_clause = sql[order_pos:]
+        self.assertIn("name", order_clause)
+        self.assertIn("created_at", order_clause)
+
+    async def test_direct_share_query_orders_by_name_created_at_id(self) -> None:
+        """Verify direct-share ORDER BY uses name, share created_at, then variable id."""
+        owner_id = uuid.uuid4()
+
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[_EmptyResult(), _EmptyResult(), _EmptyResult()]
+        )
+
+        await get_global_variables_context(db, owner_id)
+
+        query = db.execute.call_args_list[1][0][0]
+        compiled = query.compile(compile_kwargs={"literal_binds": True})
+        sql = str(compiled).lower()
+
+        self.assertIn("order by", sql)
+        self.assertIn("name", sql)
+
+    async def test_owned_query_orders_by_name_only(self) -> None:
+        """Verify owned query only orders by name (unique constraint on owner_id+name)."""
+        owner_id = uuid.uuid4()
+
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[_EmptyResult(), _EmptyResult(), _EmptyResult()]
+        )
+
+        await get_global_variables_context(db, owner_id)
+
+        query = db.execute.call_args_list[2][0][0]
+        compiled = query.compile(compile_kwargs={"literal_binds": True})
+        sql = str(compiled).lower()
+
+        self.assertIn("order by", sql)
+        # Should only have name in the order by
+        order_clause = sql[sql.index("order by"):]
+        self.assertNotIn("created_at", order_clause)
+        self.assertNotIn("global_variable_team_share", order_clause)
+
+    async def test_team_share_last_write_wins_among_same_level_collisions(self) -> None:
+        """With ascending created_at, last-write-wins means the row that appears
+        last in the DB result overwrites earlier ones. The most recently shared
+        variable wins."""
+        owner_id = uuid.uuid4()
+
+        early_share = SimpleNamespace(
+            id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
+            name="dup",
+            value={"v": "shared_early"},
+            owner_id=uuid.uuid4(),
+        )
+        late_share = SimpleNamespace(
+            id=uuid.UUID("00000000-0000-0000-0000-000000000002"),
+            name="dup",
+            value={"v": "shared_late"},
+            owner_id=uuid.uuid4(),
+        )
+
+        # DB returns in ascending (created_at, id) order: early first, late second.
+        # Dict assignment: late overwrites early → "shared_late" wins.
+        db = AsyncMock()
+        db.execute = AsyncMock(
             side_effect=[
-                _AllResult([var_late, var_early]),  # team-shared: same name, two vars
+                _AllResult([early_share, late_share]),
                 _EmptyResult(),
                 _EmptyResult(),
             ]
@@ -219,5 +277,40 @@ class GetGlobalVariablesContextTests(unittest.IsolatedAsyncioTestCase):
 
         result = await get_global_variables_context(db, owner_id)
 
-        # The query orders by (name, id), so the first row wins via dict assignment
-        self.assertEqual(result["dup"], "first")
+        self.assertEqual(result["dup"], "shared_late")
+
+    async def test_team_share_timestamp_overrides_id_order(self) -> None:
+        """When timestamps conflict with ID order, the most recently shared
+        variable wins (not the one with the higher ID)."""
+        owner_id = uuid.uuid4()
+
+        # Lower ID but shared later
+        lower_id_later = SimpleNamespace(
+            id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
+            name="conflict",
+            value={"v": "lower_id_later"},
+            owner_id=uuid.uuid4(),
+        )
+        # Higher ID but shared earlier
+        higher_id_earlier = SimpleNamespace(
+            id=uuid.UUID("00000000-0000-0000-0000-000000000002"),
+            name="conflict",
+            value={"v": "higher_id_earlier"},
+            owner_id=uuid.uuid4(),
+        )
+
+        # DB returns in ascending (created_at, id) order:
+        # earlier share first (higher_id), later share second (lower_id)
+        db = AsyncMock()
+        db.execute = AsyncMock(
+            side_effect=[
+                _AllResult([higher_id_earlier, lower_id_later]),
+                _EmptyResult(),
+                _EmptyResult(),
+            ]
+        )
+
+        result = await get_global_variables_context(db, owner_id)
+
+        # The one shared later wins regardless of ID order
+        self.assertEqual(result["conflict"], "lower_id_later")
