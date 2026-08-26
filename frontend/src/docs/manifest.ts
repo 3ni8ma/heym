@@ -130,6 +130,7 @@ export const DOCS_MANIFEST: Record<string, DocCategory> = {
       { slug: "edit-history", title: "Edit History" },
       { slug: "user-settings", title: "Settings" },
       { slug: "opentelemetry", title: "OpenTelemetry Tracing" },
+      { slug: "audit", title: "Audit Logging" },
       { slug: "download-import", title: "Download & Import" },
       { slug: "portal", title: "Portal" },
       { slug: "file-generation", title: "File Generation" },
