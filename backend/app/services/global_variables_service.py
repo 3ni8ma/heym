@@ -5,7 +5,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import GlobalVariable, GlobalVariableShare
+from app.db.models import GlobalVariable, GlobalVariableShare, GlobalVariableTeamShare, TeamMember
 
 
 def _extract_value(raw: object) -> object:
@@ -17,31 +17,50 @@ def _extract_value(raw: object) -> object:
 async def get_global_variables_context(db: AsyncSession, owner_id: uuid.UUID) -> dict[str, object]:
     """Load all global variables accessible by a user as name->value dict.
 
-    Includes both owned variables and variables shared with this user.
-    When a name collision occurs between an owned and a shared variable,
-    the user's own variable takes precedence.
+    Includes owned variables, user-shared variables, and team-shared variables.
+    Priority order (highest wins): owned > user-shared > team-shared.
     """
-    # Fetch variables shared with this user first (lower priority)
+    out: dict[str, object] = {}
+
+    # Fetch team-shared variables (lowest priority)
+    team_shared_result = await db.execute(
+        select(GlobalVariable)
+        .join(
+            GlobalVariableTeamShare,
+            GlobalVariableTeamShare.global_variable_id == GlobalVariable.id,
+        )
+        .join(TeamMember, TeamMember.team_id == GlobalVariableTeamShare.team_id)
+        .where(TeamMember.user_id == owner_id)
+        .order_by(
+            GlobalVariable.name.asc(),
+            GlobalVariableTeamShare.created_at.asc(),
+            GlobalVariable.id.asc(),
+        )
+    )
+    for v in team_shared_result.scalars().all():
+        out[v.name] = _extract_value(v.value)
+
+    # Fetch user-shared variables (override team-shared)
     shared_result = await db.execute(
         select(GlobalVariable)
         .join(GlobalVariableShare, GlobalVariableShare.global_variable_id == GlobalVariable.id)
         .where(GlobalVariableShare.user_id == owner_id)
-        .order_by(GlobalVariable.name.asc())
+        .order_by(
+            GlobalVariable.name.asc(),
+            GlobalVariableShare.created_at.asc(),
+            GlobalVariable.id.asc(),
+        )
     )
-    shared_variables = shared_result.scalars().all()
-
-    out: dict[str, object] = {}
-    for v in shared_variables:
+    for v in shared_result.scalars().all():
         out[v.name] = _extract_value(v.value)
 
-    # Fetch owned variables and let them override shared ones with the same name
+    # Fetch owned variables (override everything)
     owned_result = await db.execute(
         select(GlobalVariable)
         .where(GlobalVariable.owner_id == owner_id)
         .order_by(GlobalVariable.name.asc())
     )
-    owned_variables = owned_result.scalars().all()
-    for v in owned_variables:
+    for v in owned_result.scalars().all():
         out[v.name] = _extract_value(v.value)
 
     return out
