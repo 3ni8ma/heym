@@ -3,14 +3,20 @@
 import asyncio
 import base64
 import json
+import re
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-import websockets
-
 from app.http_identity import HEYM_USER_AGENT, merge_outbound_headers
+from app.services.ssrf_guard import (
+    open_guarded_websocket,
+    reject_reserved_websocket_headers,
+)
+
+_HTTP_TOKEN_PATTERN = re.compile(r"^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$")
+_FORBIDDEN_HEADER_VALUE_CHARACTERS = ("\r", "\n", "\x00")
 
 
 @dataclass(frozen=True)
@@ -46,7 +52,13 @@ def normalize_websocket_headers(headers_value: Any) -> dict[str, str]:
     for key, value in parsed.items():
         if value is None:
             continue
-        normalized[str(key)] = str(value)
+        name = str(key)
+        normalized_value = str(value)
+        if _HTTP_TOKEN_PATTERN.fullmatch(name) is None:
+            raise ValueError(f"WebSocket header name {name!r} is invalid")
+        if any(character in normalized_value for character in _FORBIDDEN_HEADER_VALUE_CHARACTERS):
+            raise ValueError(f"WebSocket header {name} contains an invalid control character")
+        normalized[name] = normalized_value
     return normalized
 
 
@@ -78,7 +90,20 @@ def normalize_websocket_subprotocols(subprotocols_value: Any) -> list[str]:
         raise ValueError("WebSocket subprotocols must be a CSV string or JSON array")
 
     normalized = [str(item).strip() for item in items if str(item).strip()]
+    for subprotocol in normalized:
+        if _HTTP_TOKEN_PATTERN.fullmatch(subprotocol) is None:
+            raise ValueError(f"WebSocket subprotocol {subprotocol!r} is invalid")
     return normalized
+
+
+def _pop_single_header(headers: dict[str, str], header_name: str) -> str | None:
+    """Remove and return one case-insensitive header, rejecting duplicates."""
+    matches = [name for name in headers if name.strip().lower() == header_name]
+    if len(matches) > 1:
+        raise ValueError(f"WebSocket headers may contain only one {header_name} header")
+    if not matches:
+        return None
+    return headers.pop(matches[0])
 
 
 def build_websocket_connect_kwargs(
@@ -86,8 +111,17 @@ def build_websocket_connect_kwargs(
     subprotocols_value: Any,
 ) -> dict[str, Any]:
     """Convert node config into ``websockets.connect`` keyword arguments."""
-    merged_headers = merge_outbound_headers(normalize_websocket_headers(headers_value))
-    user_agent_header = str(merged_headers.pop("User-Agent", HEYM_USER_AGENT)).strip()
+    normalized_headers = normalize_websocket_headers(headers_value)
+    origin = _pop_single_header(normalized_headers, "origin")
+    configured_user_agent = _pop_single_header(normalized_headers, "user-agent")
+    # Checked before the merge so the rejection names the header the operator
+    # actually configured, not the merged result.
+    reject_reserved_websocket_headers(normalized_headers)
+    merged_headers = merge_outbound_headers(normalized_headers)
+    user_agent_header = str(
+        HEYM_USER_AGENT if configured_user_agent is None else configured_user_agent
+    ).strip()
+    merged_headers.pop("User-Agent", None)
     subprotocols = normalize_websocket_subprotocols(subprotocols_value)
 
     kwargs: dict[str, Any] = {
@@ -98,6 +132,8 @@ def build_websocket_connect_kwargs(
         kwargs["additional_headers"] = merged_headers
     if user_agent_header:
         kwargs["user_agent_header"] = user_agent_header
+    if origin is not None:
+        kwargs["origin"] = origin
     if subprotocols:
         kwargs["subprotocols"] = subprotocols
     return kwargs
@@ -196,7 +232,11 @@ async def send_websocket_message(
 
     connect_kwargs = build_websocket_connect_kwargs(headers, subprotocols)
     payload, metadata = serialize_websocket_message(message)
-    websocket = await websockets.connect(normalized_url, **connect_kwargs)
+    websocket = await open_guarded_websocket(
+        normalized_url,
+        subject="WebSocket Send node URL",
+        **connect_kwargs,
+    )
 
     try:
         await websocket.send(payload)

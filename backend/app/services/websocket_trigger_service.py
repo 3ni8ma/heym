@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-import websockets
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from websockets.exceptions import ConnectionClosed
@@ -22,6 +21,11 @@ from app.db.models import ExecutionHistory, Workflow
 from app.db.session import async_session_maker
 from app.services.distributed_lock import lock_service
 from app.services.global_variables_service import get_global_variables_context
+from app.services.ssrf_guard import (
+    SsrfBlockedError,
+    SsrfResolutionError,
+    open_guarded_websocket,
+)
 from app.services.websocket_utils import (
     build_websocket_connect_kwargs,
     parse_websocket_message,
@@ -254,11 +258,28 @@ class WebSocketTriggerManager:
 
         while self._running:
             try:
-                connect_kwargs = build_websocket_connect_kwargs(
-                    config.headers,
-                    config.subprotocols,
-                )
-                async with websockets.connect(config.url, **connect_kwargs) as websocket:
+                try:
+                    connect_kwargs = build_websocket_connect_kwargs(
+                        config.headers,
+                        config.subprotocols,
+                    )
+                except ValueError as exc:
+                    logger.warning(
+                        "WebSocket trigger configuration is invalid for workflow %s node %s: %s",
+                        config.workflow_id,
+                        config.node_id,
+                        exc,
+                    )
+                    await self._mark_trigger_permanently_stopped(key)
+                    return
+                # Inside the retry loop, not before it: a host that resolved
+                # publicly on the first attempt must not be trusted on the
+                # next one, and the trigger reconnects indefinitely.
+                async with await open_guarded_websocket(
+                    config.url,
+                    subject="WebSocket Trigger URL",
+                    **connect_kwargs,
+                ) as websocket:
                     if "onConnected" in config.event_names:
                         await self._execute_workflow_for_event(
                             config.workflow_id,
@@ -318,6 +339,26 @@ class WebSocketTriggerManager:
                 await asyncio.sleep(config.retry_wait_seconds)
             except asyncio.CancelledError:
                 raise
+            except SsrfResolutionError as exc:
+                logger.warning(
+                    "WebSocket trigger host resolution failed for workflow %s node %s: %s",
+                    config.workflow_id,
+                    config.node_id,
+                    exc,
+                )
+                if not config.retry_enabled:
+                    await self._mark_trigger_permanently_stopped(key)
+                    return
+                await asyncio.sleep(config.retry_wait_seconds)
+            except SsrfBlockedError as exc:
+                logger.warning(
+                    "WebSocket trigger blocked for workflow %s node %s: %s",
+                    config.workflow_id,
+                    config.node_id,
+                    exc,
+                )
+                await self._mark_trigger_permanently_stopped(key)
+                return
             except Exception as exc:
                 logger.exception(
                     "WebSocket trigger connection failed for workflow %s node %s: %s",

@@ -1,24 +1,23 @@
 """SSRF egress guard for outbound fetches the backend performs on a user URL.
 
-Used by the HTTP workflow node (GHSA-8wj7-v2w6-wfcx) and the LLM image-edit
-input loader (GHSA-6rph-qqcv-jqh4). Both send requests to URLs chosen by the
-workflow author, or by the caller when the field is templated from input. On a
-multi-tenant or hosted deployment those authors are not necessarily trusted, so
-without a guard they can be pointed at loopback, private, link-local, or
-cloud-metadata endpoints (SSRF, CWE-918). This mirrors the protection already
-applied to the MCP http(s)/SSE transports.
+Used by the HTTP workflow node (GHSA-8wj7-v2w6-wfcx), the LLM image-edit input
+loader (GHSA-6rph-qqcv-jqh4), and the WebSocket Send and Trigger nodes
+(GHSA-mqw6-g845-w596). They send requests to URLs chosen by the workflow author,
+or by the caller when a field is templated from input. On a multi-tenant or hosted
+deployment those authors are not necessarily trusted, so without a guard they can
+be pointed at loopback, private, link-local, or cloud-metadata endpoints (SSRF,
+CWE-918). This mirrors the protection already applied to the MCP http(s)/SSE
+transports.
 
 Two layers, matching the MCP guard:
 
-* ``guard_http_url`` is a fast pre-connection check: only ``http``/``https`` are
-  allowed, and the host must resolve exclusively to globally routable addresses.
-* ``get_guarded_http_client`` returns a client whose network backend re-checks
-  and pins the resolved IP at dial time, so a DNS-rebinding answer or a redirect
-  to an internal host cannot bounce the real connection onto a private address
-  after the pre-connection check passed. The client is built with
-  ``trust_env=False`` so environment proxies cannot add unpinned proxy
-  transports that would dial the target (and thus an internal redirect hop)
-  outside the pinned backend.
+* ``guard_http_url`` and ``guard_websocket_url`` are fast pre-connection checks:
+  only the matching URL schemes are allowed, and the host must resolve
+  exclusively to globally routable addresses.
+* ``get_guarded_http_client`` and ``open_guarded_websocket`` re-check and pin the
+  resolved IP at dial time, so a DNS-rebinding answer cannot bounce the real
+  connection onto a private address after the pre-connection check passed. The
+  guarded transports connect directly rather than trusting environment proxies.
 
 Self-hosted operators who intentionally call internal hosts can opt out with
 ``HEYM_HTTP_ALLOW_PRIVATE_URLS=true``. The scheme check still applies even then;
@@ -29,6 +28,7 @@ than silently sending unprotected requests.
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import socket
 from threading import Lock
@@ -37,17 +37,22 @@ from urllib.parse import urlparse
 
 import httpcore
 import httpx
+import websockets
+from websockets.asyncio.client import ClientConnection
+from websockets.exceptions import InvalidStatus
 
 from app.config import settings
 from app.http_identity import HEYM_USER_AGENT
 
 _ALLOWED_URL_SCHEMES = ("http", "https")
+_ALLOWED_WEBSOCKET_SCHEMES = ("ws", "wss")
 
 # Prefixes the rejection messages so the operator sees the field they configured.
 # The dial-time pin is shared by every caller of the guarded client, so it cannot
 # attribute a hop to one node and uses the neutral subject instead.
 _DEFAULT_URL_SUBJECT = "HTTP node URL"
 _PINNED_DIAL_SUBJECT = "Guarded request URL"
+_DEFAULT_WEBSOCKET_SUBJECT = "WebSocket node URL"
 
 # IPv6 forms that carry an IPv4 destination but that ``is_global`` still reports
 # as globally routable, so the embedded address has to be checked instead.
@@ -61,6 +66,10 @@ _GUARDED_CLIENT_LOCK = Lock()
 
 class SsrfBlockedError(ValueError):
     """Raised when a target URL is refused by the SSRF egress guard."""
+
+
+class SsrfResolutionError(SsrfBlockedError):
+    """Raised when a guarded target cannot currently be resolved."""
 
 
 def _resolve_host_addresses(
@@ -85,7 +94,7 @@ def _resolve_host_addresses(
     try:
         resolved = socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
     except socket.gaierror as exc:
-        raise SsrfBlockedError(f"{subject} host could not be resolved") from exc
+        raise SsrfResolutionError(f"{subject} host could not be resolved") from exc
 
     addresses: list[ipaddress.IPv4Address | ipaddress.IPv6Address] = []
     seen: set[str] = set()
@@ -100,7 +109,7 @@ def _resolve_host_addresses(
         addresses.append(address)
 
     if not addresses:
-        raise SsrfBlockedError(f"{subject} host could not be resolved")
+        raise SsrfResolutionError(f"{subject} host could not be resolved")
     return addresses
 
 
@@ -183,19 +192,35 @@ def guard_http_url(url: str, subject: str = _DEFAULT_URL_SUBJECT) -> None:
         raise SsrfBlockedError(f"{subject} is not allowed (resolves to a non-public address)")
 
 
-def _resolve_pinned_ip(host: str) -> str:
-    """Resolve ``host`` and return a public IP to connect to, or raise.
+def _resolve_pinned_addresses(host: str) -> list[tuple[socket.AddressFamily, str]]:
+    """Resolve ``host`` and return every public address suitable for dialing.
 
-    Every resolved address must be public; the returned literal is used as the
-    actual TCP target so the connection cannot be rebound to an internal IP after
-    validation (TLS SNI still uses the original hostname, so certs stay valid).
+    Every resolved address must be public. Returning all valid answers preserves
+    normal IPv4/IPv6 fallback while ensuring every attempted TCP target is one of
+    the addresses inspected by the guard.
     """
     addresses = _resolve_host_addresses(host, _PINNED_DIAL_SUBJECT)
     if not all(_is_public_address(address) for address in addresses):
         raise SsrfBlockedError(
             f"{_PINNED_DIAL_SUBJECT} is not allowed (resolves to a non-public address)"
         )
-    return addresses[0].compressed
+    return [
+        (
+            socket.AF_INET6 if isinstance(address, ipaddress.IPv6Address) else socket.AF_INET,
+            address.compressed,
+        )
+        for address in addresses
+    ]
+
+
+def _resolve_pinned_ip(host: str) -> str:
+    """Resolve ``host`` and return its first public address.
+
+    The HTTP network backend accepts one dial target. WebSocket connections use
+    :func:`_resolve_pinned_addresses` directly so they can try every validated
+    address.
+    """
+    return _resolve_pinned_addresses(host)[0][1]
 
 
 class _HttpEgressPinBackend(httpcore.NetworkBackend):
@@ -315,3 +340,176 @@ def close_guarded_http_client() -> None:
         if _GUARDED_CLIENT is not None and not _GUARDED_CLIENT.is_closed:
             _GUARDED_CLIENT.close()
         _GUARDED_CLIENT = None
+
+
+# --- WebSocket egress -----------------------------------------------------
+#
+# ``guard_http_url`` admits http/https only and the pin above lives on an
+# ``httpx.Client``, so neither reaches a ``websockets.connect`` dial. The two
+# helpers below are the ws/wss counterparts, sharing this module's address
+# policy rather than restating it.
+
+# Handshake-steering headers. Unlike ``Authorization`` or ``Origin``, a
+# caller-supplied value here rewrites the request target or the upgrade
+# negotiation itself, so these are refused rather than forwarded. ``Origin`` is
+# passed through the dedicated ``websockets.connect`` parameter by the shared
+# WebSocket helpers.
+_RESERVED_WEBSOCKET_HEADERS = frozenset({"host", "connection", "upgrade"})
+_RESERVED_WEBSOCKET_HEADER_PREFIX = "sec-websocket-"
+
+
+def guard_websocket_url(url: str, subject: str = _DEFAULT_WEBSOCKET_SUBJECT) -> None:
+    """Reject user-supplied WebSocket URLs that could reach internal networks.
+
+    The ``ws``/``wss`` counterpart of :func:`guard_http_url`: same address
+    policy, same ``HEYM_HTTP_ALLOW_PRIVATE_URLS`` opt-out, different scheme
+    set. A WebSocket handshake is an HTTP request carrying attacker-chosen
+    headers, so the egress decision is the same one.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme.lower() not in _ALLOWED_WEBSOCKET_SCHEMES:
+        raise SsrfBlockedError(f"{subject} must use ws or wss")
+
+    if settings.http_allow_private_urls:
+        return
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise SsrfBlockedError(f"{subject} must include a host")
+
+    try:
+        _ = parsed.port
+    except ValueError as exc:
+        raise SsrfBlockedError(f"{subject} includes an invalid port") from exc
+
+    addresses = _resolve_host_addresses(hostname, subject)
+    if not all(_is_public_address(address) for address in addresses):
+        raise SsrfBlockedError(f"{subject} is not allowed (resolves to a non-public address)")
+
+
+def reject_reserved_websocket_headers(
+    headers: dict[str, str] | None,
+    subject: str = _DEFAULT_WEBSOCKET_SUBJECT,
+) -> None:
+    """Refuse caller-supplied headers that steer the handshake itself."""
+    for name in headers or {}:
+        lowered = str(name).strip().lower()
+        if lowered in _RESERVED_WEBSOCKET_HEADERS or lowered.startswith(
+            _RESERVED_WEBSOCKET_HEADER_PREFIX
+        ):
+            raise SsrfBlockedError(f"{subject} may not set the {name} header")
+
+
+async def _open_pinned_websocket_socket(url: str) -> socket.socket:
+    """Connect a socket to the validated public IP behind ``url``.
+
+    Dialing the literal is what closes DNS rebinding: the address checked is
+    the address connected to. TLS is unaffected because ``websockets`` defaults
+    ``server_hostname`` to the URI host, so certificate verification and SNI
+    still use the original name.
+
+    Rejections here carry ``_PINNED_DIAL_SUBJECT`` rather than the caller's
+    subject, for the reason already stated at the top of this module: the pin
+    is shared and cannot attribute a hop to one node.
+    """
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    port = parsed.port or (443 if parsed.scheme.lower() == "wss" else 80)
+    pinned_addresses = await asyncio.to_thread(_resolve_pinned_addresses, host)
+
+    last_error: OSError | None = None
+    for family, pinned in pinned_addresses:
+        sock = socket.socket(family, socket.SOCK_STREAM)
+        sock.setblocking(False)
+        address: tuple[str, int] | tuple[str, int, int, int]
+        address = (pinned, port, 0, 0) if family == socket.AF_INET6 else (pinned, port)
+        try:
+            await asyncio.get_running_loop().sock_connect(sock, address)
+        except OSError as exc:
+            sock.close()
+            last_error = exc
+            continue
+        except BaseException:
+            sock.close()
+            raise
+        return sock
+
+    if last_error is not None:
+        raise last_error
+    raise SsrfResolutionError(f"{_PINNED_DIAL_SUBJECT} host could not be resolved")
+
+
+def _is_redirect_error(exc: BaseException) -> bool:
+    """Return whether ``exc`` represents a WebSocket HTTP redirect response."""
+    candidate: BaseException | None = exc
+    while candidate is not None:
+        if isinstance(candidate, InvalidStatus):
+            return candidate.response.status_code in {300, 301, 302, 303, 307, 308}
+        candidate = candidate.__cause__
+    return False
+
+
+async def open_guarded_websocket(
+    url: str,
+    subject: str = _DEFAULT_WEBSOCKET_SUBJECT,
+    **connect_kwargs: Any,
+) -> ClientConnection:
+    """Open an outbound WebSocket connection through the SSRF egress guard.
+
+    Two layers, matching the HTTP side: ``guard_websocket_url`` is the
+    pre-connection check, and the dial is pinned to the validated address so a
+    rebinding answer cannot bounce the real connection onto a private host.
+
+    ``proxy=None`` is passed while the guard is enabled for the same reason the
+    guarded HTTP client is built ``trust_env=False``: ``websockets`` otherwise
+    consults environment proxy variables, and a proxy would route around the
+    pin. The private-URL opt-out preserves the library's normal proxy behavior.
+
+    ``open_timeout`` covers the complete opening operation, including both DNS
+    checks, TCP connect, TLS, and the WebSocket handshake. Redirects are refused
+    while the guard is enabled because a caller-provided socket cannot be safely
+    reused for a different target.
+
+    The socket is owned here until the handshake succeeds. ``websockets``
+    closes a caller-supplied socket on cancellation but *not* when the
+    handshake fails or times out, which on the Trigger's reconnect loop would
+    leak one descriptor per retry against a host that accepts TCP without
+    speaking WebSocket. ``socket.close()`` is idempotent, so closing on every
+    failure path is safe even where the library already did.
+    """
+    open_timeout_value = connect_kwargs.pop("open_timeout", 10)
+    open_timeout = None if open_timeout_value is None else float(open_timeout_value)
+    try:
+        async with asyncio.timeout(open_timeout):
+            await asyncio.to_thread(guard_websocket_url, url, subject)
+
+            if settings.http_allow_private_urls:
+                return await websockets.connect(url, open_timeout=None, **connect_kwargs)
+
+            connect_kwargs.pop("proxy", None)
+            sock = await _open_pinned_websocket_socket(url)
+            handed_off = False
+            try:
+                try:
+                    connection = await websockets.connect(
+                        url,
+                        sock=sock,
+                        proxy=None,
+                        open_timeout=None,
+                        **connect_kwargs,
+                    )
+                except BaseException as exc:
+                    if _is_redirect_error(exc):
+                        raise SsrfBlockedError(
+                            f"{subject} redirects are not allowed while the SSRF guard is enabled"
+                        ) from exc
+                    raise
+                handed_off = True
+                return connection
+            finally:
+                if not handed_off:
+                    sock.close()
+    except TimeoutError as exc:
+        raise TimeoutError(
+            f"{subject} timed out while resolving and opening the connection"
+        ) from exc

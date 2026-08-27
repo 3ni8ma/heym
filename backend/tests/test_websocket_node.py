@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import websockets
 
+from app.services import ssrf_guard
 from app.services.websocket_utils import send_websocket_message
 
 
@@ -165,6 +166,12 @@ class TestWebSocketSendIntegration(unittest.IsolatedAsyncioTestCase):
         server = await websockets.serve(handler, "127.0.0.1", 0)
         port = server.sockets[0].getsockname()[1]
 
+        # This asserts payload delivery, not egress policy: the send path now
+        # runs through the SSRF guard, which refuses loopback. Use the operator
+        # opt-out the guard already documents rather than bypassing it, so the
+        # test still exercises the real dial.
+        self.enterContext(patch.object(ssrf_guard.settings, "http_allow_private_urls", True))
+
         try:
             result = await send_websocket_message(
                 url=f"ws://127.0.0.1:{port}",
@@ -181,6 +188,55 @@ class TestWebSocketSendIntegration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["status"], "sent")
         self.assertEqual(result["message_type"], "json")
         self.assertEqual(received_messages, ['{"kind": "ping"}'])
+
+    async def test_guarded_send_uses_pinned_socket_and_origin_argument(self) -> None:
+        received_messages: list[str] = []
+
+        async def handler(websocket: websockets.ServerConnection) -> None:
+            received_messages.append(await asyncio.wait_for(websocket.recv(), timeout=2))
+
+        server = await websockets.serve(
+            handler,
+            "127.0.0.1",
+            0,
+            origins=["https://client.example"],
+        )
+        port = server.sockets[0].getsockname()[1]
+
+        try:
+            with (
+                patch.object(ssrf_guard.settings, "http_allow_private_urls", False),
+                patch.object(
+                    ssrf_guard.socket,
+                    "getaddrinfo",
+                    return_value=[
+                        (
+                            ssrf_guard.socket.AF_INET,
+                            ssrf_guard.socket.SOCK_STREAM,
+                            0,
+                            "",
+                            ("93.184.216.34", 0),
+                        )
+                    ],
+                ),
+                patch.object(
+                    ssrf_guard,
+                    "_resolve_pinned_addresses",
+                    return_value=[(ssrf_guard.socket.AF_INET, "127.0.0.1")],
+                ),
+            ):
+                result = await send_websocket_message(
+                    url=f"ws://public.example:{port}",
+                    headers={"Origin": "https://client.example"},
+                    subprotocols=[],
+                    message="guarded payload",
+                )
+        finally:
+            server.close()
+            await server.wait_closed()
+
+        self.assertEqual(result["status"], "sent")
+        self.assertEqual(received_messages, ["guarded payload"])
 
 
 if __name__ == "__main__":

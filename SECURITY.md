@@ -88,6 +88,9 @@ vulnerabilities in Heym:
   Playwright node's custom `playwrightCode` field (GHSA-mp23-7m6r-jfw4).
 - [@0neOfU4](https://github.com/0neOfU4) for SSRF in the HTTP workflow node,
   which was guarded on the MCP transports but not there (GHSA-8wj7-v2w6-wfcx).
+- [@euriconicacio](https://github.com/euriconicacio) for SSRF in the WebSocket
+  Send and WebSocket Trigger egress paths (GHSA-mqw6-g845-w596), and for
+  contributing the remediation.
 - [@SashaMIT](https://github.com/SashaMIT) for three reports: an
   expression-engine sandbox escape via DotList item expressions and the
   simpleeval fallback (GHSA-87x2-9jwx-7gh4), SSRF in the LLM image-edit input

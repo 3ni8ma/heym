@@ -49,6 +49,12 @@ The **HTTP** node makes HTTP requests using cURL syntax. It can be a workflow st
 
 Use cURL syntax with `-H` for headers, `-d` for POST body, etc. Expressions can be used in the curl string for dynamic URLs.
 
+## Egress Safety
+
+- By default, the URL must use `http://` or `https://` and resolve only to public addresses. Loopback, private, link-local, multicast, and cloud-metadata destinations are blocked.
+- Heym validates the resolved addresses and pins the connection target to prevent DNS rebinding. Environment proxies are disabled while the guard is active. Redirects are not followed by default; add cURL's `-L` option to follow them. When enabled, every redirect hop is checked against the same public-address policy and pinned before connecting.
+- Trusted self-hosted deployments that intentionally connect to internal services can set `HEYM_HTTP_ALLOW_PRIVATE_URLS=true`. Keep the default on hosted or multi-tenant deployments.
+
 ## Related
 
 - [Node Types](../reference/node-types.md) – Overview of all node types

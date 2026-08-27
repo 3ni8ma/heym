@@ -1,5 +1,6 @@
 """Unit tests for WebSocket trigger manager behavior."""
 
+import asyncio
 import unittest
 import uuid
 from types import SimpleNamespace
@@ -9,7 +10,9 @@ from websockets.exceptions import ConnectionClosed
 from websockets.frames import Close
 
 from app.db.models import ExecutionHistory
+from app.services.ssrf_guard import SsrfBlockedError, SsrfResolutionError
 from app.services.websocket_trigger_service import (
+    WebSocketTriggerConfig,
     WebSocketTriggerManager,
     _infer_close_initiator,
 )
@@ -54,6 +57,170 @@ class WebSocketTriggerManagerConfigTests(unittest.TestCase):
         self.assertFalse(manager._wake_event.is_set())
         manager.request_sync()
         self.assertTrue(manager._wake_event.is_set())
+
+
+class WebSocketTriggerRetryTests(unittest.IsolatedAsyncioTestCase):
+    def _config(
+        self,
+        *,
+        retry_enabled: bool = True,
+        headers: str = "",
+        subprotocols: str = "",
+    ) -> WebSocketTriggerConfig:
+        return WebSocketTriggerConfig(
+            workflow_id=uuid.uuid4(),
+            node_id="socket-node",
+            url="wss://socket.example.com/feed",
+            headers=headers,
+            subprotocols=subprotocols,
+            retry_enabled=retry_enabled,
+            retry_wait_seconds=1,
+            event_names=("onMessage",),
+        )
+
+    async def test_policy_block_stops_without_retrying(self) -> None:
+        manager = WebSocketTriggerManager()
+        manager._running = True
+        mark_stopped = AsyncMock()
+
+        with (
+            patch(
+                "app.services.websocket_trigger_service.open_guarded_websocket",
+                new=AsyncMock(side_effect=SsrfBlockedError("private address")),
+            ) as open_socket,
+            patch.object(manager, "_mark_trigger_permanently_stopped", mark_stopped),
+            patch("app.services.websocket_trigger_service.asyncio.sleep", new=AsyncMock()) as sleep,
+            patch("app.services.websocket_trigger_service.logger.exception") as log_exception,
+        ):
+            await asyncio.wait_for(
+                manager._run_trigger_loop("trigger-key", self._config()),
+                timeout=0.5,
+            )
+
+        open_socket.assert_awaited_once()
+        mark_stopped.assert_awaited_once_with("trigger-key")
+        sleep.assert_not_awaited()
+        log_exception.assert_not_called()
+
+    async def test_invalid_header_configuration_stops_without_retrying(self) -> None:
+        invalid_headers = (
+            "{not-json",
+            '{"Origin": "https://one.example", "origin": "https://two.example"}',
+            '{"Authorization": "Bearer t\\r\\nHost: internal-admin"}',
+        )
+
+        for headers in invalid_headers:
+            with self.subTest(headers=headers):
+                manager = WebSocketTriggerManager()
+                manager._running = True
+                mark_stopped = AsyncMock()
+
+                with (
+                    patch(
+                        "app.services.websocket_trigger_service.open_guarded_websocket",
+                        new=AsyncMock(),
+                    ) as open_socket,
+                    patch.object(manager, "_mark_trigger_permanently_stopped", mark_stopped),
+                    patch(
+                        "app.services.websocket_trigger_service.asyncio.sleep",
+                        new=AsyncMock(),
+                    ) as sleep,
+                    patch(
+                        "app.services.websocket_trigger_service.logger.exception"
+                    ) as log_exception,
+                ):
+                    await asyncio.wait_for(
+                        manager._run_trigger_loop(
+                            "trigger-key",
+                            self._config(headers=headers),
+                        ),
+                        timeout=0.5,
+                    )
+
+                open_socket.assert_not_awaited()
+                mark_stopped.assert_awaited_once_with("trigger-key")
+                sleep.assert_not_awaited()
+                log_exception.assert_not_called()
+
+    async def test_invalid_subprotocol_configuration_stops_without_retrying(self) -> None:
+        manager = WebSocketTriggerManager()
+        manager._running = True
+        mark_stopped = AsyncMock()
+
+        with (
+            patch(
+                "app.services.websocket_trigger_service.open_guarded_websocket",
+                new=AsyncMock(),
+            ) as open_socket,
+            patch.object(manager, "_mark_trigger_permanently_stopped", mark_stopped),
+            patch(
+                "app.services.websocket_trigger_service.asyncio.sleep",
+                new=AsyncMock(),
+            ) as sleep,
+            patch("app.services.websocket_trigger_service.logger.exception") as log_exception,
+        ):
+            await asyncio.wait_for(
+                manager._run_trigger_loop(
+                    "trigger-key",
+                    self._config(subprotocols="chat proto"),
+                ),
+                timeout=0.5,
+            )
+
+        open_socket.assert_not_awaited()
+        mark_stopped.assert_awaited_once_with("trigger-key")
+        sleep.assert_not_awaited()
+        log_exception.assert_not_called()
+
+    async def test_resolution_failure_retries_without_traceback(self) -> None:
+        manager = WebSocketTriggerManager()
+        manager._running = True
+        mark_stopped = AsyncMock()
+
+        with (
+            patch(
+                "app.services.websocket_trigger_service.open_guarded_websocket",
+                new=AsyncMock(
+                    side_effect=[
+                        SsrfResolutionError("temporary DNS failure"),
+                        SsrfBlockedError("private address"),
+                    ]
+                ),
+            ) as open_socket,
+            patch.object(manager, "_mark_trigger_permanently_stopped", mark_stopped),
+            patch("app.services.websocket_trigger_service.asyncio.sleep", new=AsyncMock()) as sleep,
+            patch("app.services.websocket_trigger_service.logger.warning") as log_warning,
+            patch("app.services.websocket_trigger_service.logger.exception") as log_exception,
+        ):
+            await manager._run_trigger_loop("trigger-key", self._config())
+
+        self.assertEqual(open_socket.await_count, 2)
+        sleep.assert_awaited_once_with(1)
+        mark_stopped.assert_awaited_once_with("trigger-key")
+        self.assertEqual(log_warning.call_count, 2)
+        log_exception.assert_not_called()
+
+    async def test_resolution_failure_stops_when_retry_is_disabled(self) -> None:
+        manager = WebSocketTriggerManager()
+        manager._running = True
+        mark_stopped = AsyncMock()
+
+        with (
+            patch(
+                "app.services.websocket_trigger_service.open_guarded_websocket",
+                new=AsyncMock(side_effect=SsrfResolutionError("temporary DNS failure")),
+            ) as open_socket,
+            patch.object(manager, "_mark_trigger_permanently_stopped", mark_stopped),
+            patch("app.services.websocket_trigger_service.asyncio.sleep", new=AsyncMock()) as sleep,
+        ):
+            await manager._run_trigger_loop(
+                "trigger-key",
+                self._config(retry_enabled=False),
+            )
+
+        open_socket.assert_awaited_once()
+        mark_stopped.assert_awaited_once_with("trigger-key")
+        sleep.assert_not_awaited()
 
 
 class WebSocketTriggerExecutionHistoryTests(unittest.IsolatedAsyncioTestCase):

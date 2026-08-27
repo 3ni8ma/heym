@@ -70,6 +70,13 @@ input → set → websocketSend → output
 - If the remote server expects auth or tenant headers, pass them via `websocketHeaders`.
 - Use [HTTP](./http-node.md) when the remote system is request/response based instead of socket based.
 
+## Egress Safety
+
+- By default, the URL must use `ws://` or `wss://` and resolve only to public addresses. Loopback, private, link-local, multicast, and cloud-metadata destinations are blocked.
+- Heym validates every resolved address and connects directly to one of those addresses. Environment proxies and WebSocket redirects are disabled while the guard is active.
+- `Authorization`, `Origin`, `User-Agent`, and custom data headers are supported. `Origin` is sent through the WebSocket client's dedicated option. `Host`, `Connection`, `Upgrade`, and `Sec-WebSocket-*` headers cannot be overridden.
+- Trusted self-hosted deployments that intentionally connect to internal services can set `HEYM_HTTP_ALLOW_PRIVATE_URLS=true`. Keep the default on hosted or multi-tenant deployments.
+
 ## Related
 
 - [WebSocket Trigger](./websocket-trigger-node.md) – Listen to an external socket and trigger workflows on events

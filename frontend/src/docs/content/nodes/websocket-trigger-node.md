@@ -1,6 +1,6 @@
 # WebSocket Trigger
 
-The **WebSocket Trigger** node opens an outbound client connection to an external WebSocket server and starts the workflow when selected socket events happen. Use it for event streams such as market feeds, telemetry, chat backplanes, or internal realtime systems.
+The **WebSocket Trigger** node opens an outbound client connection to an external WebSocket server and starts the workflow when selected socket events happen. Use it for event streams such as market feeds, telemetry, or chat backplanes. Connecting to internal realtime systems requires the private-URL opt-out described below.
 
 ## Overview
 
@@ -75,6 +75,14 @@ Useful fields:
 - The connection runs only on the leader worker, similar to [IMAP Trigger](./imap-trigger-node.md) and [RabbitMQ](./rabbitmq-node.md) receive mode.
 - If reconnect is enabled, Heym waits `retryWaitSeconds` and opens the socket again after a drop.
 - Each emitted event creates a separate workflow run with `trigger_source = "websocket"`.
+
+## Egress Safety
+
+- By default, the URL must use `ws://` or `wss://` and resolve only to public addresses. Loopback, private, link-local, multicast, and cloud-metadata destinations are blocked.
+- Heym revalidates DNS on every reconnect, validates every resolved address, and connects directly to one of those addresses. Environment proxies and WebSocket redirects are disabled while the guard is active.
+- Permanent policy violations stop the trigger instead of retrying indefinitely. Temporary DNS or network failures still follow the node's retry settings.
+- `Authorization`, `Origin`, `User-Agent`, and custom data headers are supported. `Origin` is sent through the WebSocket client's dedicated option. `Host`, `Connection`, `Upgrade`, and `Sec-WebSocket-*` headers cannot be overridden.
+- Trusted self-hosted deployments that intentionally connect to internal services can set `HEYM_HTTP_ALLOW_PRIVATE_URLS=true`. Keep the default on hosted or multi-tenant deployments.
 
 ## Example Workflow
 
