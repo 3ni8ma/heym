@@ -15,6 +15,7 @@ import {
   getTimelineRowKey,
   summarizeTimelineModel,
 } from "@/components/Panels/executionTimeline";
+import ExecutionSpanDetails from "@/components/Panels/ExecutionSpanDetails.vue";
 
 interface Props {
   nodeResults: TimelineEntry[];
@@ -29,13 +30,32 @@ const emit = defineEmits<{
   selectNode: [payload: TimelineSelectPayload];
 }>();
 
+const selectedSpan = ref<SpanItem | null>(null);
+const detailsOpen = ref(false);
+
 function emitSelectNode(payload: TimelineSelectPayload, event: MouseEvent): void {
   event.stopPropagation();
   emit("selectNode", payload);
 }
 
 function onSpanClick(span: SpanItem, event: MouseEvent): void {
+  // Clicking swaps the rows out for the details panel, so the span unmounts and
+  // mouseleave never fires — clear the hover state or the tooltip stays stuck.
+  hoveredSpan.value = null;
+  selectedSpan.value = span;
+  detailsOpen.value = true;
   emitSelectNode({ nodeId: span.nodeId, resultListIndex: span.resultListIndex }, event);
+}
+
+function onSpanKeydown(span: SpanItem, event: KeyboardEvent): void {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  onSpanClick(span, event as unknown as MouseEvent);
+}
+
+function closeDetails(): void {
+  detailsOpen.value = false;
+  selectedSpan.value = null;
 }
 
 function isTraceableSpan(span: SpanItem): boolean {
@@ -153,6 +173,25 @@ watch(
   { flush: "sync" },
 );
 
+// selectedSpan is a snapshot of a span from the previous rows computation. When
+// rows recomputes (new results arrive, rows hidden/shown), the old object is stale,
+// so re-resolve it by key against the fresh rows — or close if it no longer exists.
+watch(
+  rows,
+  (nextRows) => {
+    if (!selectedSpan.value) return;
+    const replacement = nextRows
+      .flatMap((row) => row.spans)
+      .find((span) => span.key === selectedSpan.value?.key);
+    if (replacement) {
+      selectedSpan.value = replacement;
+    } else {
+      closeDetails();
+    }
+  },
+  { flush: "sync" },
+);
+
 const timeMarkers = computed(() => {
   const totalMs = timelineModel.value.timeWindow.totalMs;
   if (totalMs <= 0) return [];
@@ -222,8 +261,11 @@ function showAllRows(): void {
 </script>
 
 <template>
-  <div class="border-t bg-muted/5 select-none overflow-hidden">
-    <div class="flex items-center gap-3 px-2 py-1.5 border-b border-border/20 bg-background/40 text-[10px] text-muted-foreground">
+  <div class="flex flex-col border-t bg-muted/5 select-none overflow-hidden">
+    <div
+      v-show="!detailsOpen"
+      class="flex items-center gap-3 px-2 py-1.5 border-b border-border/20 bg-background/40 text-[10px] text-muted-foreground"
+    >
       <span class="font-medium text-foreground/80">Execution summary</span>
       <span>{{ formatTimelineMs(timelineSummary.totalDurationMs) }}</span>
       <span>{{ timelineSummary.spanCount }} spans</span>
@@ -246,7 +288,10 @@ function showAllRows(): void {
         Healthy
       </span>
     </div>
-    <div class="flex h-5 border-b border-border/30 overflow-hidden">
+    <div
+      v-show="!detailsOpen"
+      class="flex h-5 border-b border-border/30 overflow-hidden"
+    >
       <div class="w-[176px] shrink-0 border-r border-border/20" />
       <div class="flex-1 relative overflow-hidden">
         <template
@@ -274,6 +319,7 @@ function showAllRows(): void {
 
     <div
       v-if="hiddenRows.length > 0"
+      v-show="!detailsOpen"
       class="flex items-center gap-2 px-2 py-1.5 border-b border-border/20 bg-muted/10 overflow-x-auto"
     >
       <span class="text-[10px] uppercase tracking-wide text-muted-foreground shrink-0">
@@ -299,9 +345,17 @@ function showAllRows(): void {
       </button>
     </div>
 
+    <template v-if="detailsOpen && selectedSpan">
+      <ExecutionSpanDetails
+        class="flex-1 min-h-0 overflow-y-auto"
+        :span="selectedSpan"
+        @close="closeDetails"
+        @open-trace="openTraceInNewTab(selectedSpan, $event)"
+      />
+    </template>
     <div
-      class="overflow-y-auto"
-      style="max-height: 220px;"
+      v-else
+      class="flex-1 min-h-0 overflow-y-auto"
     >
       <div
         v-for="row in visibleRows"
@@ -348,7 +402,15 @@ function showAllRows(): void {
           >
             <div
               class="trace-span absolute rounded-sm border cursor-pointer transition-opacity overflow-hidden"
+              :data-testid="`execution-timeline-span-${span.nodeId}-${span.resultListIndex}`"
+              role="button"
+              tabindex="0"
+              :aria-label="`Open details for ${span.nodeLabel}`"
+              :aria-pressed="selectedSpan?.key === span.key"
               :class="[
+                selectedSpan?.key === span.key
+                  ? 'ring-2 ring-primary ring-offset-1 ring-offset-background'
+                  : '',
                 span.isHitlWait
                   ? 'opacity-80 group-hover:opacity-95 hitl-wait-span'
                   : span.status === 'error'
@@ -370,6 +432,7 @@ function showAllRows(): void {
                 transform: 'translateY(-50%)',
               }"
               @click="onSpanClick(span, $event)"
+              @keydown="onSpanKeydown(span, $event)"
               @mouseenter="onBarEnter(span, $event)"
               @mousemove="onBarMove"
               @mouseleave="onBarLeave"

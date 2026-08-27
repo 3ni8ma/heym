@@ -7,6 +7,7 @@ import HtmlOutputMapperTourVisual from "@/features/release-tour/components/visua
 import PlaywrightAiStepsTourVisual from "@/features/release-tour/components/visuals/PlaywrightAiStepsTourVisual.vue";
 import SsoLoginTourVisual from "@/features/release-tour/components/visuals/SsoLoginTourVisual.vue";
 import WorkflowListingTourVisual from "@/features/release-tour/components/visuals/WorkflowListingTourVisual.vue";
+import SpanDetailsInspectorTourVisual from "@/features/release-tour/components/visuals/SpanDetailsInspectorTourVisual.vue";
 
 /** Maps a section's `tourVisual` key to the mock UI that demonstrates it. */
 export const TOUR_VISUALS: Record<string, Component> = {
@@ -16,6 +17,7 @@ export const TOUR_VISUALS: Record<string, Component> = {
   "playwright-ai-steps": PlaywrightAiStepsTourVisual,
   "sso-login": SsoLoginTourVisual,
   "workflow-listing": WorkflowListingTourVisual,
+  "span-details-inspector": SpanDetailsInspectorTourVisual,
 };
 
 export function resolveTourVisual(key: string): Component {
