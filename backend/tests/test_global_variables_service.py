@@ -17,6 +17,11 @@ def _make_variable(name: str, value: object, owner_id: uuid.UUID | None = None) 
     )
 
 
+def _normalize_sql(compiled: object) -> str:
+    """Normalize compiled SQL: lowercase and collapse whitespace."""
+    return " ".join(str(compiled).lower().split())
+
+
 class _AllResult:
     """Mock for Result.scalars().all() returning a preset list."""
 
@@ -161,89 +166,90 @@ class GetGlobalVariablesContextTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(result["config"], {"key": "value"})
 
-    async def test_team_share_query_uses_correct_joins_and_filter(self) -> None:
-        """Assert exact join conditions and WHERE clause for team-share query."""
+    async def test_team_share_query_structure(self) -> None:
+        """Assert exact join conditions, WHERE clause, and ORDER BY for team-share query."""
         owner_id = uuid.uuid4()
 
         db = AsyncMock()
-        db.execute = AsyncMock(
-            side_effect=[_EmptyResult(), _EmptyResult(), _EmptyResult()]
-        )
+        db.execute = AsyncMock(side_effect=[_EmptyResult(), _EmptyResult(), _EmptyResult()])
 
         await get_global_variables_context(db, owner_id)
 
         query = db.execute.call_args_list[0][0][0]
-        compiled = query.compile(compile_kwargs={"literal_binds": True})
-        sql = str(compiled).lower()
+        sql = _normalize_sql(query.compile(compile_kwargs={"literal_binds": True}))
 
-        # Verify join: global_variable_team_shares
-        self.assertIn("global_variable_team_shares", sql)
-        # Verify join: team_members
-        self.assertIn("team_members", sql)
-        # Verify filter column: user_id
-        self.assertIn("team_members.user_id =", sql)
-        # UUID bind params strip hyphens in compiled SQL
-        self.assertIn(str(owner_id).replace("-", ""), sql)
+        self.assertIn(
+            "join global_variable_team_shares on "
+            "global_variable_team_shares.global_variable_id = global_variables.id",
+            sql,
+        )
+        self.assertIn(
+            "join team_members on team_members.team_id = global_variable_team_shares.team_id",
+            sql,
+        )
+        self.assertIn(
+            f"where team_members.user_id = '{str(owner_id).replace('-', '')}'",
+            sql,
+        )
 
-    async def test_team_share_query_orders_by_name_created_at_id(self) -> None:
-        """Verify ORDER BY uses name, team share created_at, then variable id."""
+        order_clause = sql.partition(" order by ")[2]
+        self.assertEqual(
+            order_clause,
+            "global_variables.name asc, "
+            "global_variable_team_shares.created_at asc, "
+            "global_variables.id asc",
+        )
+
+    async def test_direct_share_query_structure(self) -> None:
+        """Assert exact join, WHERE, and ORDER BY for direct-share query."""
         owner_id = uuid.uuid4()
 
         db = AsyncMock()
-        db.execute = AsyncMock(
-            side_effect=[_EmptyResult(), _EmptyResult(), _EmptyResult()]
-        )
-
-        await get_global_variables_context(db, owner_id)
-
-        query = db.execute.call_args_list[0][0][0]
-        compiled = query.compile(compile_kwargs={"literal_binds": True})
-        sql = str(compiled).lower()
-
-        # Extract the ORDER BY clause
-        order_pos = sql.rindex("order by")
-        order_clause = sql[order_pos:]
-        self.assertIn("name", order_clause)
-        self.assertIn("created_at", order_clause)
-
-    async def test_direct_share_query_orders_by_name_created_at_id(self) -> None:
-        """Verify direct-share ORDER BY uses name, share created_at, then variable id."""
-        owner_id = uuid.uuid4()
-
-        db = AsyncMock()
-        db.execute = AsyncMock(
-            side_effect=[_EmptyResult(), _EmptyResult(), _EmptyResult()]
-        )
+        db.execute = AsyncMock(side_effect=[_EmptyResult(), _EmptyResult(), _EmptyResult()])
 
         await get_global_variables_context(db, owner_id)
 
         query = db.execute.call_args_list[1][0][0]
-        compiled = query.compile(compile_kwargs={"literal_binds": True})
-        sql = str(compiled).lower()
+        sql = _normalize_sql(query.compile(compile_kwargs={"literal_binds": True}))
 
-        self.assertIn("order by", sql)
-        self.assertIn("name", sql)
+        self.assertIn(
+            "join global_variable_shares on "
+            "global_variable_shares.global_variable_id = global_variables.id",
+            sql,
+        )
+        self.assertIn(
+            f"where global_variable_shares.user_id = '{str(owner_id).replace('-', '')}'",
+            sql,
+        )
 
-    async def test_owned_query_orders_by_name_only(self) -> None:
-        """Verify owned query only orders by name (unique constraint on owner_id+name)."""
+        order_clause = sql.partition(" order by ")[2]
+        self.assertEqual(
+            order_clause,
+            "global_variables.name asc, "
+            "global_variable_shares.created_at asc, "
+            "global_variables.id asc",
+        )
+
+    async def test_owned_query_structure(self) -> None:
+        """Assert exact WHERE and ORDER BY for owned query (no joins, name-only ordering)."""
         owner_id = uuid.uuid4()
 
         db = AsyncMock()
-        db.execute = AsyncMock(
-            side_effect=[_EmptyResult(), _EmptyResult(), _EmptyResult()]
-        )
+        db.execute = AsyncMock(side_effect=[_EmptyResult(), _EmptyResult(), _EmptyResult()])
 
         await get_global_variables_context(db, owner_id)
 
         query = db.execute.call_args_list[2][0][0]
-        compiled = query.compile(compile_kwargs={"literal_binds": True})
-        sql = str(compiled).lower()
+        sql = _normalize_sql(query.compile(compile_kwargs={"literal_binds": True}))
 
-        self.assertIn("order by", sql)
-        # Should only have name in the order by
-        order_clause = sql[sql.index("order by"):]
-        self.assertNotIn("created_at", order_clause)
-        self.assertNotIn("global_variable_team_share", order_clause)
+        self.assertNotIn("join", sql)
+        self.assertIn(
+            f"where global_variables.owner_id = '{str(owner_id).replace('-', '')}'",
+            sql,
+        )
+
+        order_clause = sql.partition(" order by ")[2]
+        self.assertEqual(order_clause, "global_variables.name asc")
 
     async def test_team_share_last_write_wins_among_same_level_collisions(self) -> None:
         """With ascending created_at, last-write-wins means the row that appears
