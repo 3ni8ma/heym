@@ -2815,7 +2815,7 @@ function renderContent(content: string): string {
           <Download class="w-3.5 h-3.5" />
         </Button>
         <Button
-          v-if="(executionResult || nodeResults.length > 0) && !isExecuting"
+          v-if="executionResult || nodeResults.length > 0"
           :variant="showTimeline ? 'secondary' : 'ghost'"
           size="icon"
           class="h-11 w-11 min-h-[44px] min-w-[44px] md:h-7 md:w-7"

@@ -1,8 +1,64 @@
 from __future__ import annotations
 
+import json
 from importlib import import_module
+from typing import Any
 
 from app.services.node_execution.base import NodeExecutionContext
+
+
+def _is_json_content_type(headers: dict[str, str]) -> bool:
+    """Return whether headers declare a JSON request body."""
+    for key, value in headers.items():
+        if key.lower() == "content-type":
+            return value.split(";", 1)[0].strip().lower() == "application/json"
+    return False
+
+
+def _is_inside_json_string(text: str, position: int) -> bool:
+    """Return whether a position is inside a double-quoted JSON string."""
+    in_string = False
+    escaped = False
+    for char in text[:position]:
+        if escaped:
+            escaped = False
+        elif in_string and char == "\\":
+            escaped = True
+        elif char == '"':
+            in_string = not in_string
+    return in_string
+
+
+def _json_literal(value: object) -> str:
+    """Encode a resolved expression as a JSON value."""
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return json.dumps(str(value), ensure_ascii=False)
+
+
+def _render_json_body_template(
+    executor: Any,
+    body: str,
+    inputs: dict,
+    node_id: str,
+) -> str:
+    """Resolve JSON-body expressions with JSON-safe serialization."""
+    rendered: list[str] = []
+    last_end = 0
+    for start, end, expression in executor._find_expressions(body):
+        rendered.append(body[last_end:start])
+        value = executor.resolve_expression(expression, inputs, node_id, preserve_type=True)
+        if _is_inside_json_string(body, start):
+            replacement = _json_literal(str(value))[1:-1]
+        elif expression.endswith(".escape()") and isinstance(value, str):
+            replacement = value
+        else:
+            replacement = _json_literal(value)
+        rendered.append(replacement)
+        last_end = end
+    rendered.append(body[last_end:])
+    return "".join(rendered)
 
 
 def execute(ctx: NodeExecutionContext) -> object:
@@ -13,17 +69,26 @@ def execute(ctx: NodeExecutionContext) -> object:
     inputs = ctx.inputs
     node_data = ctx.node_data
 
-    curl_command = node_data.get("curl", "")
-    curl_command = self.evaluate_message_template(curl_command, inputs, node_id)
-    method, url, headers, body, follow_redirects = self.parse_curl(curl_command)
+    curl_template = node_data.get("curl", "")
+    method, url, headers, body, follow_redirects = self.parse_curl(curl_template)
     if not url:
         raise ValueError("HTTP node requires a URL")
+    url = self.evaluate_message_template(url, inputs, node_id)
+    headers = {
+        self.evaluate_message_template(key, inputs, node_id): self.evaluate_message_template(
+            value, inputs, node_id
+        )
+        for key, value in headers.items()
+    }
     # Refuse targets that resolve to internal/metadata addresses before dialing
     # (SSRF, GHSA-8wj7-v2w6-wfcx). The guarded client additionally pins the
     # resolved IP so redirects and DNS rebinding cannot reach internal hosts.
     ssrf_guard.guard_http_url(url)
     if body:
-        body = self.evaluate_message_template(body, inputs, node_id)
+        if _is_json_content_type(headers):
+            body = _render_json_body_template(self, body, inputs, node_id)
+        else:
+            body = self.evaluate_message_template(body, inputs, node_id)
     http_client = ssrf_guard.get_guarded_http_client()
     response = http_client.request(
         method,

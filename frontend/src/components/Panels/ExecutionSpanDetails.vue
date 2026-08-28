@@ -97,24 +97,29 @@ onBeforeUnmount(() => {
     <div class="flex-1 min-h-0 overflow-auto border-t border-border/20 px-2 py-2">
       <div class="mb-1 text-[10px] font-medium text-muted-foreground">
         Output
-      </div><div
-        v-if="span.isHitlWait"
-        class="text-[10px] text-muted-foreground"
-      >
-        Output is available after this wait completes.
-      </div><div
-        v-else-if="span.output !== null && typeof span.output === 'object'"
-        class="text-[10px] font-mono"
-      >
-        <JsonTree
-          :data="span.output"
-          :root-expanded="true"
-          :auto-expand-depth="1"
-        />
-      </div><pre
-        v-else
-        class="whitespace-pre-wrap break-words text-[10px] font-mono"
-      >{{ outputText }}</pre>
+      </div>
+      <div class="select-text">
+        <div
+          v-if="span.isHitlWait"
+          class="text-[10px] text-muted-foreground"
+        >
+          Output is available after this wait completes.
+        </div>
+        <div
+          v-else-if="span.output !== null && typeof span.output === 'object'"
+          class="text-[10px] font-mono"
+        >
+          <JsonTree
+            :data="span.output"
+            :root-expanded="true"
+            :auto-expand-depth="1"
+          />
+        </div>
+        <pre
+          v-else
+          class="whitespace-pre-wrap break-words text-[10px] font-mono"
+        >{{ outputText }}</pre>
+      </div>
     </div>
   </div>
 </template>

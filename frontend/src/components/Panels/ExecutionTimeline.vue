@@ -13,6 +13,7 @@ import {
   buildTimelineModel,
   formatTimelineMs,
   getTimelineRowKey,
+  LIVE_TIMELINE_REFRESH_INTERVAL_MS,
   summarizeTimelineModel,
 } from "@/components/Panels/executionTimeline";
 import ExecutionSpanDetails from "@/components/Panels/ExecutionSpanDetails.vue";
@@ -91,14 +92,20 @@ const hasLiveHitlWait = computed(() =>
         Boolean(result.metadata?.codex)),
   ),
 );
+const hasLiveRunningSpan = computed(() =>
+  props.nodeResults.some((result) => result.status === "running"),
+);
+const hasLiveTimelineSpan = computed(
+  () => hasLiveHitlWait.value || hasLiveRunningSpan.value,
+);
 
 function syncTimelineNowTimer(): void {
-  if (hasLiveHitlWait.value) {
+  if (hasLiveTimelineSpan.value) {
     timelineNowMs.value = Date.now();
     if (timelineNowTimer === null) {
       timelineNowTimer = setInterval(() => {
         timelineNowMs.value = Date.now();
-      }, 1000);
+      }, LIVE_TIMELINE_REFRESH_INTERVAL_MS);
     }
     return;
   }
@@ -119,7 +126,7 @@ onBeforeUnmount(() => {
   }
 });
 
-watch(hasLiveHitlWait, () => {
+watch(hasLiveTimelineSpan, () => {
   syncTimelineNowTimer();
 });
 
@@ -411,6 +418,7 @@ function showAllRows(): void {
                 selectedSpan?.key === span.key
                   ? 'ring-2 ring-primary ring-offset-1 ring-offset-background'
                   : '',
+                span.status === 'running' ? 'trace-span-running' : '',
                 span.isHitlWait
                   ? 'opacity-80 group-hover:opacity-95 hitl-wait-span'
                   : span.status === 'error'
@@ -541,6 +549,22 @@ function showAllRows(): void {
   overflow: visible;
 }
 
+.trace-span-running {
+  animation: trace-span-running-heartbeat 1.2s ease-in-out infinite;
+}
+
+@keyframes trace-span-running-heartbeat {
+  0%,
+  100% {
+    opacity: 0.55;
+    box-shadow: 0 0 0 0 hsl(var(--success) / 0.45);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 0 4px hsl(var(--success) / 0);
+  }
+}
+
 .trace-span-duration {
   position: absolute;
   left: 4px;
@@ -596,5 +620,11 @@ function showAllRows(): void {
 
 .trace-span-action:hover {
   background: hsl(var(--primary) / 0.16);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .trace-span-running {
+    animation: none;
+  }
 }
 </style>
