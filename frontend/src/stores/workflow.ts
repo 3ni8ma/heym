@@ -1276,6 +1276,46 @@ export const useWorkflowStore = defineStore("workflow", () => {
     }
   }
 
+  function appendLiveRunningNodeResult(nodeId: string): void {
+    const existingRunningResult = nodeResults.value.some(
+      (result) => result.node_id === nodeId && result.status === "running",
+    );
+    if (existingRunningResult) return;
+
+    const node = nodes.value.find((candidate) => candidate.id === nodeId);
+    const startedAtMs = Date.now();
+    nodeResults.value = [
+      ...nodeResults.value,
+      {
+        node_id: nodeId,
+        node_label: node?.data.label || nodeId,
+        node_type: node?.type || "unknown",
+        status: "running",
+        output: {},
+        execution_time_ms: 0,
+        error: null,
+        metadata: {
+          started_at_ms: startedAtMs,
+          ended_at_ms: startedAtMs,
+        },
+      },
+    ];
+  }
+
+  function replaceLiveRunningNodeResult(nodeResult: NodeResult): void {
+    const runningResultIndex = nodeResults.value.findIndex(
+      (result) => result.node_id === nodeResult.node_id && result.status === "running",
+    );
+    if (runningResultIndex < 0) {
+      nodeResults.value = [...nodeResults.value, nodeResult];
+      return;
+    }
+
+    const nextResults = [...nodeResults.value];
+    nextResults.splice(runningResultIndex, 1, nodeResult);
+    nodeResults.value = nextResults;
+  }
+
   function clearNodeStatuses(): void {
     nodes.value.forEach((node) => {
       if (
@@ -1434,6 +1474,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
           (nodeId) => {
             if (!isActiveExecutionStream(wf.id, streamAbort)) return;
             setNodeStatus(nodeId, "running");
+            appendLiveRunningNodeResult(nodeId);
           },
           (data) => {
             if (!isActiveExecutionStream(wf.id, streamAbort)) return;
@@ -1462,7 +1503,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
             if (data.metadata && typeof data.metadata === "object") {
               row.metadata = data.metadata;
             }
-            nodeResults.value = [...nodeResults.value, row];
+            replaceLiveRunningNodeResult(row);
 
             if (
               data.node_type === "disableNode" &&
@@ -1721,24 +1762,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
           },
           (nodeId) => {
             setNodeStatus(nodeId, "running");
-            const existingRunningResult = nodeResults.value.some(
-              (result) => result.node_id === nodeId && result.status === "running",
-            );
-            if (!existingRunningResult) {
-              const node = nodes.value.find((candidate) => candidate.id === nodeId);
-              nodeResults.value = [
-                ...nodeResults.value,
-                {
-                  node_id: nodeId,
-                  node_label: node?.data.label || nodeId,
-                  node_type: node?.type || "unknown",
-                  status: "running",
-                  output: {},
-                  execution_time_ms: 0,
-                  error: null,
-                },
-              ];
-            }
+            appendLiveRunningNodeResult(nodeId);
           },
           (data) => {
             setNodeStatus(
@@ -1757,16 +1781,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
             if (data.metadata && typeof data.metadata === "object") {
               row.metadata = data.metadata;
             }
-            const runningResultIndex = nodeResults.value.findIndex(
-              (result) => result.node_id === data.node_id && result.status === "running",
-            );
-            if (runningResultIndex >= 0) {
-              const nextResults = [...nodeResults.value];
-              nextResults.splice(runningResultIndex, 1, row);
-              nodeResults.value = nextResults;
-            } else {
-              nodeResults.value = [...nodeResults.value, row];
-            }
+            replaceLiveRunningNodeResult(row);
           },
           async (result) => {
             completed = true;

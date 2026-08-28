@@ -15,12 +15,13 @@ def execute(ctx: NodeExecutionContext) -> object:
     mcp_connection = node_data.get("connection") or {}
     selected_tool = node_data.get("selectedTool") or ""
     tool_arguments = node_data.get("toolArguments") or {}
-    timeout = float(node_data.get("timeoutSeconds") or 30)
+    node_timeout = float(node_data.get("timeoutSeconds") or 30)
 
     if not selected_tool:
         raise ValueError("mcpCall node requires a tool to be selected")
 
     mcp_connection = self._resolve_mcp_connection(mcp_connection, inputs, node_id)
+    timeout = float(mcp_connection.get("timeoutSeconds") or node_timeout)
 
     resolved_args = self._resolve_mcp_config_value(
         tool_arguments,

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { TimelineEntry } from "@/components/Panels/executionTimeline";
 import {
   buildTimelineModel,
+  LIVE_TIMELINE_REFRESH_INTERVAL_MS,
   summarizeTimelineModel,
 } from "@/components/Panels/executionTimeline";
 
@@ -143,6 +144,36 @@ describe("buildTimelineModel HITL wait spans", () => {
     expect(rows[0].spans).toHaveLength(2);
     expect(rows[0].spans[1].isHitlWait).toBe(true);
     expect(rows[0].spans[1].durationMs).toBe(3000);
+  });
+});
+
+describe("buildTimelineModel running spans", () => {
+  it("extends an open running span to the current timeline time", () => {
+    const results: TimelineEntry[] = [
+      entry({
+        node_id: "http-1",
+        node_label: "HTTP Request",
+        node_type: "http",
+        status: "running",
+        execution_time_ms: 0,
+        metadata: {
+          started_at_ms: 1000,
+          ended_at_ms: 1000,
+        },
+      }),
+    ];
+
+    const model = buildTimelineModel(results, 0, new Map(), { nowMs: 1050 });
+    const span = model.rows[0]?.spans[0];
+
+    expect(LIVE_TIMELINE_REFRESH_INTERVAL_MS).toBe(50);
+    expect(model.timeWindow).toEqual({ startMs: 1000, totalMs: 50 });
+    expect(span).toMatchObject({
+      status: "running",
+      durationMs: 50,
+      startOffsetMs: 0,
+      endOffsetMs: 50,
+    });
   });
 });
 

@@ -117,6 +117,8 @@ export interface GcPauseSegment {
 
 /** GC is not shown in the span timeline / tooltip below this total pause (ms). */
 const GC_PAUSE_DISPLAY_MIN_MS = 20;
+/** Refresh open running spans while the execution timeline is visible. */
+export const LIVE_TIMELINE_REFRESH_INTERVAL_MS = 50;
 
 function nodeColorVar(nodeType: string): string {
   const def = NODE_DEFINITIONS[nodeType as NodeType];
@@ -135,6 +137,10 @@ function canSynthesizeLiveHitlWait(result: TimelineEntry): boolean {
     return true;
   }
   return Boolean(result.metadata?.hitl) || Boolean(result.metadata?.codex);
+}
+
+function isLiveRunningSpan(result: TimelineEntry): boolean {
+  return result.status === "running";
 }
 
 function colorFor(result: TimelineEntry): string {
@@ -252,7 +258,7 @@ export function buildTimelineModel(
       if (
         typeof nowMs === "number" &&
         Number.isFinite(nowMs) &&
-        canSynthesizeLiveHitlWait(result) &&
+        (isLiveRunningSpan(result) || canSynthesizeLiveHitlWait(result)) &&
         nowMs > bounds.endMs
       ) {
         maxEndMs = Math.max(maxEndMs, nowMs);
@@ -349,12 +355,20 @@ export function buildTimelineModel(
     const bounds = recordedTiming ? getTimingBounds(result) : null;
     const startMs = bounds?.startMs ?? syntheticCursorMs;
     const endMs = bounds?.endMs ?? (syntheticCursorMs + Math.max(result.execution_time_ms, 0));
+    const liveRunningEndMs =
+      bounds &&
+      typeof nowMs === "number" &&
+      Number.isFinite(nowMs) &&
+      isLiveRunningSpan(result) &&
+      nowMs > endMs
+        ? nowMs
+        : endMs;
 
     if (!bounds) {
       syntheticCursorMs = endMs;
     }
 
-    pushRawSpan(row, result, index, startMs, endMs, {
+    pushRawSpan(row, result, index, startMs, liveRunningEndMs, {
       isHitlWait: isHitlWaitResult(result),
     });
 

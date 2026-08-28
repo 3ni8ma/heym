@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, watch, nextTick, ref } from "vue";
-import { LayoutTemplate, Puzzle, X } from "lucide-vue-next";
+import { LayoutTemplate, Puzzle, Search, X } from "lucide-vue-next";
 
 import type { NodeTemplate } from "@/features/templates/types/template.types";
 import type { NodeType, PluginSummary, WorkflowEdge, WorkflowNode } from "@/types/workflow";

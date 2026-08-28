@@ -178,21 +178,21 @@ class MCPCallNodeTests(unittest.TestCase):
         self.assertEqual(resolved_connection["env"], {"TOKEN": "secret-token"})
 
     @patch("app.services.mcp_tool_executor.execute_mcp_tool")
-    def test_timeout_passed(self, mock_exec: MagicMock) -> None:
-        """timeoutSeconds from node_data is passed to execute_mcp_tool as float."""
+    def test_connection_timeout_overrides_node_timeout(self, mock_exec: MagicMock) -> None:
+        """The MCP connection timeout governs a direct tool call."""
         mock_exec.return_value = None
         executor = _make_executor(
             {
                 "label": "mcpCall",
-                "connection": CONNECTION,
+                "connection": {**CONNECTION, "timeoutSeconds": 120},
                 "selectedTool": "ping",
                 "toolArguments": {},
-                "timeoutSeconds": 60,
+                "timeoutSeconds": 30,
             }
         )
         executor.execute_node("node_mcp1", {})
         passed_timeout = mock_exec.call_args[0][3]
-        self.assertEqual(passed_timeout, 60.0)
+        self.assertEqual(passed_timeout, 120.0)
 
     @patch("app.services.mcp_tool_executor.execute_mcp_tool")
     def test_default_timeout_when_missing(self, mock_exec: MagicMock) -> None:
