@@ -10,7 +10,7 @@
 
 <p align="center">
   <strong>Build, visualize, and run intelligent AI workflows without writing code.</strong><br/>
-  Drag-and-drop canvas · LLM & Agent nodes · RAG pipelines · Multi-agent orchestration · MCP support · OIDC SSO login
+  Drag-and-drop canvas · LLM & Agent nodes · RAG pipelines · Multi-agent orchestration · MCP support · OIDC SSO
 </p>
 
 <p align="center">
@@ -191,6 +191,7 @@ Turn a workflow into a chat experience so users can invoke the orchestration wit
 - **Built-In RAG** — Insert documents and run semantic search against managed vector stores (Qdrant or built-in Postgres/pgvector) in two nodes
 - **MCP Support** — Connect Agent nodes to any MCP server as a client; expose your workflows as an MCP server for Claude, Cursor, and other clients
 - **OIDC SSO Login**: Let teams sign in through Keycloak, Okta, Entra ID, Auth0, Google, or any OpenID Connect provider
+- **Load Distribution** — Run two or more Heym instances against one database and split background workflow execution between them by percentage, configured from **Settings → Instances**. Postgres is the only channel between the instances; no broker, and no direct connection between them, is required
 - **Portal** — Turn any workflow into a public chat UI at `/chat/{slug}` with streaming responses and file uploads
 - **Webhook SSE Streaming** — Generate ready-to-run cURL commands for `/execute` or `/execute/stream`, with per-node start messages and live node event output in the terminal
 - **Live Execution Canvas** — Open any running production execution from History or a Kanban card and watch the existing run continue node by node on the animated canvas with incremental Debug logs
@@ -341,6 +342,7 @@ ENCRYPTION_KEY=$(python3 -c "import secrets; print(secrets.token_hex(32))")
 sed -i.bak "s|^SECRET_KEY=.*|SECRET_KEY=${SECRET_KEY}|; s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=${ENCRYPTION_KEY}|" .env && rm -f .env.bak
 docker run --env-file .env \
   -p 4017:4017 \
+  --shm-size 2g \
   -e FILE_STORAGE_DIR=/app/data/files \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$(pwd)/data/files:/app/data/files" \
@@ -355,6 +357,7 @@ docker run \
   -e DATABASE_URL=postgresql+asyncpg://postgres:postgres@host.docker.internal:6543/heym \
   -e FILE_STORAGE_DIR=/app/data/files \
   -p 4017:4017 \
+  --shm-size 2g \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v "$(pwd)/data/files:/app/data/files" \
   -v heym-codex-workspaces:/app/data/codex-workspaces \
@@ -366,6 +369,7 @@ Open the editor on port `4017`. See [ENVIRONMENT-VARIABLES.md](ENVIRONMENT-VARIA
 
 Three things about the `docker run` setup are worth knowing:
 
+- **`--shm-size 2g` keeps Playwright working.** Docker gives a container 64 MB of `/dev/shm` by default, and Chromium crashes its renderer under that. Step-based Playwright nodes run Chromium as a subprocess inside this container, so the limit is this container's. (Custom `playwrightCode` runs in a sibling container that sets its own.) `docker-compose.yml` already sets it; a plain `docker run` does not.
 - **`FILE_STORAGE_DIR=/app/data/files` is load-bearing.** The release image runs the backend from `/app/backend`, so the default relative path would land inside the container instead of your mount and Drive uploads would vanish on restart. `./run.sh` and `./deploy.sh` are unaffected.
 - **Keep `heym-codex-workspaces` mounted.** Python skills and the Codex node run there in a hardened sibling container; without it, skill execution fails closed. Per-run isolation needs Docker Engine 25.0+.
 - **Keep `heym-opencode-workspaces` mounted** if you use the OpenCode Go node. The sibling runner shares that volume; without it the wrapper fails closed.
@@ -378,6 +382,8 @@ Heym workflows are not limited to the editor. Run them from the canvas, call the
 ## Production Readiness
 
 Heym is built to be inspected and operated in your own infrastructure. Docker deployment, JWT auth, team controls, shared credentials, `SECURITY.md`, execution history, logs, LLM traces, OpenTelemetry export, evals, and per-model USD cost tracking all live in the core self-hostable product.
+
+When one machine is not enough, a second instance pointed at the same database joins as a worker and takes a configurable share of background runs — see [Load Distribution](frontend/src/docs/content/reference/cluster.md) for the roles, the environment variables, and the two deployment rules the cluster cannot enforce for you.
 
 Every pull request runs the [PR checks](https://github.com/heymrun/heym/actions/workflows/pr-checks.yml) workflow: a file line-limit check, frontend ESLint, TypeScript strict typecheck, frontend Vitest unit tests, production build, backend Ruff format and lint, the backend unit test suite, and Playwright E2E tests against a live Postgres service.
 
@@ -781,7 +787,7 @@ Commercial licensing, enterprise deployment help, and professional support are a
 ## Contributors
 
 <a href="https://github.com/heymrun/heym/graphs/contributors">
-  <img alt="Heym contributors" src="https://contrib.rocks/image?repo=heymrun/heym&amp;v=0.0.98" />
+  <img alt="Heym contributors" src="https://contrib.rocks/image?repo=heymrun/heym&amp;v=0.0.99" />
 </a>
 
 </div>

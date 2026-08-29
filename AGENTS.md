@@ -100,6 +100,51 @@ When adding a new node type, operation, or operation-specific field, keep the ca
 - When adding a **new node type**, update the docs that enumerate nodes: add the node page under `frontend/src/docs/content/nodes/`, register it in `frontend/src/docs/manifest.ts`, and add the node to the reference docs — including `frontend/src/docs/content/reference/features.md` (both the per-node section and the node-types summary list), plus `node-types.md` and, for credential-backed nodes, `integrations.md` / `credentials.md` / `credentials-sharing.md`. 
 - Add or extend frontend tests for meaningful UI behavior changes when practical, especially for autofill eligibility and expression dialog field discovery.
 
+### Node placement in a multi-instance cluster
+Every node type must declare where it may run.
+`backend/app/services/cluster/node_placement.py` holds one entry per node type;
+`backend/tests/test_cluster_node_placement.py` fails the build when a node
+registered in `node_execution/registry.py` has no entry. There is no default —
+a missing entry is a build failure, not a silent fallback to the main instance.
+
+Declare `MAIN_ONLY` when the node:
+- reads or writes `FILE_STORAGE_DIR` (Heym Drive, attachments, generated files),
+- leaves state on local disk that a later run reads back (coding-agent
+  workspaces resumed through `workspace_path`),
+- depends on something installed per instance rather than baked into the image
+  (plugins),
+- must keep one fixed outbound IP (`sendEmail`: corporate SMTP relays commonly
+  allowlist the source address).
+
+Declare `ANYWHERE` otherwise — including nodes that open a Docker sandbox. Every
+instance in a cluster runs the same image with its own Docker socket, so a
+sandbox is not a reason to pin a run to the main instance, and `code` and
+`playwright` are exactly the CPU-heavy work worth moving off it.
+
+When placement depends on configuration rather than node type — `agent` with a
+skill tool attached — express it as a predicate over the node's own data in the
+same module. Never branch on node type in the scheduler.
+
+### Audit logging stays on the main instance
+`audit()` writes a line to stdout and nothing to the database — see
+`backend/app/services/audit_log.py`. In a cluster that line lands on the stdout
+of whichever instance ran the code, so where it is called from decides whether
+the audit trail stays in one place.
+
+Call `audit()` from `backend/app/api/` routers only. Ingress points at the main
+instance, so a router call keeps the whole trail on one machine, where a log
+shipper can collect it. All 128 call sites are routers today; keep it that way.
+
+Never call `audit()` from `workflow_executor.py`, a node handler, or anything
+else reachable from the run queue. Those run on whichever instance claimed the
+run, and the trail would split across machines without any error to notice.
+
+When an audited action genuinely originates during execution, record it in the
+run's own history instead. `execution_history` already carries
+`executed_by_instance_id` and `executed_by_instance_name`, so it answers "who
+did what, where" from one query. `file_intake_service.write_audit` is the
+pattern: a helper that writes to a table, called from a router.
+
 ### PropertiesPanel modularity
 `frontend/src/components/Panels/PropertiesPanel.vue` must stay a thin shell, not a node-specific implementation file. Node configuration UI belongs under `frontend/src/components/Panels/propertiesPanel/nodes/`, with one component per node type or shared paired node form (for example, `SetJsonOutputMapperNodeProperties.vue`). Node-specific helper state, computed values, API loading, and handlers should live with that node component or a sibling composable in the same `propertiesPanel/` module. Keep only cross-node panel orchestration, shared output/run handling, and context wiring in shared properties panel composables. When adding or changing a node property field, update the node-specific component instead of adding `selectedNode.type` branches to `PropertiesPanel.vue`.
 

@@ -562,6 +562,10 @@ class ExecutionHistory(Base):
         String(50), nullable=True, default=None, index=True
     )
     recovered: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    executed_by_instance_id: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, index=True
+    )
+    executed_by_instance_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     workflow: Mapped["Workflow"] = relationship("Workflow", back_populates="executions")
     hitl_requests: Mapped[list["HITLRequest"]] = relationship(
@@ -599,6 +603,8 @@ class ActiveWorkflowExecution(Base):
     actor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     recoverable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, index=True)
+    executed_by_instance_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    executed_by_instance_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -2314,4 +2320,72 @@ class SsoSettings(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ClusterInstance(Base):
+    """One Heym deployment sharing this database. Upserted by all its processes."""
+
+    __tablename__ = "cluster_instances"
+
+    id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False, default="")
+    role: Mapped[str] = mapped_column(String(16), nullable=False, default="worker")
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    weight: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # False means "never given a weight": eligible for one automatic seeding.
+    weight_configured: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    version: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    schema_revision: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    keys_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    docker_ok: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    db_latency_ms: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    heartbeat_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class WorkflowRunQueue(Base):
+    """A background run waiting for, or claimed by, one instance."""
+
+    __tablename__ = "workflow_run_queue"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workflow_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False
+    )
+    execution_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False, unique=True)
+    placement: Mapped[str] = mapped_column(String(16), nullable=False)
+    target_instance_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    inputs: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    trigger_source: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    credentials_owner_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    test_run: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    timeout_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    enqueued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    not_after: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    claimed_by_process: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ClusterDispatchState(Base):
+    """A single row holding per-instance assignment counters, locked on assignment."""
+
+    __tablename__ = "cluster_dispatch_state"
+
+    id: Mapped[str] = mapped_column(String(16), primary_key=True, default="singleton")
+    counters: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    automatic_weighting: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )

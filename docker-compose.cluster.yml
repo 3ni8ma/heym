@@ -1,0 +1,104 @@
+# Two Heym instances, one database: main runs everything that touches local
+# state, the worker takes a share of the rest. Postgres is the only channel
+# between them.
+#
+# Set the split under Settings -> Instances once both are up.
+# UI: http://localhost:4017   (10105 is main's API, 10111 the worker's)
+
+name: heym-cluster
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: heym-cluster-postgres
+    entrypoint:
+      - bash
+      - -c
+      - >-
+        ( dpkg -s postgresql-16-pgvector >/dev/null 2>&1
+        || ( apt-get update -qq && apt-get install -y -qq --no-install-recommends postgresql-16-pgvector ) )
+        || echo 'pgvector unavailable; continuing without it';
+        exec docker-entrypoint.sh postgres -c max_connections=300
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-heym}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "6544:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  main:
+    image: ${HEYM_BACKEND_IMAGE:-heym-backend:local}
+    container_name: heym-cluster-main
+    # Both instances must agree on SECRET_KEY and ENCRYPTION_KEY; a mismatch
+    # marks the instance incompatible and it receives no work.
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-heym}
+      HEYM_CLUSTER_ENABLED: "true"
+      HEYM_INSTANCE_ROLE: main
+      HEYM_INSTANCE_ID: main
+      HEYM_INSTANCE_NAME: Main
+      HEYM_OTEL_ENABLED: "false"
+      HEYM_DB_POOL_SIZE: "8"
+      HEYM_DB_MAX_OVERFLOW: "12"
+      HEYM_DB_SYNC_POOL_SIZE: "2"
+      HEYM_DB_SYNC_MAX_OVERFLOW: "3"
+    shm_size: "2gb"
+    ports:
+      - "10105:10105"
+    volumes:
+      - ./backend/app:/app/app:ro
+      - ./backend/alembic:/app/alembic:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - cluster-files:/app/data/files
+      - cluster-plugins:/app/data/plugins
+      - codex-workspaces:/app/data/codex-workspaces
+      - opencode-workspaces:/app/data/opencode-workspaces
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: always
+
+  worker-a:
+    image: ${HEYM_BACKEND_IMAGE:-heym-backend:local}
+    container_name: heym-cluster-worker-a
+    env_file: [.env]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-heym}
+      HEYM_CLUSTER_ENABLED: "true"
+      HEYM_INSTANCE_ROLE: worker
+      HEYM_INSTANCE_ID: worker-a
+      HEYM_INSTANCE_NAME: Worker A
+      HEYM_OTEL_ENABLED: "false"
+      HEYM_DB_POOL_SIZE: "8"
+      HEYM_DB_MAX_OVERFLOW: "12"
+      HEYM_DB_SYNC_POOL_SIZE: "2"
+      HEYM_DB_SYNC_MAX_OVERFLOW: "3"
+    shm_size: "2gb"
+    # Skips the image entrypoint's migration step: main owns the schema.
+    entrypoint: ["sh", "-c", "uv run python -m uvicorn app.main:app --host 0.0.0.0 --port 10105 --workers 2"]
+    ports:
+      - "10111:10105"
+    volumes:
+      - ./backend/app:/app/app:ro
+      - ./backend/alembic:/app/alembic:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      main:
+        condition: service_started
+    restart: always
+
+volumes:
+  postgres-data:
+  cluster-files:
+  cluster-plugins:
+  codex-workspaces:
+  opencode-workspaces:

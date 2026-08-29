@@ -18,12 +18,15 @@ from app.db.models import ExecutionHistory, PortalSession, Workflow, WorkflowVer
 from app.db.session import async_session_maker
 from app.services.alerts.cleanup import cleanup_old_alert_events
 from app.services.alerts.evaluator import evaluate_due_alerts
+from app.services.cluster import registry, run_queue
+from app.services.cluster.autoweight import apply_automatic_weighting
+from app.services.cluster.dispatch import dispatch_workflow
 from app.services.cron_slot_state import claim_cron_slot, cleanup_cron_slot_claims
 from app.services.distributed_lock import lock_service
 from app.services.global_variables_service import get_global_variables_context
 from app.services.hitl_service import build_default_public_base_url, persist_pending_hitl_execution
 from app.services.timezone_utils import get_configured_timezone
-from app.services.workflow_executor import _to_json_compatible, execute_workflow
+from app.services.workflow_executor import _to_json_compatible
 
 logger = logging.getLogger("cron_scheduler")
 
@@ -67,6 +70,8 @@ class CronScheduler:
                     continue
 
                 await self._check_and_execute()
+                await self._maintain_run_queue()
+                await self._apply_automatic_weighting()
                 await self._check_alerts()
                 await self._check_alert_event_cleanup()
                 await self._check_scheduled_deletion_cleanup()
@@ -203,23 +208,34 @@ class CronScheduler:
             try:
                 # Off the event loop: a cron run can block for minutes, and this
                 # worker still has to serve HTTP and keep its leader lock alive.
-                result = await asyncio.to_thread(
-                    execute_workflow,
+                result = await dispatch_workflow(
                     workflow_id=workflow.id,
                     nodes=workflow.nodes,
                     edges=workflow.edges,
                     inputs=enriched_inputs,
                     workflow_cache=workflow_cache,
+                    trigger_source="schedule",
+                    credentials_owner_id=workflow.owner_id,
+                    execution_id=execution_id,
+                    run_in_thread=True,
                     credentials_context=credentials_context,
                     global_variables_context=global_variables_context,
                     trace_user_id=workflow.owner_id,
                     actor_user_id=workflow.owner_id,
                     public_base_url=public_base_url,
                     cancel_event=cancel_event,
-                    execution_id=str(execution_id),
                 )
             finally:
                 clear_execution(execution_id)
+
+            # An offloaded run wrote its own history on the instance that ran it.
+            if getattr(result, "history_written", False):
+                logger.info(
+                    "Workflow %s executed via cron on another instance, status: %s",
+                    workflow.id,
+                    result.status,
+                )
+                return
             if result.allow_downstream_pending:
                 result.join_allow_downstream()
 
@@ -582,6 +598,44 @@ class CronScheduler:
                     self._last_cron_slot_claim_cleanup_date = current_date
                 else:
                     logger.debug("Cron slot claim cleanup already handled by another worker")
+
+    async def _maintain_run_queue(self) -> None:
+        """Retire stale queued runs and hand waiting ones back to a returning main.
+
+        Runs on the leader, which may be a worker while main is down - that is
+        exactly what makes waiting_for_main rows drain when main comes back.
+        Expiring first is what stops a long outage from replaying its whole
+        backlog at once.
+        """
+        if not settings.cluster_enabled:
+            return
+        try:
+            expired = await run_queue.expire_late_rows()
+            if expired:
+                logger.info("Retired %d run queue rows past the misfire grace window", expired)
+            for execution_id in await run_queue.expire_stranded_claims():
+                logger.warning(
+                    "Retired run %s: the instance that claimed it stopped before finishing",
+                    execution_id,
+                )
+                await run_queue.notify_done(execution_id)
+            instances = await registry.list_instances()
+            main = registry.find_main(instances)
+            if main is not None and registry.is_live(main, now=datetime.now(timezone.utc)):
+                released = await run_queue.release_waiting_for_main(main.id)
+                if released:
+                    logger.info("Released %d runs waiting for the main instance", released)
+        except Exception:
+            logger.exception("Run queue maintenance failed")
+
+    async def _apply_automatic_weighting(self) -> None:
+        """Give a newly joined instance a share so it does not sit idle."""
+        if not settings.cluster_enabled:
+            return
+        try:
+            await apply_automatic_weighting()
+        except Exception:
+            logger.exception("Automatic weighting failed")
 
     async def _cleanup_old_cron_slot_claims(self) -> None:
         async with async_session_maker() as db:

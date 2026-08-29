@@ -163,7 +163,10 @@ class McpCallToolCancellationTests(unittest.IsolatedAsyncioTestCase):
             patch("app.api.mcp.get_global_variables_context", AsyncMock(return_value={})),
             patch("app.api.mcp.upsert_workflow_analytics_snapshot", AsyncMock()),
             patch("app.api.mcp._persist_global_variables_from_execution", AsyncMock()),
-            patch("app.api.mcp.asyncio.to_thread", AsyncMock(side_effect=fake_execute)),
+            patch(
+                "app.services.cluster.dispatch.asyncio.to_thread",
+                AsyncMock(side_effect=fake_execute),
+            ),
         ):
             user = MagicMock()
             user.id = uuid.uuid4()
@@ -255,7 +258,10 @@ class McpCallToolCancellationTests(unittest.IsolatedAsyncioTestCase):
             patch("app.api.mcp.get_global_variables_context", AsyncMock(return_value={})),
             patch("app.api.mcp.upsert_workflow_analytics_snapshot", AsyncMock()),
             patch("app.api.mcp._persist_global_variables_from_execution", AsyncMock()),
-            patch("app.api.mcp.asyncio.to_thread", AsyncMock(side_effect=capture_event)),
+            patch(
+                "app.services.cluster.dispatch.asyncio.to_thread",
+                AsyncMock(side_effect=capture_event),
+            ),
         ):
             user = MagicMock()
             user.id = uuid.uuid4()
@@ -343,7 +349,8 @@ class NonStreamingHttpCancellationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ctx.exception.status_code, 409)
         self.assertEqual(ctx.exception.detail, "Execution was cancelled")
         db.add.assert_called_once()
-        db.commit.assert_called_once()
+        # Two: one releasing the transaction before dispatch, one persisting.
+        self.assertEqual(db.commit.await_count, 2)
 
     async def test_execution_registered_before_executor_called(self) -> None:
         """register_execution must be called so the run is visible in the active list."""
