@@ -69,6 +69,7 @@ Jira credentials are also excluded from `$credentials`. The [Jira node](../nodes
 | Credential type | Value exposed to `$credentials.Name` |
 |-----------------|--------------------------------------|
 | Bearer | Bearer token string |
+| Header | Complete `header key: header value` line, ready to drop into a cURL `-H` argument |
 | GitHub | Personal access token |
 | Notion | Internal `api_token` or OAuth `access_token` (Bearer token for Notion API calls) |
 | Sentry | Sentry auth token |

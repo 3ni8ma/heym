@@ -6579,13 +6579,30 @@ class WorkflowExecutor:
             except ValueError:
                 raise original_error from None
 
-    def parse_curl(self, curl_command: str) -> tuple[str, str, dict[str, str], str | None, bool]:
+    def parse_curl(
+        self,
+        curl_command: str,
+        resolve: Callable[[str], str] | None = None,
+    ) -> tuple[str, str, dict[str, str], str | None, bool]:
+        """Parse a curl DSL command into its request parts.
+
+        ``resolve`` renders ``$…`` spans in every token except the ``-d`` payload,
+        which callers render themselves so JSON bodies keep their types. It must be
+        applied before the token is interpreted: a header-type credential resolves to
+        a whole ``key: value`` line and a URL can come entirely from an expression,
+        so parsing the raw template would drop the header and lose the URL.
+        """
         if not curl_command:
             return "GET", "", {}, None, False
         normalized_cmd = curl_command.replace("\\\n", " ").replace("\\\r\n", " ")
         tokens = self._split_curl_tokens(normalized_cmd)
         if tokens and tokens[0].lower() == "curl":
             tokens = tokens[1:]
+
+        def rendered(token: str) -> str:
+            if resolve is None or "$" not in token:
+                return token
+            return resolve(token)
 
         method = "GET"
         headers: dict[str, str] = {}
@@ -6597,10 +6614,10 @@ class WorkflowExecutor:
             token = tokens[i]
             if token in ("-X", "--request") and i + 1 < len(tokens):
                 i += 1
-                method = tokens[i].upper()
+                method = rendered(tokens[i]).upper()
             elif token in ("-H", "--header") and i + 1 < len(tokens):
                 i += 1
-                header = tokens[i]
+                header = rendered(tokens[i])
                 if ":" in header:
                     key, value = header.split(":", 1)
                     headers[key.strip()] = value.strip()
@@ -6619,15 +6636,20 @@ class WorkflowExecutor:
                     method = "POST"
             elif token == "--url" and i + 1 < len(tokens):
                 i += 1
-                url = tokens[i]
-            elif token.startswith("http://") or token.startswith("https://"):
-                url = token
+                url = rendered(tokens[i])
+            elif not token.startswith("-"):
+                candidate = rendered(token)
+                if candidate.startswith(("http://", "https://")):
+                    url = candidate
             i += 1
 
         if not url:
             for token in reversed(tokens):
-                if token.startswith("http://") or token.startswith("https://"):
-                    url = token
+                if token is data:
+                    continue
+                candidate = rendered(token)
+                if candidate.startswith(("http://", "https://")):
+                    url = candidate
                     break
 
         return method, url, headers, data, follow_redirects

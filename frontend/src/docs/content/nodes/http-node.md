@@ -47,7 +47,11 @@ The **HTTP** node makes HTTP requests using cURL syntax. It can be a workflow st
 }
 ```
 
-Use cURL syntax with `-H` for headers, `-d` for POST body, etc. Expressions can be used in the curl string for dynamic URLs.
+Use cURL syntax with `-H` for headers, `-d` for POST body, etc. Expressions can be used anywhere in the curl string, including the URL, a header, or a whole header line. A [Header credential](../reference/credentials.md) resolves to `key: value`, so `-H "$credentials.MyApiKey"` sends the complete header:
+
+```
+curl -X GET "https://api.example.com/search?q=$query.body.text.urlEncode()" -H "$credentials.MyApiKey"
+```
 
 ## Egress Safety
 
