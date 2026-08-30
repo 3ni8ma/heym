@@ -53,6 +53,12 @@ Use cURL syntax with `-H` for headers, `-d` for POST body, etc. Expressions can 
 curl -X GET "https://api.example.com/search?q=$query.body.text.urlEncode()" -H "$credentials.MyApiKey"
 ```
 
+Quotes and spaces inside an expression belong to the expression, not to the cURL command, so methods that take string arguments work inline:
+
+```
+curl "https://r.jina.ai/$url.text.replaceAll("\n", "").strip()" -H "Authorization: $credentials.Jina"
+```
+
 ## Egress Safety
 
 - By default, the URL must use `http://` or `https://` and resolve only to public addresses. Loopback, private, link-local, multicast, and cloud-metadata destinations are blocked.
