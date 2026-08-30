@@ -180,8 +180,10 @@ onMounted(load);
       v-if="config"
       class="rounded-md border border-border p-3"
     >
+      <!-- The rows stack below `sm`, where a five-column header would not line
+           up with anything. -->
       <div
-        class="flex items-center gap-2 border-b border-border pb-2 text-xs uppercase text-muted-foreground"
+        class="hidden items-center gap-2 border-b border-border pb-2 text-xs uppercase text-muted-foreground sm:flex"
       >
         <span class="mr-4 w-32 shrink-0 pl-2">Name</span>
         <span class="w-16 shrink-0">Role</span>

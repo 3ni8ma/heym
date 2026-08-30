@@ -67,6 +67,7 @@ import VectorStoresPanel from "@/components/VectorStores/VectorStoresPanel.vue";
 import WorkflowListRow from "@/components/Workflows/WorkflowListRow.vue";
 import WorkflowPreviewPanel from "@/components/Workflows/WorkflowPreviewPanel.vue";
 import WorkflowStatusFilter from "@/components/Workflows/WorkflowStatusFilter.vue";
+import { useDialogStackLayer } from "@/composables/useDialogStack";
 import { useLongPress } from "@/composables/useLongPress";
 import { useWorkflowPreview } from "@/composables/useWorkflowPreview";
 import { useWorkflowRowStatus } from "@/composables/useWorkflowRowStatus";
@@ -285,6 +286,10 @@ const showCommandPalette = ref(false);
 const isMobile = useMediaQuery("(max-width: 767px)");
 /** Below this width the preview becomes a bottom sheet instead of a second column. */
 const isDesktopSplitView = useMediaQuery("(min-width: 1280px)");
+/** The sheet shares the dialog stack, so history opened from it paints above it. */
+const previewSheetZIndex = useDialogStackLayer(
+  () => isPreviewSheetOpen.value && !isDesktopSplitView.value,
+);
 const showWorkflowActionSheet = ref(false);
 const workflowActionWorkflow = ref<WorkflowListItem | null>(null);
 const actionSheetConsumedId = ref<string | null>(null);
@@ -2455,7 +2460,8 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
         >
           <div
             v-if="isPreviewSheetOpen && !isDesktopSplitView"
-            class="fixed inset-0 z-[120] bg-background/70 backdrop-blur-sm"
+            class="fixed inset-0 bg-background/70 backdrop-blur-sm"
+            :style="{ zIndex: previewSheetZIndex }"
             @click="closePreviewSheet"
           />
         </Transition>
@@ -2467,7 +2473,8 @@ async function restoreFromTrash(workflowId: string, event: Event): Promise<void>
         >
           <div
             v-if="isPreviewSheetOpen && !isDesktopSplitView"
-            class="fixed inset-x-0 bottom-0 z-[121] flex max-h-[88vh] flex-col rounded-t-2xl border-t border-border bg-card shadow-2xl"
+            class="fixed inset-x-0 bottom-0 flex max-h-[88vh] flex-col rounded-t-2xl border-t border-border bg-card shadow-2xl"
+            :style="{ zIndex: previewSheetZIndex + 1 }"
             role="dialog"
             aria-label="Workflow preview"
             data-testid="workflow-preview-sheet"

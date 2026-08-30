@@ -1065,7 +1065,7 @@ function bringToCanvas(): void {
                 <span
                   v-if="entry.executed_by_instance_name"
                   :title="entry.executed_by_instance_id ?? ''"
-                  class="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-sky-500/20 text-sky-400 shrink-0 hidden sm:inline"
+                  class="max-w-[45%] truncate px-1.5 py-0.5 text-[10px] font-semibold rounded bg-sky-500/20 text-sky-400 shrink-0"
                 >
                   {{ entry.executed_by_instance_name }}
                 </span>
