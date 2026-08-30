@@ -371,6 +371,7 @@ async function handleChangePassword(): Promise<void> {
   <Dialog
     :open="props.open"
     title="Settings"
+    content-class="!max-w-[532px]"
     @close="emit('close')"
   >
     <div class="space-y-5 -mt-3">

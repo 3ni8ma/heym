@@ -892,7 +892,7 @@ function bringToCanvas(): void {
               />
               <span class="text-xs font-medium truncate flex-1">{{ formatTime(entry.started_at) }}</span>
             </div>
-            <div class="flex items-center gap-1.5 mt-0.5 pl-5">
+            <div class="flex flex-wrap items-center gap-x-1.5 gap-y-1 mt-0.5 pl-5">
               <span class="text-[10px] text-muted-foreground">
                 <template v-if="entry.status === 'pending'">Pending review</template>
                 <template v-else>{{ entry.execution_time_ms.toFixed(2) }}ms</template>
@@ -913,7 +913,7 @@ function bringToCanvas(): void {
               <span
                 v-if="entry.executed_by_instance_name"
                 :title="entry.executed_by_instance_id ?? ''"
-                class="px-1 py-0 text-[9px] font-semibold rounded bg-sky-500/20 text-sky-400"
+                class="max-w-full truncate px-1 py-0 text-[9px] font-semibold rounded bg-sky-500/20 text-sky-400"
               >
                 {{ entry.executed_by_instance_name }}
               </span>

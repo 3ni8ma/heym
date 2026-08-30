@@ -5,9 +5,9 @@ import { Maximize2, Minimize2, X } from "lucide-vue-next";
 import { useDialogBackHistory } from "@/composables/useDialogBackHistory";
 import {
   addToDialogStack,
-  dialogStackPosition,
   isBottommostDialog,
   isTopmostDialog,
+  overlayZIndex,
   removeFromDialogStack,
 } from "@/composables/useDialogStack";
 
@@ -19,6 +19,8 @@ interface Props {
   title?: string;
   titleClass?: string;
   size?: "sm" | "md" | "lg" | "xl" | "2xl" | "3xl" | "4xl" | "5xl" | "6xl" | "7xl" | "full";
+  /** Escape hatch for a width the size scale does not cover; needs `!` to beat it. */
+  contentClass?: string;
   allowFullscreen?: boolean;
   defaultFullscreen?: boolean;
   hideFullscreenToggleOnMobile?: boolean;
@@ -30,6 +32,7 @@ const props = withDefaults(defineProps<Props>(), {
   title: undefined,
   titleClass: undefined,
   size: "lg",
+  contentClass: undefined,
   allowFullscreen: false,
   defaultFullscreen: false,
   hideFullscreenToggleOnMobile: false,
@@ -41,7 +44,7 @@ const isFullscreen = ref(props.defaultFullscreen);
 const dialogId = Symbol("dialog");
 const isTopmost = computed(() => props.open && isTopmostDialog(dialogId));
 const isNestedBackdrop = computed(() => props.open && !isBottommostDialog(dialogId));
-const dialogZIndex = computed(() => 50 + dialogStackPosition(dialogId) * 10);
+const dialogZIndex = computed(() => overlayZIndex(dialogId));
 
 const sizeClasses = computed(() => {
   if (isFullscreen.value) {
@@ -153,7 +156,8 @@ function toggleFullscreen(): void {
             'p-4 sm:p-6 md:p-7 flex flex-col',
             isFullscreen ? 'max-h-[100dvh]' : 'max-h-[min(90vh,calc(100dvh-2rem))] sm:max-h-[min(85vh,calc(100dvh-3rem))] rounded-2xl',
             'overflow-hidden',
-            sizeClasses
+            sizeClasses,
+            contentClass
           ]"
           @click.stop
         >
