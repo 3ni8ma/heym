@@ -88,6 +88,8 @@ export const useWorkflowStore = defineStore("workflow", () => {
   const runningNodeIds = ref<Set<string>>(new Set());
   const propertiesPanelOpen = ref(false);
   const propertiesPanelVisible = ref(false);
+  const mobileNodeExecutionDetailNodeId = ref<string | null>(null);
+  const mobileEditorTab = ref<"nodes" | "properties" | "run" | "more">("nodes");
   const analysisPanelOpen = ref(false);
   const analysisNoteEmpty = ref(true);
 
@@ -1993,6 +1995,8 @@ export const useWorkflowStore = defineStore("workflow", () => {
     nodes.value = [];
     edges.value = [];
     selectedNodeId.value = null;
+    closeMobileNodeExecutionDetail();
+    mobileEditorTab.value = "nodes";
     clearEvaluateLoopSelection();
     executionHistoryList.value = [];
     executionHistoryDetails.value = new Map();
@@ -2015,12 +2019,25 @@ export const useWorkflowStore = defineStore("workflow", () => {
   }
 
   function clearExecution(): void {
+    closeMobileNodeExecutionDetail();
     executionResult.value = null;
     timelinePickedNodeResultIndex.value = null;
     nodeResults.value = [];
     agentProgressLogs.value = new Map();
     llmBatchProgressLogs.value = new Map();
     clearNodeStatuses();
+  }
+
+  function getLatestNodeResult(nodeId: string): NodeResult | null {
+    const streamedResults = nodeResults.value.filter((result) => result.node_id === nodeId);
+    if (streamedResults.length > 0) {
+      return streamedResults.at(-1) ?? null;
+    }
+
+    const snapshotResults = executionResult.value?.node_results.filter(
+      (result) => result.node_id === nodeId,
+    );
+    return snapshotResults?.at(-1) ?? null;
   }
 
   function clearCanvas(): void {
@@ -2054,6 +2071,14 @@ export const useWorkflowStore = defineStore("workflow", () => {
     skipPrimaryExpandOnNextPropertiesOpen.value = options?.skipPrimaryExpand ?? false;
     propertiesPanelOpen.value = true;
     focusField.value = fieldToFocus || null;
+  }
+
+  function openMobileNodeExecutionDetail(nodeId: string): void {
+    mobileNodeExecutionDetailNodeId.value = nodeId;
+  }
+
+  function closeMobileNodeExecutionDetail(): void {
+    mobileNodeExecutionDetailNodeId.value = null;
   }
 
   function clearSkipPrimaryExpandOnNextPropertiesOpen(): void {
@@ -3621,6 +3646,7 @@ export const useWorkflowStore = defineStore("workflow", () => {
     stopExecutionIfCurrent,
     clearWorkflow,
     clearExecution,
+    getLatestNodeResult,
     clearCanvas,
     clearExecutionHistory,
     fetchExecutionHistory,
@@ -3628,6 +3654,10 @@ export const useWorkflowStore = defineStore("workflow", () => {
     propertiesPanelOpen,
     propertiesPanelVisible,
     setPropertiesPanelVisible,
+    mobileNodeExecutionDetailNodeId,
+    openMobileNodeExecutionDetail,
+    closeMobileNodeExecutionDetail,
+    mobileEditorTab,
     analysisPanelOpen,
     analysisNoteEmpty,
     refreshAnalysisNoteEmpty,
