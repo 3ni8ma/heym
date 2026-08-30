@@ -70,16 +70,16 @@ def execute(ctx: NodeExecutionContext) -> object:
     node_data = ctx.node_data
 
     curl_template = node_data.get("curl", "")
-    method, url, headers, body, follow_redirects = self.parse_curl(curl_template)
+
+    def render(text: str) -> str:
+        return self.evaluate_message_template(text, inputs, node_id)
+
+    # Resolve while parsing: an expression can supply a whole header line or the
+    # whole URL, and parsing the raw template would drop it. The body is left raw
+    # so it can be rendered JSON-aware below.
+    method, url, headers, body, follow_redirects = self.parse_curl(curl_template, resolve=render)
     if not url:
         raise ValueError("HTTP node requires a URL")
-    url = self.evaluate_message_template(url, inputs, node_id)
-    headers = {
-        self.evaluate_message_template(key, inputs, node_id): self.evaluate_message_template(
-            value, inputs, node_id
-        )
-        for key, value in headers.items()
-    }
     # Refuse targets that resolve to internal/metadata addresses before dialing
     # (SSRF, GHSA-8wj7-v2w6-wfcx). The guarded client additionally pins the
     # resolved IP so redirects and DNS rebinding cannot reach internal hosts.
