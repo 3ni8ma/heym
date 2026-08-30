@@ -6579,6 +6579,43 @@ class WorkflowExecutor:
             except ValueError:
                 raise original_error from None
 
+    def _mask_curl_expressions(self, command: str) -> tuple[str, list[str]]:
+        """Replace every ``$…`` span with an inert placeholder before shell tokenizing.
+
+        Quotes, spaces and backslashes inside an expression are its own syntax, not
+        shell quoting: ``$url.text.replaceAll("\\n", "")`` is one value. ``shlex``
+        reads them as shell metacharacters and strips them, so the expression that
+        reaches the resolver is no longer the one the user wrote. Masking hides those
+        spans from the tokenizer and restores them verbatim afterwards.
+        """
+        spans = self._find_expressions(command)
+        if not spans:
+            return command, []
+        marker = "HEYMEXPR"
+        while marker in command:
+            marker += "X"
+        masked: list[str] = []
+        expressions: list[str] = []
+        last_end = 0
+        for start, end, expression in spans:
+            masked.append(command[last_end:start])
+            masked.append(f"{marker}{len(expressions)}{marker}")
+            expressions.append(expression)
+            last_end = end
+        masked.append(command[last_end:])
+        return "".join(masked), [marker, *expressions]
+
+    def _unmask_curl_expressions(self, token: str, masked: list[str]) -> str:
+        """Restore the expression spans hidden by :meth:`_mask_curl_expressions`."""
+        if not masked:
+            return token
+        marker, *expressions = masked
+        if marker not in token:
+            return token
+        for index, expression in enumerate(expressions):
+            token = token.replace(f"{marker}{index}{marker}", expression)
+        return token
+
     def parse_curl(
         self,
         curl_command: str,
@@ -6595,7 +6632,11 @@ class WorkflowExecutor:
         if not curl_command:
             return "GET", "", {}, None, False
         normalized_cmd = curl_command.replace("\\\n", " ").replace("\\\r\n", " ")
-        tokens = self._split_curl_tokens(normalized_cmd)
+        masked_cmd, masked_expressions = self._mask_curl_expressions(normalized_cmd)
+        tokens = [
+            self._unmask_curl_expressions(token, masked_expressions)
+            for token in self._split_curl_tokens(masked_cmd)
+        ]
         if tokens and tokens[0].lower() == "curl":
             tokens = tokens[1:]
 

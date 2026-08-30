@@ -102,6 +102,38 @@ class HttpNodeCurlExpressionTests(unittest.TestCase):
 
         self.assertEqual(request.content.decode("utf-8"), "price is $total.amount")
 
+    def test_expression_arguments_keep_their_quotes(self) -> None:
+        """Quotes inside an expression are its syntax, not shell quoting."""
+        request = _run_curl(
+            'curl "https://r.jina.ai/$url.text.replaceAll("\\n", "").strip()" '
+            '-H "Authorization: $credentials.jina"',
+            inputs={"url": {"text": " https://heym.run\n"}},
+            credentials={"jina": "Bearer jina-secret"},
+        )
+
+        self.assertEqual(str(request.url), "https://r.jina.ai/https://heym.run")
+        self.assertEqual(request.headers["authorization"], "Bearer jina-secret")
+
+    def test_expression_argument_containing_a_space_is_one_token(self) -> None:
+        """A space inside an expression argument must not split the curl token."""
+        request = _run_curl(
+            'curl "https://api.example.com/?q=$q.text.replaceAll(", ", "+")"',
+            inputs={"q": {"text": "a, b, c"}},
+        )
+
+        self.assertEqual(str(request.url), "https://api.example.com/?q=a+b+c")
+
+    def test_json_body_expression_with_quoted_arguments(self) -> None:
+        """A quoted-argument expression in a JSON body still renders JSON-safely."""
+        request = _run_curl(
+            "curl -X POST https://api.example.com/data "
+            '-H "Content-Type: application/json" '
+            '-d \'{"text": $payload.text.replaceAll("\\n", " ")}\'',
+            inputs={"payload": {"text": "line1\nline2"}},
+        )
+
+        self.assertEqual(request.content.decode("utf-8"), '{"text": "line1 line2"}')
+
 
 if __name__ == "__main__":
     unittest.main()
