@@ -88,7 +88,9 @@ function handleEscape(event: KeyboardEvent): void {
   }
   event.preventDefault();
   event.stopImmediatePropagation();
-  if (isFullscreen.value) {
+  // Only exit fullscreen on Escape when the toggle exists; otherwise Escape closes
+  // (forced-fullscreen dialogs must not fall back to a "mini" sized shell).
+  if (isFullscreen.value && props.allowFullscreen) {
     isFullscreen.value = false;
   } else {
     emit("close");
@@ -251,7 +253,9 @@ function toggleFullscreen(): void {
 .dialog-backdrop {
   --dialog-backdrop-tint: 0.65;
   --dialog-backdrop-blur: 12px;
-  background: hsl(0 0% 0% / var(--dialog-backdrop-tint));
+  /* Instant tint + blur. Animating background-color (or backdrop-filter) over
+   * the page behind the dialog is the "renk geçişi / patlama" flash. */
+  background-color: hsl(0 0% 0% / var(--dialog-backdrop-tint));
   backdrop-filter: blur(var(--dialog-backdrop-blur));
 }
 
@@ -297,28 +301,6 @@ function toggleFullscreen(): void {
   }
 }
 
-@keyframes dialog-backdrop-in {
-  from {
-    background-color: hsl(0 0% 0% / 0);
-    backdrop-filter: blur(0px);
-  }
-  to {
-    background-color: hsl(0 0% 0% / var(--dialog-backdrop-tint));
-    backdrop-filter: blur(var(--dialog-backdrop-blur));
-  }
-}
-
-@keyframes dialog-backdrop-out {
-  from {
-    background-color: hsl(0 0% 0% / var(--dialog-backdrop-tint));
-    backdrop-filter: blur(var(--dialog-backdrop-blur));
-  }
-  to {
-    background-color: hsl(0 0% 0% / 0);
-    backdrop-filter: blur(0px);
-  }
-}
-
 .dialog-header {
   position: relative;
 }
@@ -348,15 +330,7 @@ function toggleFullscreen(): void {
   background: hsl(var(--muted));
 }
 
-/* Fading the container would make the backdrop its own backdrop root and snap the blur on at the end. */
-.dialog-enter-active .dialog-backdrop {
-  animation: dialog-backdrop-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-.dialog-leave-active .dialog-backdrop {
-  animation: dialog-backdrop-out 0.2s ease both;
-}
-
+/* Backdrop stays static (no tint/blur animation). Only the panel animates. */
 .dialog-enter-active .dialog-content {
   animation: dialog-scale-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
