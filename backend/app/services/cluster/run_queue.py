@@ -21,7 +21,7 @@ from app.config import settings
 from app.db.models import ActiveWorkflowExecution, ClusterDispatchState, WorkflowRunQueue
 from app.db.session import async_session_maker
 from app.services.cluster import registry
-from app.services.cluster.weights import pick_instance, rescale_counters
+from app.services.cluster.weights import level_counters, pick_instance, rescale_counters
 
 logger = logging.getLogger("cluster")
 
@@ -99,17 +99,19 @@ async def choose_target(placement: str) -> str | None:
         if state is None:
             return None
 
-        counters = rescale_counters(dict(state.counters or {}))
+        pool = registry.candidate_instances(instances, now=now)
+        weights = {i.id: i.weight for i in pool}
+        counters = level_counters(rescale_counters(dict(state.counters or {})), weights)
 
         if placement == "main_only":
             main = registry.find_main(instances)
             target = main.id if main and registry.is_live(main, now=now) else None
         else:
-            pool = registry.candidate_instances(instances, now=now)
-            target = pick_instance({i.id: i.weight for i in pool}, counters=counters)
+            target = pick_instance(weights, counters=counters)
 
         if target is not None:
             counters[target] = counters.get(target, 0) + 1
+        if counters != (state.counters or {}):
             state.counters = counters
         await db.commit()
         return target

@@ -5,6 +5,11 @@ forced to take. That single rule is what makes a percentage describe total load:
 forced work spends main's quota, so the next ANYWHERE runs fall to the workers.
 The consequence, which the UI and docs state: main's percentage is a ceiling,
 not a floor.
+
+A counter only means something while its instance is a candidate. An instance
+that was not one - Offline, Disabled, or on a version main cannot hand work to -
+must be re-entered at the pool's current position rather than repaid for the
+time it was away; see level_counters.
 """
 
 from __future__ import annotations
@@ -30,6 +35,34 @@ def pick_instance(weights: dict[str, int], *, counters: dict[str, int]) -> str |
         sorted(shares),
         key=lambda instance_id: shares[instance_id] * total - counters.get(instance_id, 0),
     )
+
+
+def level_counters(counters: dict[str, int], weights: dict[str, int]) -> dict[str, int]:
+    """Keep the pool's counters, forget the rest, and enter a joiner level.
+
+    Counters are lifetime totals, so an instance that was not a candidate for a
+    while builds a deficit it never earned, and pick_instance repays it in one
+    burst: after a worker spends a night on a mismatched version, a 70/30 split
+    runs as 0/100 for thousands of runs. Dropping an absent instance's counter
+    is how the next pass knows it was away; it then rejoins carrying the same
+    number of runs per unit of weight the pool already carries, so the split
+    holds from the first run after the rejoin.
+
+    A deficit built while the instance *was* a candidate is left alone - that is
+    the catch-up that makes main's percentage a ceiling.
+    """
+    if not weights:
+        return counters
+    present = {i: counters[i] for i in weights if i in counters}
+    joining = [i for i in weights if i not in present]
+    if not joining:
+        return present
+
+    served_weight = sum(weights[i] for i in present)
+    per_weight = sum(present.values()) / served_weight if served_weight else 0.0
+    for instance_id in joining:
+        present[instance_id] = round(per_weight * weights[instance_id])
+    return present
 
 
 def rescale_counters(counters: dict[str, int]) -> dict[str, int]:

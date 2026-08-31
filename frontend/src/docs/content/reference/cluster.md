@@ -50,6 +50,8 @@ So with a strong main and a smaller worker, start nearer 60/40 than the machines
 
 Weights are renormalized across the instances that are currently live and enabled. With `main=70, A=15, B=15`, if A goes offline the split becomes 70/85 and 15/85 between main and B, and returns to 70/15/15 when A comes back.
 
+**An instance that comes back is not owed the runs it missed.** Time spent Offline, Disabled or on a mismatched version is not counted against it, so a worker that spends a night unavailable rejoins at the pool's current position and the split reads 70/30 again from its first run — it does not absorb every run until it has caught up. A worker that was available the whole time still catches up, which is what makes main's percentage a ceiling.
+
 ### A new instance joins at zero
 
 An instance that has never been given a weight starts at 0, which would leave it Live, Enabled and receiving nothing. **Give new instances a share automatically** — on by default, under the instances table — fixes that: on the leader's next pass the newcomer is given an equal share of the pool, and the existing weights are scaled down keeping their ratios to each other, so a deliberate 70/30 still reads as roughly 70/30 afterwards. The total stays exactly 100.
