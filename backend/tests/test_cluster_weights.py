@@ -4,6 +4,7 @@ import unittest
 
 from app.services.cluster.weights import (
     COUNTER_RESCALE_THRESHOLD,
+    level_counters,
     normalized_weights,
     pick_instance,
     rescale_counters,
@@ -146,3 +147,51 @@ class SeedWeightsTests(unittest.TestCase):
         seeded = seed_weights({"main": (False, 0)})
         assert seeded is not None
         self.assertEqual(seeded, {"main": 100})
+
+
+class RejoinTests(unittest.TestCase):
+    """A machine that was not a candidate must not be repaid for that time.
+
+    Counters are lifetime totals. While an instance is Offline, Disabled or on a
+    version main cannot hand work to, every run charges the others, and the
+    absent machine builds a deficit it never earned. Repaying it sends it every
+    run until the debt clears.
+    """
+
+    def test_a_rejoining_worker_does_not_take_every_run(self) -> None:
+        """main ran a night alone; the worker updates and rejoins at 70/30."""
+        counters = level_counters({"main": 10_000}, {"main": 70, "worker": 30})
+        taken = {"main": 0, "worker": 0}
+        for _ in range(100):
+            winner = pick_instance({"main": 70, "worker": 30}, counters=counters)
+            counters[winner] = counters.get(winner, 0) + 1
+            taken[winner] += 1
+        self.assertEqual(taken, {"main": 70, "worker": 30})
+
+    def test_a_brand_new_worker_joins_a_busy_main_at_the_split(self) -> None:
+        counters = level_counters({"main": 5_000}, {"main": 70, "worker": 30})
+        first_ten = []
+        for _ in range(10):
+            winner = pick_instance({"main": 70, "worker": 30}, counters=counters)
+            counters[winner] = counters.get(winner, 0) + 1
+            first_ten.append(winner)
+        self.assertEqual(first_ten.count("main"), 7)
+
+    def test_a_joiner_enters_at_the_pools_own_position(self) -> None:
+        leveled = level_counters({"main": 700}, {"main": 70, "worker": 30})
+        self.assertEqual(leveled, {"main": 700, "worker": 300})
+
+    def test_an_instance_outside_the_pool_is_forgotten(self) -> None:
+        """Dropping the key is how the next pass knows it was away."""
+        self.assertEqual(level_counters({"main": 700, "gone": 300}, {"main": 70}), {"main": 700})
+
+    def test_a_present_instance_keeps_its_deficit(self) -> None:
+        """main_only runs still spend main's quota; that catch-up is the point."""
+        leveled = level_counters({"main": 90, "worker": 0}, {"main": 70, "worker": 30})
+        self.assertEqual(leveled, {"main": 90, "worker": 0})
+
+    def test_an_empty_pool_leaves_the_counters_alone(self) -> None:
+        self.assertEqual(level_counters({"main": 700}, {}), {"main": 700})
+
+    def test_a_pool_of_only_joiners_starts_at_zero(self) -> None:
+        self.assertEqual(level_counters({}, {"main": 70, "worker": 30}), {"main": 0, "worker": 0})

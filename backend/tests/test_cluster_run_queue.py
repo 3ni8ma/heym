@@ -1,9 +1,12 @@
 """Enqueue shape, expiry, and the guarantee that no credential is stored."""
 
+import contextlib
 import unittest
 import uuid
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.services.cluster.run_queue import (
     STATUS_QUEUED,
@@ -129,3 +132,118 @@ class StrandedClaimTests(unittest.TestCase):
                 claimed_at=None, has_active_execution=False, now=self.now, grace_seconds=60
             )
         )
+
+
+def _instance(instance_id: str, *, role: str, weight: int, version: str = "1.0.0", **over: object):
+    from app.services.cluster.registry import InstanceView
+
+    fields: dict = dict(
+        id=instance_id,
+        name=instance_id,
+        role=role,
+        enabled=True,
+        weight=weight,
+        weight_configured=True,
+        version=version,
+        schema_revision="rev",
+        keys_fingerprint="fp",
+        docker_ok=True,
+        db_latency_ms=1.0,
+        heartbeat_at=datetime.now(timezone.utc),
+    )
+    fields.update(over)
+    return InstanceView(**fields)
+
+
+class ChooseTargetTests(unittest.IsolatedAsyncioTestCase):
+    """The 70/30 split must survive a worker being away and coming back.
+
+    Counters are lifetime totals, so a worker that spent a night Offline or on a
+    mismatched version used to return owed every run it missed and take them all
+    back-to-back - a 70/30 cluster running 0/100 for thousands of runs.
+    """
+
+    def setUp(self) -> None:
+        self.state = SimpleNamespace(counters={})
+        self.instances: list = []
+
+    @contextlib.contextmanager
+    def _patched(self):
+        session = MagicMock()
+        session.commit = AsyncMock()
+        session.execute = AsyncMock(
+            return_value=SimpleNamespace(scalar_one_or_none=lambda: self.state)
+        )
+
+        @contextlib.asynccontextmanager
+        async def maker():
+            yield session
+
+        with (
+            patch("app.services.cluster.run_queue.async_session_maker", maker),
+            patch(
+                "app.services.cluster.run_queue.registry.list_instances",
+                AsyncMock(side_effect=lambda **_kw: list(self.instances)),
+            ),
+        ):
+            yield
+
+    async def _dispatch(self, count: int, placement: str = "anywhere") -> dict[str, int]:
+        from app.services.cluster.run_queue import choose_target
+
+        taken: dict[str, int] = {}
+        with self._patched():
+            for _ in range(count):
+                target = await choose_target(placement)
+                taken[target] = taken.get(target, 0) + 1
+        return taken
+
+    async def test_a_worker_that_rejoins_after_a_mismatch_does_not_take_every_run(self) -> None:
+        self.instances = [
+            _instance("main", role="main", weight=70),
+            _instance("worker", role="worker", weight=30, version="0.9.0"),
+        ]
+        away = await self._dispatch(200)
+        self.assertEqual(away, {"main": 200})
+
+        self.instances = [
+            _instance("main", role="main", weight=70),
+            _instance("worker", role="worker", weight=30),
+        ]
+        back = await self._dispatch(100)
+        self.assertEqual(back, {"main": 70, "worker": 30})
+
+    async def test_a_stretch_of_main_only_work_does_not_stale_an_absent_counter(self) -> None:
+        """The counter of an away worker must be forgotten on any dispatch."""
+        self.instances = [
+            _instance("main", role="main", weight=70),
+            _instance("worker", role="worker", weight=30),
+        ]
+        await self._dispatch(10)
+        self.instances[1] = _instance("worker", role="worker", weight=30, version="0.9.0")
+        await self._dispatch(200, placement="main_only")
+
+        self.instances[1] = _instance("worker", role="worker", weight=30)
+        back = await self._dispatch(100)
+        self.assertEqual(back, {"main": 70, "worker": 30})
+
+    async def test_main_only_work_still_spends_mains_quota(self) -> None:
+        """The catch-up that makes main's percentage a ceiling is preserved."""
+        self.instances = [
+            _instance("main", role="main", weight=70),
+            _instance("worker", role="worker", weight=30),
+        ]
+        await self._dispatch(30, placement="main_only")
+        after = await self._dispatch(70)
+        self.assertEqual(after, {"main": 40, "worker": 30})
+
+    async def test_an_offline_worker_receives_nothing_and_rejoins_level(self) -> None:
+        stale = datetime.now(timezone.utc) - timedelta(minutes=5)
+        self.instances = [
+            _instance("main", role="main", weight=70),
+            _instance("worker", role="worker", weight=30, heartbeat_at=stale),
+        ]
+        self.assertEqual(await self._dispatch(500), {"main": 500})
+
+        self.instances[1] = _instance("worker", role="worker", weight=30)
+        self.assertEqual(await self._dispatch(100), {"main": 70, "worker": 30})
