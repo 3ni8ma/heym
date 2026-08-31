@@ -3,7 +3,6 @@ import { computed, onScopeDispose, ref, watch, type ComputedRef } from "vue";
 /** Ids of the currently open dialogs, bottom-most first. */
 const dialogStack = ref<symbol[]>([]);
 
-
 function syncBodyScrollLock(): void {
   document.body.style.overflow = dialogStack.value.length > 0 ? "hidden" : "";
 }

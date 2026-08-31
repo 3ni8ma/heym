@@ -924,9 +924,7 @@ onMounted(async () => {
       title="Trace Details"
       title-class="text-lg sm:text-lg md:text-xl"
       size="3xl"
-      allow-fullscreen
       default-fullscreen
-      hide-fullscreen-toggle-on-mobile
       @close="closeDetail"
     >
       <template #header-actions>
