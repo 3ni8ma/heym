@@ -12,6 +12,7 @@ const {
   workflowStore,
   ragQueryInputRef,
   ragDocumentInputRef,
+  ragDocumentIdInputRef,
   selectedNode,
   selectedNodeEvaluateDialogLabel,
   vectorStoreOptions,
@@ -79,7 +80,64 @@ const {
       </p>
     </div>
 
-    <template v-if="selectedNode.data.ragOperation === 'insert'">
+    <template
+      v-if="
+        selectedNode.data.ragOperation === 'upsert' ||
+          selectedNode.data.ragOperation === 'delete'
+      "
+    >
+      <div class="space-y-2">
+        <Label>Document ID Field</Label>
+        <Input
+          :model-value="selectedNode.data.documentIdField || 'doc_id'"
+          placeholder="doc_id"
+          @update:model-value="updateNodeData('documentIdField', $event)"
+        />
+        <p class="text-xs text-muted-foreground">
+          Payload field that carries the document's unique ID (default:
+          <code>doc_id</code>)
+        </p>
+      </div>
+
+      <div class="space-y-2">
+        <Label>Document ID <span class="text-destructive">*</span></Label>
+        <ExpressionInput
+          ref="ragDocumentIdInputRef"
+          :model-value="selectedNode.data.documentId || ''"
+          placeholder="$input.id"
+          :rows="1"
+          :nodes="workflowStore.nodes"
+          :node-results="workflowStore.nodeResults"
+          :edges="workflowStore.edges"
+          :current-node-id="selectedNode.id"
+          :dialog-node-label="selectedNodeEvaluateDialogLabel"
+          dialog-key-label="Document ID"
+          field-key="documentId"
+          @update:model-value="updateNodeData('documentId', $event)"
+        />
+        <p
+          v-if="!selectedNode.data.documentId"
+          class="text-xs text-amber-500 flex items-center gap-1"
+        >
+          <AlertTriangle class="h-3 w-3" />
+          Document ID is required
+        </p>
+        <p class="text-xs text-muted-foreground">
+          {{
+            selectedNode.data.ragOperation === "delete"
+              ? "Every point whose ID field matches this value is deleted"
+              : "Points with this ID are replaced, then the new version is stored"
+          }}
+        </p>
+      </div>
+    </template>
+
+    <template
+      v-if="
+        selectedNode.data.ragOperation === 'insert' ||
+          selectedNode.data.ragOperation === 'upsert'
+      "
+    >
       <div class="space-y-2">
         <Label>Document Content <span class="text-destructive">*</span></Label>
         <ExpressionInput
@@ -103,14 +161,22 @@ const {
 
       <div class="space-y-2">
         <Label>Document Metadata (JSON)</Label>
-        <Textarea
+        <ExpressionInput
           :model-value="selectedNode.data.documentMetadata || '{}'"
-          placeholder="{&quot;source&quot;: &quot;manual&quot;, &quot;category&quot;: &quot;faq&quot;}"
+          placeholder="{&quot;source&quot;: &quot;manual&quot;, &quot;url&quot;: &quot;$start.url&quot;}"
           :rows="3"
+          :nodes="workflowStore.nodes"
+          :node-results="workflowStore.nodeResults"
+          :edges="workflowStore.edges"
+          :current-node-id="selectedNode.id"
+          :dialog-node-label="selectedNodeEvaluateDialogLabel"
+          dialog-key-label="Document metadata"
+          field-key="documentMetadata"
           @update:model-value="updateNodeData('documentMetadata', $event)"
         />
         <p class="text-xs text-muted-foreground">
-          JSON metadata to associate with the document
+          JSON metadata to store with the document. Values support expressions, so
+          <code>{ "url": "$start.url" }</code> stores the resolved value.
         </p>
       </div>
     </template>
@@ -232,6 +298,21 @@ const {
           <div>${{ selectedNode.data.label }}.success - Boolean</div>
           <div>${{ selectedNode.data.label }}.operation - "insert"</div>
           <div>${{ selectedNode.data.label }}.point_id - Vector ID</div>
+        </template>
+        <template v-else-if="selectedNode.data.ragOperation === 'upsert'">
+          <div>${{ selectedNode.data.label }}.success - Boolean</div>
+          <div>${{ selectedNode.data.label }}.operation - "upsert"</div>
+          <div>${{ selectedNode.data.label }}.point_id - Vector ID</div>
+          <div>${{ selectedNode.data.label }}.document_id - Unique document ID</div>
+          <div>${{ selectedNode.data.label }}.replaced - Boolean</div>
+          <div>${{ selectedNode.data.label }}.replaced_count - Replaced points</div>
+        </template>
+        <template v-else-if="selectedNode.data.ragOperation === 'delete'">
+          <div>${{ selectedNode.data.label }}.success - Boolean</div>
+          <div>${{ selectedNode.data.label }}.operation - "delete"</div>
+          <div>${{ selectedNode.data.label }}.document_id - Unique document ID</div>
+          <div>${{ selectedNode.data.label }}.deleted - Boolean</div>
+          <div>${{ selectedNode.data.label }}.deleted_count - Deleted points</div>
         </template>
         <template v-else-if="selectedNode.data.ragOperation === 'search'">
           <div>${{ selectedNode.data.label }}.success - Boolean</div>

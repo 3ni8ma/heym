@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
-import { AlertTriangle, ChevronDown, ChevronRight, Copy, Database, File, FileUp, Pencil, Plus, Share2, Trash2, Upload, Users, X } from "lucide-vue-next";
+import { AlertTriangle, ChevronDown, ChevronRight, Copy, Database, File, FileUp, Pencil, Plus, Share2, Trash2, Upload, Users, Workflow, X } from "lucide-vue-next";
 
 import type { CredentialListItem } from "@/types/credential";
 import type { Team, TeamShare } from "@/types/team";
@@ -494,6 +494,21 @@ async function loadItems(): Promise<void> {
   } finally {
     itemsLoading.value = false;
   }
+}
+
+/** Mirrors WORKFLOW_SOURCE_PREFIX in backend/app/services/vector_store.py. */
+const WORKFLOW_SOURCE_PREFIX = "workflow:";
+
+/** The workflow that stored the group, or "" when the source is a file or absent. */
+function workflowSourceName(source: string): string {
+  return source.startsWith(WORKFLOW_SOURCE_PREFIX)
+    ? source.slice(WORKFLOW_SOURCE_PREFIX.length)
+    : "";
+}
+
+/** Older workflow-written points carry no source at all; they are still deletable. */
+function sourceLabel(source: string): string {
+  return source || "No source";
 }
 
 function toggleSourceExpanded(source: string): void {
@@ -1247,8 +1262,22 @@ async function deleteItem(pointId: string): Promise<void> {
                   :is="expandedSources.has(group.source) ? ChevronDown : ChevronRight"
                   class="w-4 h-4 text-muted-foreground flex-shrink-0"
                 />
-                <File class="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                <span class="font-medium line-clamp-2 break-words min-w-0 flex-1">{{ group.source }}</span>
+                <component
+                  :is="workflowSourceName(group.source) ? Workflow : File"
+                  class="w-4 h-4 text-muted-foreground flex-shrink-0"
+                />
+                <span
+                  v-if="workflowSourceName(group.source)"
+                  class="line-clamp-2 break-words min-w-0 flex-1"
+                >
+                  <span class="text-muted-foreground">Added workflow: </span>
+                  <span class="font-medium">{{ workflowSourceName(group.source) }}</span>
+                </span>
+                <span
+                  v-else
+                  class="line-clamp-2 break-words min-w-0 flex-1"
+                  :class="group.source ? 'font-medium' : 'font-medium text-muted-foreground'"
+                >{{ sourceLabel(group.source) }}</span>
                 <span class="text-xs text-muted-foreground flex-shrink-0 whitespace-nowrap">
                   ({{ group.chunk_count }} chunks)
                 </span>
@@ -1265,7 +1294,11 @@ async function deleteItem(pointId: string): Promise<void> {
                 size="icon"
                 class="h-7 w-7 text-muted-foreground hover:text-destructive flex-shrink-0"
                 :loading="deletingSource === group.source"
-                title="Delete all chunks from this source"
+                :title="workflowSourceName(group.source)
+                  ? `Delete everything ${workflowSourceName(group.source)} added`
+                  : group.source
+                    ? 'Delete all chunks from this source'
+                    : 'Delete all chunks that have no source'"
                 @click.stop="deleteSource(group.source)"
               >
                 <Trash2 class="w-3.5 h-3.5" />

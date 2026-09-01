@@ -154,7 +154,7 @@ Pairs naturally with [Qdrant RAG](../nodes/rag-node.md), [Agent Node](../nodes/a
 
 #### [RAG / Vector Store](../nodes/rag-node.md)
 
-The RAG / Vector Store node inserts documents into or searches a vector store for retrieval-augmented generation. A Database dropdown selects the backend — **Qdrant** (external server) or **Postgres (pgvector)** (Heym's own database, no external service), defaulting to Qdrant. Choose a vector store from the [Vectorstores](../tabs/vectorstores-tab.md) tab and set the operation to insert or search. Search supports metadata filters and optional Cohere reranking, and returns an array of results with text, score, metadata, reranked flag, and count for use in [LLM](../nodes/llm-node.md) or [Agent Node](../nodes/agent-node.md) flows.
+The RAG / Vector Store node inserts, upserts, deletes, and searches documents in a vector store for retrieval-augmented generation. A Database dropdown selects the backend — **Qdrant** (external server) or **Postgres (pgvector)** (Heym's own database, no external service), defaulting to Qdrant. Choose a vector store from the [Vectorstores](../tabs/vectorstores-tab.md) tab and set the operation to insert, upsert, delete, or search. Upsert and delete address a document by a unique id stored inside the payload — a **Document ID Field** names that field (default `doc_id`) and **Document ID** carries its value — so a document keeps the id your own system already uses: upsert replaces every matching point before storing the new version, and delete reports whether anything matched. Document metadata accepts expressions in its values, so `{"url": "$start.url"}` stores what the run produced. Search supports metadata filters and optional Cohere reranking, and returns an array of results with text, score, metadata, reranked flag, and count for use in [LLM](../nodes/llm-node.md) or [Agent Node](../nodes/agent-node.md) flows.
 
 Common downstream nodes are [LLM](../nodes/llm-node.md) and [Agent Node](../nodes/agent-node.md); vector store setup lives in [Vectorstores](../tabs/vectorstores-tab.md).
 
@@ -733,7 +733,7 @@ See also [Credentials](./credentials.md), [Credentials Sharing](./credentials-sh
 
 ### [Vectorstores](../tabs/vectorstores-tab.md)
 
-The Vectorstores tab manages vector stores used by [RAG](../nodes/rag-node.md) nodes. Create a store with a name and a vector store [credential](./credentials.md) — *RAG: Qdrant + OpenAI* (external Qdrant) or *RAG: Psql + OpenAI* (Heym's own Postgres via pgvector), which fixes the store's backend — optionally set a collection name, then upload documents (PDF, TXT, etc.). Manage content (view, delete sources), edit store details, and share stores with users. In a [RAG](../nodes/rag-node.md) node, pick the Database, select the vector store, and run insert or search operations.
+The Vectorstores tab manages vector stores used by [RAG](../nodes/rag-node.md) nodes. Create a store with a name and a vector store [credential](./credentials.md) — *RAG: Qdrant + OpenAI* (external Qdrant) or *RAG: Psql + OpenAI* (Heym's own Postgres via pgvector), which fixes the store's backend — optionally set a collection name, then upload documents (PDF, TXT, etc.). Manage content (view, delete sources), edit store details, and share stores with users. In a [RAG](../nodes/rag-node.md) node, pick the Database, select the vector store, and run insert, upsert, delete, or search operations.
 
 See also [Qdrant RAG](../nodes/rag-node.md), [Credentials](./credentials.md), and [Teams](./teams.md).
 

@@ -276,6 +276,43 @@ describe("buildReleaseTourCatalog", () => {
 
     expect(catalog?.slides.map((slide) => slide.id)).toEqual(["newer", "older"]);
   });
+
+  it("keeps each slide's own feature date, not the catalog's", () => {
+    const older = makeRelease({
+      releaseId: "2026.08",
+      publishedAt: new Date("2026-08-01T00:00:00Z"),
+    });
+    const newer = makeRelease({
+      releaseId: "2026.09",
+      publishedAt: new Date("2026-09-01T00:00:00Z"),
+      releaseTour: {
+        label: "New in Heym",
+        introTitle: "Latest release",
+        introDescription: "Latest feature",
+        sectionOrder: ["newest"],
+      },
+      sections: [
+        {
+          id: "newest",
+          title: "Newest feature",
+          blocks: [{ type: "prose", markdown: "newest notes" }],
+          tour: { description: "newest tour", useCases: ["n"], tourVisual: "newest-visual" },
+        },
+      ],
+    });
+
+    const catalog = buildReleaseTourCatalog([older, newer]);
+
+    // The catalog carries the newest release's date, but an August slide stays August.
+    expect(catalog?.publishedAt.toISOString()).toBe("2026-09-01T00:00:00.000Z");
+    expect(
+      catalog?.slides.map((slide) => slide.publishedAt.toISOString()),
+    ).toEqual([
+      "2026-09-01T00:00:00.000Z",
+      "2026-08-01T00:00:00.000Z",
+      "2026-08-01T00:00:00.000Z",
+    ]);
+  });
 });
 
 describe("selectPendingReleaseTour", () => {
@@ -311,18 +348,15 @@ describe("selectPendingReleaseTour", () => {
 });
 
 describe("shipped release registry", () => {
-  it("keeps the existing August tours in newest-first catalog order", () => {
+  it("keeps only the five most recent tours, newest first", () => {
     const catalog = buildReleaseTourCatalog(RELEASE_REGISTRY);
 
     expect(catalog?.slides.map((slide) => slide.id)).toEqual([
+      "rag-upsert-delete",
       "cluster-load-distribution",
       "span-details-inspector",
       "oidc-sso",
       "playwright-ai-steps",
-      "html-output-mapper",
-      "workflow-listing",
-      "folder-icons",
-      "code-node",
     ]);
   });
 

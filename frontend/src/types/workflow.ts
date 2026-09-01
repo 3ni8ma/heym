@@ -306,7 +306,7 @@ export type LLMOutputType = "text" | "image";
 
 export type RedisOperation = "set" | "get" | "hasKey" | "deleteKey";
 
-export type RagOperation = "insert" | "search";
+export type RagOperation = "insert" | "upsert" | "delete" | "search";
 
 export type GristOperation =
   | "getRecord"
@@ -569,6 +569,8 @@ export interface NodeData {
   vectorStoreId?: string;
   documentContent?: string;
   documentMetadata?: string;
+  documentIdField?: string;
+  documentId?: string;
   queryText?: string;
   searchLimit?: number;
   metadataFilters?: string;

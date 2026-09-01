@@ -99,6 +99,8 @@ const FIELD_LABELS: Record<string, string> = {
   maxToolIterations: "Max Iterations",
   duration: "Duration (ms)",
   ragOperation: "RAG Operation",
+  documentIdField: "Document ID Field",
+  documentId: "Document ID",
   gristOperation: "Grist Operation",
   githubOperation: "GitHub Operation",
   redisOperation: "Redis Operation",

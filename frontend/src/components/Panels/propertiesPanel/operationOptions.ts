@@ -15,6 +15,8 @@ function flattenOperationGroups(groups: OperationOptionGroup[]): OperationOption
 export const ragOperationOptions: OperationOption[] = [
   { value: "", label: "Select operation" },
   { value: "insert", label: "Insert" },
+  { value: "upsert", label: "Upsert" },
+  { value: "delete", label: "Delete" },
   { value: "search", label: "Search" },
 ];
 

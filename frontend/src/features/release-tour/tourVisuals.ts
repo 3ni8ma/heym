@@ -1,24 +1,18 @@
 import type { Component } from "vue";
 
 import ClusterInstancesTourVisual from "@/features/release-tour/components/visuals/ClusterInstancesTourVisual.vue";
-import CodeNodeTourVisual from "@/features/release-tour/components/visuals/CodeNodeTourVisual.vue";
 import FallbackTourVisual from "@/features/release-tour/components/visuals/FallbackTourVisual.vue";
-import FolderIconsTourVisual from "@/features/release-tour/components/visuals/FolderIconsTourVisual.vue";
-import HtmlOutputMapperTourVisual from "@/features/release-tour/components/visuals/HtmlOutputMapperTourVisual.vue";
 import PlaywrightAiStepsTourVisual from "@/features/release-tour/components/visuals/PlaywrightAiStepsTourVisual.vue";
+import RagUpsertDeleteTourVisual from "@/features/release-tour/components/visuals/RagUpsertDeleteTourVisual.vue";
 import SsoLoginTourVisual from "@/features/release-tour/components/visuals/SsoLoginTourVisual.vue";
-import WorkflowListingTourVisual from "@/features/release-tour/components/visuals/WorkflowListingTourVisual.vue";
 import SpanDetailsInspectorTourVisual from "@/features/release-tour/components/visuals/SpanDetailsInspectorTourVisual.vue";
 
 /** Maps a section's `tourVisual` key to the mock UI that demonstrates it. */
 export const TOUR_VISUALS: Record<string, Component> = {
   "cluster-instances": ClusterInstancesTourVisual,
-  "code-node": CodeNodeTourVisual,
-  "folder-icons": FolderIconsTourVisual,
-  "html-output-mapper": HtmlOutputMapperTourVisual,
   "playwright-ai-steps": PlaywrightAiStepsTourVisual,
+  "rag-upsert-delete": RagUpsertDeleteTourVisual,
   "sso-login": SsoLoginTourVisual,
-  "workflow-listing": WorkflowListingTourVisual,
   "span-details-inspector": SpanDetailsInspectorTourVisual,
 };
 

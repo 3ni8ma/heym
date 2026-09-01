@@ -602,6 +602,7 @@ export function usePropertiesPanelController() {
   const vectorStores = ref<{ id: string; name: string; backend: string }[]>([]);
   const ragQueryInputRef = ref<ExpandableFieldRef | null>(null);
   const ragDocumentInputRef = ref<ExpandableFieldRef | null>(null);
+  const ragDocumentIdInputRef = ref<ExpandableFieldRef | null>(null);
   const rabbitmqExchangeInputRef = ref<ExpandableFieldRef | null>(null);
   const rabbitmqRoutingKeyInputRef = ref<ExpandableFieldRef | null>(null);
   const rabbitmqQueueNameInputRef = ref<ExpandableFieldRef | null>(null);
@@ -2206,6 +2207,7 @@ export function usePropertiesPanelController() {
     throwErrorMessageInputRef.value?.closeExpandDialog();
     ragQueryInputRef.value?.closeExpandDialog();
     ragDocumentInputRef.value?.closeExpandDialog();
+    ragDocumentIdInputRef.value?.closeExpandDialog();
     rabbitmqExchangeInputRef.value?.closeExpandDialog();
     rabbitmqRoutingKeyInputRef.value?.closeExpandDialog();
     rabbitmqQueueNameInputRef.value?.closeExpandDialog();
@@ -2648,10 +2650,14 @@ export function usePropertiesPanelController() {
         const focusField = workflowStore.focusField;
         if (focusField === "documentContent" && ragDocumentInputRef.value) {
           nextTick(() => ragDocumentInputRef.value?.openExpandDialog());
+        } else if (focusField === "documentId" && ragDocumentIdInputRef.value) {
+          nextTick(() => ragDocumentIdInputRef.value?.openExpandDialog());
         } else if (focusField === "queryText" && ragQueryInputRef.value) {
           nextTick(() => ragQueryInputRef.value?.openExpandDialog());
-        } else if (op === "insert" && ragDocumentInputRef.value) {
+        } else if ((op === "insert" || op === "upsert") && ragDocumentInputRef.value) {
           nextTick(() => ragDocumentInputRef.value?.openExpandDialog());
+        } else if (op === "delete" && ragDocumentIdInputRef.value) {
+          nextTick(() => ragDocumentIdInputRef.value?.openExpandDialog());
         } else if (op === "search" && ragQueryInputRef.value) {
           nextTick(() => ragQueryInputRef.value?.openExpandDialog());
         } else if (ragQueryInputRef.value) {
@@ -9128,6 +9134,7 @@ export function usePropertiesPanelController() {
     gristColumns,
     ragQueryInputRef,
     ragDocumentInputRef,
+    ragDocumentIdInputRef,
     rabbitmqExchangeInputRef,
     rabbitmqRoutingKeyInputRef,
     rabbitmqQueueNameInputRef,
