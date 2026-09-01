@@ -539,6 +539,11 @@ def _normalize_js_logical_ops_for_eval(processed: str) -> str:
 
 _SHARED_EXECUTOR = ThreadPoolExecutor(max_workers=8)
 
+_BACKGROUND_WORKFLOW_EXECUTOR = ThreadPoolExecutor(
+    max_workers=16, thread_name_prefix="heym-bg-workflow"
+)
+_BACKGROUND_NODE_EXECUTOR = ThreadPoolExecutor(max_workers=16, thread_name_prefix="heym-bg-node")
+
 _HTTP_CLIENT_LOCK = Lock()
 _EXPRESSION_EVAL_CONTEXT_LOCAL = local()
 
@@ -1940,8 +1945,10 @@ class WorkflowExecutor:
         workflow_name: str = "",
         workflow_description: str = "",
         execution_id: str = "",
+        node_pool: ThreadPoolExecutor | None = None,
     ) -> None:
         self.nodes = {node["id"]: node for node in nodes}
+        self._node_pool = node_pool or _SHARED_EXECUTOR
         self.agent_progress_queue = agent_progress_queue
         self.edges = edges
         self.node_outputs: dict[str, dict] = {}
@@ -3940,6 +3947,7 @@ class WorkflowExecutor:
             cancel_event=sub_cancel_event,
             invoked_by_agent=True,
             execution_id=str(_sub_execution_id),
+            node_pool=self._node_pool,
         )
         enriched_inputs = {
             "headers": {},
@@ -7347,7 +7355,7 @@ class WorkflowExecutor:
                                         if dp[e["target"]] == 0:
                                             dq.append(e["target"])
 
-                        _SHARED_EXECUTOR.submit(run_downstream)
+                        self._node_pool.submit(run_downstream)
                     return results, error_flow_output
 
             for edge in edges:
@@ -7539,7 +7547,7 @@ class WorkflowExecutor:
                                 inputs = self.get_loop_reexecution_inputs(
                                     target, source_node_id, active_edges
                                 )
-                                new_future = _SHARED_EXECUTOR.submit(
+                                new_future = self._node_pool.submit(
                                     self.execute_node_parallel, target, inputs
                                 )
                                 running_futures[new_future] = target
@@ -7577,7 +7585,7 @@ class WorkflowExecutor:
                 if already_running:
                     continue
                 inputs = self.get_node_inputs_for_edges(target, active_edges)
-                new_future = _SHARED_EXECUTOR.submit(self.execute_node_parallel, target, inputs)
+                new_future = self._node_pool.submit(self.execute_node_parallel, target, inputs)
                 running_futures[new_future] = target
 
         root_nodes = self._prioritize_ready_node_ids(
@@ -7603,7 +7611,7 @@ class WorkflowExecutor:
                 completed_nodes.add(node_id)
                 schedule_downstream(node_id)
             else:
-                future = _SHARED_EXECUTOR.submit(
+                future = self._node_pool.submit(
                     self.execute_node_parallel,
                     node_id,
                     self.get_node_inputs_for_edges(node_id, active_edges),
@@ -7710,7 +7718,7 @@ class WorkflowExecutor:
                                                             inp = self.get_loop_reexecution_inputs(
                                                                 tgt, nid, active_edges
                                                             )
-                                                            new_f = _SHARED_EXECUTOR.submit(
+                                                            new_f = self._node_pool.submit(
                                                                 self.execute_node_parallel,
                                                                 tgt,
                                                                 inp,
@@ -7732,7 +7740,7 @@ class WorkflowExecutor:
                                                             inp = self.get_node_inputs_for_edges(
                                                                 tgt, active_edges
                                                             )
-                                                            new_f = _SHARED_EXECUTOR.submit(
+                                                            new_f = self._node_pool.submit(
                                                                 self.execute_node_parallel,
                                                                 tgt,
                                                                 inp,
@@ -8194,7 +8202,7 @@ def resume_workflow_execution(
                             for pending_node_id in running_futures.values()
                         )
                         if not already_running:
-                            new_future = _SHARED_EXECUTOR.submit(
+                            new_future = wf_executor._node_pool.submit(
                                 wf_executor.execute_node_parallel,
                                 target,
                                 wf_executor.get_loop_reexecution_inputs(
@@ -8238,7 +8246,7 @@ def resume_workflow_execution(
             )
             if already_running:
                 continue
-            new_future = _SHARED_EXECUTOR.submit(
+            new_future = wf_executor._node_pool.submit(
                 wf_executor.execute_node_parallel,
                 target,
                 wf_executor.get_node_inputs_for_edges(target, active_edges),
@@ -8247,7 +8255,7 @@ def resume_workflow_execution(
 
     with pending_lock:
         if hitl_resume_mode in {"rerun_agent", "continue_agent"}:
-            rerun_future = _SHARED_EXECUTOR.submit(
+            rerun_future = wf_executor._node_pool.submit(
                 wf_executor.execute_node_parallel,
                 paused_node_id,
                 wf_executor.get_node_inputs_for_edges(paused_node_id, active_edges),
@@ -8343,7 +8351,7 @@ def resume_workflow_execution(
                                                         for pending_node_id in remaining_futures.values()
                                                     )
                                                     if not already:
-                                                        new_future = _SHARED_EXECUTOR.submit(
+                                                        new_future = wf_executor._node_pool.submit(
                                                             wf_executor.execute_node_parallel,
                                                             tgt,
                                                             wf_executor.get_loop_reexecution_inputs(
@@ -8364,7 +8372,7 @@ def resume_workflow_execution(
                                                     for pending_node_id in remaining_futures.values()
                                                 )
                                                 if not already:
-                                                    new_future = _SHARED_EXECUTOR.submit(
+                                                    new_future = wf_executor._node_pool.submit(
                                                         wf_executor.execute_node_parallel,
                                                         tgt,
                                                         wf_executor.get_node_inputs_for_edges(
@@ -8571,7 +8579,7 @@ def execute_llm_batch_notification_branch(
         if already_running:
             return
         _enqueue_start(node_id)
-        new_future = _SHARED_EXECUTOR.submit(
+        new_future = wf_executor._node_pool.submit(
             wf_executor.execute_node_parallel,
             node_id,
             (
@@ -8838,7 +8846,7 @@ def execute_hitl_notification_branch(
                         pending_node_id == target for pending_node_id in running_futures.values()
                     )
                     if not already_running:
-                        new_future = _SHARED_EXECUTOR.submit(
+                        new_future = wf_executor._node_pool.submit(
                             wf_executor.execute_node_parallel,
                             target,
                             wf_executor.get_loop_reexecution_inputs(
@@ -8873,7 +8881,7 @@ def execute_hitl_notification_branch(
                         pending_node_id == target for pending_node_id in running_futures.values()
                     )
                     if not already_running:
-                        new_future = _SHARED_EXECUTOR.submit(
+                        new_future = wf_executor._node_pool.submit(
                             wf_executor.execute_node_parallel,
                             target,
                             wf_executor.get_node_inputs_for_edges(target, active_edges),
@@ -9303,7 +9311,7 @@ def _execute_workflow_streaming_impl(
                     ):
                         already_running = any(nid == target for nid in running_futures.values())
                         if not already_running:
-                            new_future = _SHARED_EXECUTOR.submit(
+                            new_future = wf_executor._node_pool.submit(
                                 execute_and_report,
                                 target,
                                 wf_executor.get_loop_reexecution_inputs(
@@ -9339,7 +9347,7 @@ def _execute_workflow_streaming_impl(
                     else:
                         already_running = any(nid == target for nid in running_futures.values())
                         if not already_running:
-                            new_future = _SHARED_EXECUTOR.submit(execute_and_report, target)
+                            new_future = wf_executor._node_pool.submit(execute_and_report, target)
                             running_futures[new_future] = target
 
     root_nodes = [nid for nid, count in pending_count.items() if count == 0]
@@ -9364,7 +9372,7 @@ def _execute_workflow_streaming_impl(
             nodes_to_schedule.append(node_id)
             schedule_downstream(node_id)
         else:
-            future = _SHARED_EXECUTOR.submit(execute_and_report, node_id)
+            future = wf_executor._node_pool.submit(execute_and_report, node_id)
             running_futures[future] = node_id
 
     for skipped_id in nodes_to_schedule:

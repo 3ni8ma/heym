@@ -54,7 +54,8 @@ def execute(ctx: NodeExecutionContext) -> object:
     _workflow_executor = import_module("app.services.workflow_executor")
     SubWorkflowExecution = _workflow_executor.SubWorkflowExecution  # noqa: N806
     WorkflowExecutor = _workflow_executor.WorkflowExecutor  # noqa: N806
-    _SHARED_EXECUTOR = _workflow_executor._SHARED_EXECUTOR  # noqa: N806
+    _BACKGROUND_WORKFLOW_EXECUTOR = _workflow_executor._BACKGROUND_WORKFLOW_EXECUTOR  # noqa: N806
+    _BACKGROUND_NODE_EXECUTOR = _workflow_executor._BACKGROUND_NODE_EXECUTOR  # noqa: N806
     _register_sub_execution = _workflow_executor._register_sub_execution
     self = ctx.executor
     node_id = ctx.node_id
@@ -131,6 +132,7 @@ def execute(ctx: NodeExecutionContext) -> object:
             cancel_event=_exec_node_cancel_event,
             invoked_by_agent=self._invoked_by_agent,
             execution_id=str(_sub_exec_id),
+            node_pool=(_BACKGROUND_NODE_EXECUTOR if execute_do_not_wait else self._node_pool),
         )
         enriched_execute_inputs = {
             "headers": {},
@@ -167,7 +169,7 @@ def execute(ctx: NodeExecutionContext) -> object:
                     )
                     bg_callback_done.set()
 
-            bg_future = _SHARED_EXECUTOR.submit(
+            bg_future = _BACKGROUND_WORKFLOW_EXECUTOR.submit(
                 sub_executor.execute,
                 workflow_id=uuid.UUID(execute_workflow_id),
                 initial_inputs=enriched_execute_inputs,

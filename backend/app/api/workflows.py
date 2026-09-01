@@ -3885,10 +3885,7 @@ async def execute_workflow_stream(
                 extra = _serialize_sub_workflow_executions(wf_exec.sub_workflow_executions)
                 if extra and final_result:
                     existing = final_result.get("sub_workflow_executions") or []
-                    seen = {s.get("workflow_id") for s in existing}
-                    final_result["sub_workflow_executions"] = existing + [
-                        s for s in extra if s.get("workflow_id") not in seen
-                    ]
+                    final_result["sub_workflow_executions"] = existing + extra[len(existing) :]
         except WorkflowTimeoutError as exc:
             # Surface as a failed run: emit a final event (so the canvas shows the
             # timeout) and set final_result so it is persisted with status "error".

@@ -3,7 +3,12 @@ import uuid
 from threading import Event
 from unittest.mock import patch
 
-from app.services.workflow_executor import NodeResult, WorkflowExecutor, execute_workflow_streaming
+from app.services.workflow_executor import (
+    _SHARED_EXECUTOR,
+    NodeResult,
+    WorkflowExecutor,
+    execute_workflow_streaming,
+)
 
 
 class _RetryingWorkflowExecutor(WorkflowExecutor):
@@ -84,6 +89,7 @@ class _FakeRetryStreamingExecutor:
         self.loop_states: dict[str, dict[str, int]] = {}
         self.node_outputs: dict[str, dict] = {}
         self._cancel_event = cancel_event
+        self._node_pool = _SHARED_EXECUTOR
         self._sequence = 0
 
     def _arm_deadline(self) -> None:
