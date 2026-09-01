@@ -61,9 +61,12 @@ const panelStyle = computed<CSSProperties>(() => {
   };
 });
 
+// The catalog spans several releases, so the date follows the slide on screen,
+// not the newest release the catalog inherited its own date from.
 const publishedLabel = computed(() => {
-  if (!props.release) return "";
-  return props.release.publishedAt.toLocaleDateString(undefined, {
+  const publishedAt = currentSlide.value?.publishedAt ?? props.release?.publishedAt;
+  if (!publishedAt) return "";
+  return publishedAt.toLocaleDateString(undefined, {
     month: "long",
     year: "numeric",
   });

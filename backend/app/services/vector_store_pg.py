@@ -10,6 +10,8 @@ from app.services.vector_store import (
     SearchResult,
     VectorStoreItem,
     VectorStoreSourceGroup,
+    upsert_payload_metadata,
+    upsert_point_id,
 )
 
 TABLE = "vector_store_items"
@@ -221,6 +223,56 @@ class PgVectorStoreService:
             )
         return results
 
+    def upsert_by_field(
+        self,
+        collection_name: str,
+        id_field: str,
+        id_value: str,
+        text: str,
+        metadata: dict | None = None,
+    ) -> tuple[str, int]:
+        self._require_backend()
+        embedding = self.embedding_service.embed_text(text)
+        meta = upsert_payload_metadata(metadata, id_field, id_value)
+        point_id = upsert_point_id(collection_name, id_field, id_value)
+        # Replace and insert in one transaction so a failed embed/insert cannot
+        # leave the collection without the document it was asked to update.
+        with self.engine.begin() as conn:
+            replaced = (
+                conn.execute(
+                    self._delete_by_field_stmt(),
+                    {"c": collection_name, "mf": json.dumps({id_field: id_value})},
+                ).rowcount
+                or 0
+            )
+            conn.execute(
+                self._insert_stmt(),
+                {
+                    "id": point_id,
+                    "c": collection_name,
+                    "t": text,
+                    "e": _vec_literal(embedding),
+                    "m": json.dumps(meta),
+                    "s": meta.get("source"),
+                    "fs": meta.get("file_size"),
+                },
+            )
+        return point_id, replaced
+
+    def delete_by_field(self, collection_name: str, id_field: str, id_value: str) -> int:
+        if not self._table_exists():
+            return 0
+        with self.engine.begin() as conn:
+            result = conn.execute(
+                self._delete_by_field_stmt(),
+                {"c": collection_name, "mf": json.dumps({id_field: id_value})},
+            )
+        return result.rowcount or 0
+
+    @staticmethod
+    def _delete_by_field_stmt():
+        return text(f"DELETE FROM {TABLE} WHERE collection_name = :c AND metadata @> (:mf)::jsonb")
+
     def delete_points(self, collection_name: str, point_ids: list[str]) -> bool:
         if not point_ids:
             return True
@@ -237,10 +289,18 @@ class PgVectorStoreService:
     def delete_by_source(self, collection_name: str, source: str) -> int:
         if not self._table_exists():
             return 0
+        # An empty source addresses the points that carry no source at all — the group
+        # the UI lists separately, whose column is NULL rather than blank.
+        params: dict = {"c": collection_name}
+        if source:
+            where = "source = :s"
+            params["s"] = source
+        else:
+            where = "source IS NULL OR source = ''"
         with self.engine.begin() as conn:
             conn.execute(
-                text(f"DELETE FROM {TABLE} WHERE collection_name = :c AND source = :s"),
-                {"c": collection_name, "s": source},
+                text(f"DELETE FROM {TABLE} WHERE collection_name = :c AND ({where})"),
+                params,
             )
         return 1
 
@@ -313,7 +373,7 @@ class PgVectorStoreService:
             total_items += 1
             meta = dict(r.metadata) if r.metadata else {}
             text_value = r.text or ""
-            source = r.source or "Unknown"
+            source = r.source or ""
             file_size = r.file_size
             truncated = (
                 text_value[:text_truncate_length] + "..."

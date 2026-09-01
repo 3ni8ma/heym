@@ -23,8 +23,12 @@ The **Vectorstores** tab manages vector stores used by [RAG](../nodes/rag-node.m
 
 ## Managing Content
 
-- **View items** – See source groups and document counts per store
-- **Delete sources** – Remove specific files or source groups from a store
+- **View items** – See source groups and document counts per store. Uploaded files group
+  under their filename; documents a [RAG node](../nodes/rag-node.md) stored without a
+  `source` of their own group under **Added workflow: _name_**, naming the workflow that
+  wrote them
+- **Delete sources** – Remove specific files or source groups from a store, including
+  everything one workflow added
 - **Edit store** – Change name, description, or credential
 
 ## Sharing

@@ -627,7 +627,7 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
   rag: {
     type: "rag",
     label: "RAG / Vector Store",
-    description: "Insert or search documents in a Qdrant or Postgres vector store",
+    description: "Insert, upsert, delete, or search documents in a Qdrant or Postgres vector store",
     color: "node-rag",
     icon: "Search",
     inputs: 1,
@@ -639,6 +639,8 @@ export const NODE_DEFINITIONS: Record<NodeType, NodeDefinition> = {
       ragOperation: undefined,
       documentContent: "$input.text",
       documentMetadata: "{}",
+      documentIdField: "doc_id",
+      documentId: "",
       queryText: "$input.text",
       searchLimit: 5,
       metadataFilters: "{}",

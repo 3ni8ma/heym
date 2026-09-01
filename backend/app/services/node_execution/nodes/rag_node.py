@@ -5,6 +5,61 @@ import json
 from app.services.node_execution.base import NodeExecutionContext
 
 
+def _parse_metadata(raw: object) -> dict:
+    """Metadata JSON as configured on the node, tolerating an empty or invalid value."""
+    try:
+        if isinstance(raw, str):
+            return json.loads(raw) if raw.strip() else {}
+        return dict(raw) if raw else {}
+    except Exception:
+        return {}
+
+
+def _resolve_metadata_expressions(executor, value: object, inputs: dict, node_id: str) -> object:
+    """Resolve ``$`` expressions in every string inside parsed metadata JSON.
+
+    Values are resolved after the JSON is parsed, not by templating the raw text, so a
+    resolved value containing a quote or a newline cannot break the document apart.
+    """
+    if isinstance(value, dict):
+        return {
+            key: _resolve_metadata_expressions(executor, item, inputs, node_id)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_resolve_metadata_expressions(executor, item, inputs, node_id) for item in value]
+    if not isinstance(value, str) or "$" not in value:
+        return value
+    # A whole-string expression keeps its type, so a number stays a number and still
+    # matches a metadata filter; anything else is a text template.
+    if executor._is_single_dollar_expression(value):
+        return executor.resolve_expression(value.strip(), inputs, node_id, preserve_type=True)
+    return executor._resolve_value_with_dollar_refs(value, inputs, node_id)
+
+
+def _with_workflow_source(executor, metadata: dict) -> dict:
+    """Name the workflow as the source when the author supplied none of their own."""
+    from app.services.vector_store import WORKFLOW_SOURCE_PREFIX
+
+    if metadata.get("source"):
+        return metadata
+
+    name = str(executor._get_workflow_metadata()[0] or "").strip()
+    if not name:
+        return metadata
+    return {**metadata, "source": f"{WORKFLOW_SOURCE_PREFIX}{name}"}
+
+
+def _metadata_from_node_data(executor, node_data: dict, inputs: dict, node_id: str) -> dict:
+    """Node metadata JSON with expressions resolved and Dot* values made serializable."""
+    metadata = _parse_metadata(node_data.get("documentMetadata", "{}"))
+    resolved = _resolve_metadata_expressions(executor, metadata, inputs, node_id)
+    unwrapped = executor._unwrap_value(resolved)
+    if not isinstance(unwrapped, dict):
+        return {}
+    return _with_workflow_source(executor, unwrapped)
+
+
 def execute(ctx: NodeExecutionContext) -> object:
     """Execute the rag node."""
     self = ctx.executor
@@ -48,14 +103,7 @@ def execute(ctx: NodeExecutionContext) -> object:
         document_content = node_data.get("documentContent", "")
         document_content = self.evaluate_message_template(document_content, inputs, node_id)
 
-        metadata_json = node_data.get("documentMetadata", "{}")
-        try:
-            if isinstance(metadata_json, str):
-                metadata = json.loads(metadata_json) if metadata_json else {}
-            else:
-                metadata = metadata_json or {}
-        except Exception:
-            metadata = {}
+        metadata = _metadata_from_node_data(self, node_data, inputs, node_id)
 
         point_id = service.insert(collection_name, document_content, metadata)
         output = {
@@ -63,6 +111,52 @@ def execute(ctx: NodeExecutionContext) -> object:
             "operation": "insert",
             "point_id": point_id,
         }
+
+    elif operation in ("upsert", "delete"):
+        from app.services.vector_store import DEFAULT_DOCUMENT_ID_FIELD
+
+        id_field = str(node_data.get("documentIdField") or "").strip() or DEFAULT_DOCUMENT_ID_FIELD
+
+        raw_document_id = node_data.get("documentId", "")
+        document_id = ""
+        if raw_document_id not in (None, ""):
+            document_id = str(
+                self.evaluate_message_template(str(raw_document_id), inputs, node_id)
+            ).strip()
+        if not document_id:
+            raise ValueError(f"RAG {operation} operation requires a document ID")
+
+        if operation == "upsert":
+            document_content = node_data.get("documentContent", "")
+            document_content = self.evaluate_message_template(document_content, inputs, node_id)
+            metadata = _metadata_from_node_data(self, node_data, inputs, node_id)
+
+            point_id, replaced = service.upsert_by_field(
+                collection_name,
+                id_field,
+                document_id,
+                document_content,
+                metadata,
+            )
+            output = {
+                "success": True,
+                "operation": "upsert",
+                "point_id": point_id,
+                "id_field": id_field,
+                "document_id": document_id,
+                "replaced": replaced > 0,
+                "replaced_count": replaced,
+            }
+        else:
+            deleted_count = service.delete_by_field(collection_name, id_field, document_id)
+            output = {
+                "success": True,
+                "operation": "delete",
+                "id_field": id_field,
+                "document_id": document_id,
+                "deleted": deleted_count > 0,
+                "deleted_count": deleted_count,
+            }
 
     elif operation == "search":
         query_text = node_data.get("queryText", "")

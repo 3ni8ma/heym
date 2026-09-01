@@ -9,7 +9,9 @@ from qdrant_client.http.models import (
     FieldCondition,
     Filter,
     FilterSelector,
+    IsEmptyCondition,
     MatchValue,
+    PayloadField,
     PointStruct,
     VectorParams,
 )
@@ -24,6 +26,29 @@ QDRANT_PAYLOAD_LIMIT_BYTES = 30 * 1024 * 1024
 
 # Vector store backends a `rag` credential can target.
 VECTOR_STORE_BACKENDS = ("qdrant", "pgvector")
+
+# Namespace for point ids derived from a payload id field. Fixed forever: changing
+# it would make every previously upserted document unreachable by its own id.
+UPSERT_ID_NAMESPACE = uuid.UUID("1b3f0c5e-9f1a-4d6b-8c2e-5a7d4f10b921")
+
+DEFAULT_DOCUMENT_ID_FIELD = "doc_id"
+
+# A document stored by a workflow that named no source of its own gets the workflow as
+# its source. The prefix keeps it apart from an uploaded filename, and lets the
+# Vectorstores tab say which workflow wrote the group. Mirrored in VectorStoresPanel.vue.
+WORKFLOW_SOURCE_PREFIX = "workflow:"
+
+
+def upsert_point_id(collection_name: str, id_field: str, id_value: str) -> str:
+    """Stable point id for a document addressed by a payload field."""
+    return str(uuid.uuid5(UPSERT_ID_NAMESPACE, f"{collection_name}\x00{id_field}\x00{id_value}"))
+
+
+def upsert_payload_metadata(metadata: dict | None, id_field: str, id_value: str) -> dict:
+    """Metadata with the id field forced to the addressed value."""
+    meta = dict(metadata or {})
+    meta[id_field] = id_value
+    return meta
 
 
 @dataclass
@@ -95,6 +120,20 @@ class VectorStoreBackend(Protocol):
         metadata_filter: dict | None = None,
     ) -> list[SearchResult]: ...
     def delete_points(self, collection_name: str, point_ids: list[str]) -> bool: ...
+    def upsert_by_field(
+        self,
+        collection_name: str,
+        id_field: str,
+        id_value: str,
+        text: str,
+        metadata: dict | None = None,
+    ) -> tuple[str, int]: ...
+    def delete_by_field(
+        self,
+        collection_name: str,
+        id_field: str,
+        id_value: str,
+    ) -> int: ...
     def find_existing_files(
         self,
         collection_name: str,
@@ -326,6 +365,57 @@ class QdrantVectorStoreService:
         )
         return True
 
+    @staticmethod
+    def _field_filter(id_field: str, id_value: str) -> Filter:
+        return Filter(must=[FieldCondition(key=id_field, match=MatchValue(value=id_value))])
+
+    def _count_by_field(self, collection_name: str, id_field: str, id_value: str) -> int:
+        return self.client.count(
+            collection_name=collection_name,
+            count_filter=self._field_filter(id_field, id_value),
+            exact=True,
+        ).count
+
+    def upsert_by_field(
+        self,
+        collection_name: str,
+        id_field: str,
+        id_value: str,
+        text: str,
+        metadata: dict | None = None,
+    ) -> tuple[str, int]:
+        replaced = 0
+        if self.collection_exists(collection_name):
+            replaced = self._count_by_field(collection_name, id_field, id_value)
+            if replaced:
+                self.client.delete(
+                    collection_name=collection_name,
+                    points_selector=FilterSelector(filter=self._field_filter(id_field, id_value)),
+                )
+
+        point_id = upsert_point_id(collection_name, id_field, id_value)
+        self.insert(
+            collection_name,
+            text,
+            upsert_payload_metadata(metadata, id_field, id_value),
+            point_id=point_id,
+        )
+        return point_id, replaced
+
+    def delete_by_field(self, collection_name: str, id_field: str, id_value: str) -> int:
+        if not self.collection_exists(collection_name):
+            return 0
+
+        matched = self._count_by_field(collection_name, id_field, id_value)
+        if not matched:
+            return 0
+
+        self.client.delete(
+            collection_name=collection_name,
+            points_selector=FilterSelector(filter=self._field_filter(id_field, id_value)),
+        )
+        return matched
+
     def find_existing_files(
         self,
         collection_name: str,
@@ -381,14 +471,15 @@ class QdrantVectorStoreService:
         if not self.collection_exists(collection_name):
             return 0
 
-        delete_filter = Filter(
-            must=[
-                FieldCondition(
-                    key="source",
-                    match=MatchValue(value=source),
-                )
-            ]
+        # An empty source addresses the points that carry no source at all — the group
+        # the UI lists separately. Matching "" would match nothing, since the field is
+        # absent rather than blank.
+        condition = (
+            IsEmptyCondition(is_empty=PayloadField(key="source"))
+            if not source
+            else FieldCondition(key="source", match=MatchValue(value=source))
         )
+        delete_filter = Filter(must=[condition])
 
         self.client.delete(
             collection_name=collection_name,
@@ -479,7 +570,9 @@ class QdrantVectorStoreService:
                 total_items += 1
                 payload = dict(point.payload) if point.payload else {}
                 text = payload.pop("text", "")
-                source = payload.get("source", "Unknown")
+                # No source means the point was written by a workflow rather than
+                # uploaded; the empty key keeps that group addressable for delete.
+                source = payload.get("source") or ""
                 file_size = payload.get("file_size")
 
                 truncated_text = (

@@ -15,7 +15,13 @@ class AlembicMigrationGraphTest(unittest.TestCase):
         self.script = ScriptDirectory.from_config(config)
 
     def test_revision_graph_has_one_head(self) -> None:
-        self.assertEqual(self.script.get_heads(), ["121_running_node_start_times"])
+        self.assertEqual(self.script.get_heads(), ["122_vsi_metadata_index"])
+
+    def test_vector_store_metadata_index_follows_running_node_start_times(self) -> None:
+        revision = self.script.get_revision("122_vsi_metadata_index")
+
+        self.assertIsNotNone(revision)
+        self.assertEqual(revision.down_revision, "121_running_node_start_times")
 
     def test_folder_icon_revision_follows_oauth_token_hashes(self) -> None:
         folder_icon_revision = self.script.get_revision("112_add_folder_icon")

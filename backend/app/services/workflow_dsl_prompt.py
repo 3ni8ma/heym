@@ -2074,15 +2074,17 @@ The last node in the iteration body MUST connect BACK to the loop node's `loop` 
 - `$redisNodeLabel.ttl` - TTL value (for set operation with TTL)
 
 ### 22. rag (Vector Store / RAG Operations)
-- **Purpose**: Insert documents into or search documents from a vector store (Qdrant or Postgres/pgvector) for RAG (Retrieval Augmented Generation)
+- **Purpose**: Insert, upsert, delete, or search documents in a vector store (Qdrant or Postgres/pgvector) for RAG (Retrieval Augmented Generation)
 - **Inputs**: 1 | **Outputs**: 1
 - **Data fields**:
   - `label`: Node identifier
-  - `operation`: Operation type - "insert" | "search"
+  - `operation`: Operation type - "insert" | "upsert" | "delete" | "search"
   - `vectorStoreId`: UUID of the Vector Store to use
   - `dbType`: "qdrant" | "pgvector" (optional, default "qdrant"). The vector store backend. This is only a UI hint for filtering the store list; the actual backend is determined by the selected Vector Store's credential, so a valid `vectorStoreId` works regardless of `dbType`.
-  - `documentContent`: Document text to insert (only for "insert" operation, supports expressions)
-  - `documentMetadata`: JSON object with metadata for the document (only for "insert" operation)
+  - `documentContent`: Document text to insert (for "insert" and "upsert" operations, supports expressions)
+  - `documentMetadata`: JSON object with metadata for the document (for "insert" and "upsert" operations). String values support expressions and are resolved after the JSON is parsed, so `{"url": "$start.url"}` stores the resolved value, and a whole-string expression keeps its type (`{"count": "$start.count"}` stores a number)
+  - `documentIdField`: Payload field that carries the document's unique id (for "upsert" and "delete", default "doc_id")
+  - `documentId`: Value of that unique id (for "upsert" and "delete", supports expressions)
   - `queryText`: Search query text (only for "search" operation, supports expressions)
   - `searchLimit`: Maximum number of results to return (only for "search" operation, default: 3)
   - `metadataFilters`: JSON object with metadata filters for search (only for "search" operation)
@@ -2094,7 +2096,13 @@ The last node in the iteration body MUST connect BACK to the loop node's `loop` 
 | Operation | Required Fields | Description |
 |-----------|-----------------|-------------|
 | `insert` | documentContent, documentMetadata (optional) | Insert a document into the vector store |
+| `upsert` | documentId, documentContent, documentIdField (optional), documentMetadata (optional) | Replace every point whose id field matches, then insert the new version |
+| `delete` | documentId, documentIdField (optional) | Delete every point whose id field matches |
 | `search` | queryText, searchLimit (optional), metadataFilters (optional) | Search for similar documents |
+
+**Document source**: a document stored without a `source` key in `documentMetadata` is stamped with `source: "workflow:<workflow name>"`, so the Vectorstores tab can show which workflow stored it. Set `source` yourself to override it.
+
+**Document identity for `upsert` / `delete`**: the id is a field inside the payload, not the internal point id. `documentIdField` names that field (default `doc_id`) and `documentId` carries its value, so a document keeps the id your own system already uses. `upsert` writes the id field into the payload for you, and both operations work identically on Qdrant and Postgres (pgvector).
 
 **RAG Node Output Formats**:
 
@@ -2138,6 +2146,36 @@ The last node in the iteration body MUST connect BACK to the loop node's `loop` 
 }
 ```
 
+**Example - Upsert Document (insert or replace by your own id)**:
+```json
+{
+  "type": "rag",
+  "data": {
+    "label": "syncDoc",
+    "operation": "upsert",
+    "vectorStoreId": "vector-store-uuid",
+    "documentIdField": "doc_id",
+    "documentId": "$userInput.body.id",
+    "documentContent": "$userInput.body.text",
+    "documentMetadata": {"source": "crm"}
+  }
+}
+```
+
+**Example - Delete Document**:
+```json
+{
+  "type": "rag",
+  "data": {
+    "label": "removeDoc",
+    "operation": "delete",
+    "vectorStoreId": "vector-store-uuid",
+    "documentIdField": "doc_id",
+    "documentId": "$userInput.body.id"
+  }
+}
+```
+
 **Example - Search Documents**:
 ```json
 {
@@ -2159,6 +2197,10 @@ The last node in the iteration body MUST connect BACK to the loop node's `loop` 
 - `$ragNodeLabel.results` - Array of search results (for search operation)
 - `$ragNodeLabel.results.first().payload.content` - Content of the top result
 - `$ragNodeLabel.results.first().score` - Similarity score of the top result (0-1)
+- `$ragNodeLabel.point_id` - Stored point id (for insert and upsert operations)
+- `$ragNodeLabel.replaced` - Boolean, whether upsert replaced an existing document
+- `$ragNodeLabel.deleted` - Boolean, whether delete removed anything
+- `$ragNodeLabel.document_id` - The unique id the operation addressed (upsert and delete)
 
 **Example - RAG-Powered Q&A Workflow**:
 ```json
