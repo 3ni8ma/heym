@@ -14,6 +14,7 @@ from app.services.execution_cancellation import (
     register_execution,
 )
 from app.services.workflow_executor import (
+    _SHARED_EXECUTOR,
     NodeResult,
     WorkflowExecutor,
     _wrap_value,
@@ -109,6 +110,7 @@ class _FakeWorkflowExecutor:
         self.loop_states: dict[str, dict[str, int]] = {}
         self.node_outputs: dict[str, dict] = {}
         self._cancel_event = cancel_event
+        self._node_pool = _SHARED_EXECUTOR
         self._sequence = 0
 
     def _arm_deadline(self) -> None:
