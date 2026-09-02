@@ -600,8 +600,8 @@ onUnmounted(() => {
                   :class="cn(
                     'command-palette-item flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors duration-150',
                     selectedIndex === getFlatIndex(groupIdx, itemIdx)
-                      ? 'bg-accent/50 text-accent-foreground'
-                      : 'hover:bg-muted/50 text-foreground'
+                      ? 'command-palette-item--active text-accent-foreground'
+                      : 'command-palette-item--idle text-foreground'
                   )"
                   role="option"
                   :aria-selected="selectedIndex === getFlatIndex(groupIdx, itemIdx)"
@@ -816,6 +816,24 @@ onUnmounted(() => {
 
 .command-palette-item {
   outline: none;
+}
+
+.command-palette-item--active {
+  background: hsl(var(--primary) / 0.09);
+  box-shadow: inset 3px 0 0 hsl(var(--primary));
+}
+
+.command-palette-item--idle:hover {
+  background: hsl(var(--primary) / 0.045);
+}
+
+.dark .command-palette-item--active {
+  background: hsl(var(--accent) / 0.5);
+  box-shadow: inset 3px 0 0 hsl(var(--primary));
+}
+
+.dark .command-palette-item--idle:hover {
+  background: hsl(var(--muted) / 0.5);
 }
 
 .command-palette-item:focus-visible {
