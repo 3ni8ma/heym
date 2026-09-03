@@ -6,6 +6,7 @@ from urllib.parse import quote, urlparse
 import httpx
 
 from app.http_identity import merge_outbound_headers
+from app.services.ssrf_guard import build_guarded_http_client, guard_http_url
 
 
 class SentryService:
@@ -30,12 +31,15 @@ class SentryService:
                 "Content-Type": "application/json",
             }
         )
-        self._client = client or httpx.Client(
-            headers=self._headers,
-            timeout=httpx.Timeout(self._REQUEST_TIMEOUT_SECONDS),
-            follow_redirects=True,
-        )
         self._owns_client = client is None
+        if client is None:
+            guard_http_url(self._base_url, "Sentry credential base URL")
+            client = build_guarded_http_client(
+                headers=self._headers,
+                timeout=httpx.Timeout(self._REQUEST_TIMEOUT_SECONDS),
+                follow_redirects=True,
+            )
+        self._client = client
 
     def close(self) -> None:
         """Close the internally owned HTTP client."""

@@ -6,6 +6,8 @@ from typing import Any
 
 import httpx
 
+from app.services.ssrf_guard import get_guarded_http_client, guard_http_url
+
 
 class SupabaseService:
     """Sync Supabase PostgREST client.
@@ -45,7 +47,7 @@ class SupabaseService:
     _CONNECTION_TEST_TIMEOUT_SECONDS = 15.0
     _REQUEST_TIMEOUT_SECONDS = 30.0
 
-    def __init__(self, config: dict[str, Any]) -> None:
+    def __init__(self, config: dict[str, Any], client: httpx.Client | None = None) -> None:
         """Initialise with decrypted credential config."""
         self._config = dict(config)
         self._base_url = str(self._config.get("supabase_url", "")).strip().rstrip("/")
@@ -54,13 +56,17 @@ class SupabaseService:
             raise ValueError("Supabase credential requires supabase_url")
         if not self._api_key:
             raise ValueError("Supabase credential requires supabase_key")
+        if client is None:
+            guard_http_url(self._base_url, "Supabase credential URL")
+            client = get_guarded_http_client()
+        self._client = client
         schema = str(self._config.get("supabase_schema", "public")).strip()
         self._default_schema = schema or "public"
 
     def test_connection(self) -> None:
         """Verify the Supabase URL and API key against the PostgREST root."""
         try:
-            response = httpx.get(
+            response = self._client.get(
                 f"{self._base_url}/rest/v1/",
                 headers={
                     "apikey": self._api_key,
@@ -91,7 +97,7 @@ class SupabaseService:
     def _openapi_root(self, schema: str) -> dict[str, Any]:
         """Fetch the PostgREST OpenAPI root for discovery operations."""
         try:
-            response = httpx.get(
+            response = self._client.get(
                 f"{self._base_url}/rest/v1/",
                 headers=self._headers(schema),
                 timeout=self._CONNECTION_TEST_TIMEOUT_SECONDS,
@@ -195,7 +201,7 @@ class SupabaseService:
             request_kwargs["json"] = json_body
 
         try:
-            return httpx.request(method, url, **request_kwargs)
+            return self._client.request(method, url, **request_kwargs)
         except httpx.HTTPError as exc:
             operation_name = operation or method.lower()
             raise ValueError(f"Supabase {operation_name} failed: {exc}") from exc

@@ -48,6 +48,7 @@ from app.services.embedding import (
 )
 from app.services.encryption import decrypt_config, encrypt_config, mask_api_key
 from app.services.opencode_usage_service import fetch_opencode_usage
+from app.services.ssrf_guard import SsrfBlockedError
 from app.services.vector_store import VECTOR_STORE_BACKENDS
 from app.services.vector_store_pg import pgvector_dimension_message
 
@@ -1462,7 +1463,10 @@ async def get_credential_models(
     from app.services.context_compressor import KNOWN_LIMITS
     from app.services.llm_provider import fetch_models
 
-    models = await fetch_models(credential.type, config)
+    try:
+        models = await fetch_models(credential.type, config)
+    except SsrfBlockedError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     for m in models:
         model_lower = m.id.lower()
         for key, limit in KNOWN_LIMITS.items():

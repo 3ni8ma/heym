@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from app.services.openai_client import create_openai_client
+from app.services.openai_client import create_guarded_openai_client, create_openai_client
 
 if TYPE_CHECKING:
     from app.services.llm_trace import LLMTraceContext
@@ -245,7 +245,14 @@ def _check_llm_classification(
                 "Please select a credential and model for guardrails in the node."
             )
 
-        client = create_openai_client(api_key=api_key, base_url=base_url or None)
+        if base_url:
+            client = create_guarded_openai_client(
+                api_key=api_key,
+                base_url=base_url,
+                subject="Guardrail credential base URL",
+            )
+        else:
+            client = create_openai_client(api_key=api_key)
         response = client.chat.completions.create(
             model=model,
             messages=[

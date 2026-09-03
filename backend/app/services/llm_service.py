@@ -24,7 +24,7 @@ from app.services.agent_tool_observability import (
 )
 from app.services.llm_provider import is_reasoning_model
 from app.services.llm_trace import LLMTraceContext, record_llm_trace
-from app.services.openai_client import create_openai_client
+from app.services.openai_client import create_guarded_openai_client, create_openai_client
 from app.services.ssrf_guard import get_guarded_http_client, guard_http_url
 
 logger = logging.getLogger(__name__)
@@ -544,9 +544,10 @@ class LLMService:
             base = self.base_url.rstrip("/")
             if not base.endswith("/v1"):
                 base = base + "/v1"
-            return create_openai_client(
+            return create_guarded_openai_client(
                 api_key=self.api_key,
                 base_url=base,
+                subject="Custom LLM credential base URL",
                 timeout=self.request_timeout,
             ), "Custom"
 
@@ -556,7 +557,11 @@ class LLMService:
             "timeout": self.request_timeout,
         }
         if self.base_url:
-            client_kwargs["base_url"] = self.base_url
+            return create_guarded_openai_client(
+                base_url=self.base_url,
+                subject="LLM credential base URL",
+                **client_kwargs,
+            ), "OpenAI"
         return create_openai_client(**client_kwargs), "OpenAI"
 
     def _record_trace(

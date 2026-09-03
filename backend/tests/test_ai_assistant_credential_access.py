@@ -2,12 +2,20 @@ import unittest
 import uuid
 from unittest.mock import AsyncMock, patch
 
+from fastapi import HTTPException
+
 from app.api.ai_assistant import get_credential_for_user, get_openai_client
 from app.db.models import Credential, CredentialType
 from app.http_identity import HEYM_USER_AGENT
+from app.services.ssrf_guard import SsrfBlockedError, settings
 
 
 class AIAssistantOpenAIClientTests(unittest.TestCase):
+    def setUp(self) -> None:
+        patcher = patch.object(settings, "http_allow_private_urls", True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_all_provider_clients_include_heym_user_agent(self) -> None:
         cases = (
             (CredentialType.openai, {"api_key": "sk-test"}, "OpenAI"),
@@ -27,6 +35,20 @@ class AIAssistantOpenAIClientTests(unittest.TestCase):
                     self.assertEqual(client.default_headers["User-Agent"], HEYM_USER_AGENT)
                 finally:
                     client.close()
+
+    def test_custom_provider_ssrf_rejection_is_an_http_400(self) -> None:
+        with patch(
+            "app.api.ai_assistant.create_guarded_openai_client",
+            side_effect=SsrfBlockedError("Custom LLM URL is not allowed"),
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                get_openai_client(
+                    CredentialType.custom,
+                    {"api_key": "sk-test", "base_url": "http://127.0.0.1:11434"},
+                )
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertEqual(raised.exception.detail, "Custom LLM URL is not allowed")
 
 
 class AIAssistantCredentialAccessTests(unittest.IsolatedAsyncioTestCase):

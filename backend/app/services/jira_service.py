@@ -6,6 +6,7 @@ from urllib.parse import urljoin
 import httpx
 
 from app.http_identity import merge_outbound_headers
+from app.services.ssrf_guard import build_guarded_http_client, guard_http_url
 
 _DEFAULT_API_VERSION = "3"
 _DEFAULT_DEPLOYMENT = "cloud"
@@ -23,12 +24,15 @@ class JiraService:
         self._base_url = self._normalize_base_url(str(self._config.get("base_url", "") or ""))
         self._deployment = self._normalize_deployment(self._config)
         self._api_version = self._normalize_api_version(self._config, self._deployment)
-        self._client = client or httpx.Client(
-            headers=merge_outbound_headers({"Accept": "application/json"}),
-            timeout=httpx.Timeout(30.0),
-            follow_redirects=True,
-        )
         self._owns_client = client is None
+        if client is None:
+            guard_http_url(self._base_url, "Jira credential base URL")
+            client = build_guarded_http_client(
+                headers=merge_outbound_headers({"Accept": "application/json"}),
+                timeout=httpx.Timeout(30.0),
+                follow_redirects=True,
+            )
+        self._client = client
 
     def close(self) -> None:
         """Close the internally owned HTTP client, if any."""

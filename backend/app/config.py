@@ -120,10 +120,10 @@ class Settings(BaseSettings):
     opencode_git_author_email: str = Field(
         default="support@heym.run", validation_alias="HEYM_OPENCODE_GIT_AUTHOR_EMAIL"
     )
-    # HTTP and WebSocket node SSRF egress guard. When false (default), guarded
-    # nodes may only reach public addresses; loopback/private/link-local/metadata
-    # targets are refused. Trusted self-hosted instances that intentionally call
-    # internal services can opt out with HEYM_HTTP_ALLOW_PRIVATE_URLS=true.
+    # Shared SSRF egress guard for user-controlled HTTP/WebSocket targets and
+    # credential-derived integration URLs. When false (default), guarded targets
+    # may only reach public addresses. Trusted self-hosted instances that
+    # intentionally call internal services can opt out instance-wide.
     http_allow_private_urls: bool = Field(
         default=False, validation_alias="HEYM_HTTP_ALLOW_PRIVATE_URLS"
     )

@@ -49,6 +49,10 @@ class _FakeAsyncClient:
         raise AssertionError(f"Unexpected URL requested in test: {url}")
 
 
+async def _build_fake_async_client(*args, **kwargs) -> _FakeAsyncClient:
+    return _FakeAsyncClient(*args, **kwargs)
+
+
 class LlmBatchProviderTests(unittest.IsolatedAsyncioTestCase):
     def test_default_openai_models_are_marked_batch_capable(self) -> None:
         models = get_default_openai_models()
@@ -57,7 +61,7 @@ class LlmBatchProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(model.supports_batch for model in models))
         self.assertTrue(all(model.batch_support_reason for model in models))
 
-    @patch("app.services.llm_provider.httpx.AsyncClient", _FakeAsyncClient)
+    @patch("app.services.llm_provider.build_guarded_async_http_client", _build_fake_async_client)
     async def test_custom_models_mark_batch_unsupported(self) -> None:
         models = await fetch_custom_models("https://example.com", "test-key")
 

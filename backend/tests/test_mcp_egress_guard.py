@@ -1,6 +1,7 @@
 """SSRF egress-guard tests for MCP http(s)/SSE transports (GHSA-jjvx-3wfc-p8hq)."""
 
 import socket
+import ssl
 import unittest
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -171,6 +172,7 @@ class RedirectHardeningTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(captured.get("follow_redirects", True))
         # trust_env=False keeps the dial direct so the pin governs the target.
         self.assertFalse(captured.get("trust_env", True))
+        self.assertIsInstance(captured.get("verify"), ssl.SSLContext)
 
     async def test_sse_client_disables_redirects_and_env_proxy(self) -> None:
         captured: dict = {}
@@ -201,6 +203,7 @@ class RedirectHardeningTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(captured.get("follow_redirects", True))
         self.assertFalse(captured.get("trust_env", True))
+        self.assertIsInstance(captured.get("verify"), ssl.SSLContext)
 
 
 class ResolvePinnedIpTests(unittest.TestCase):
@@ -224,12 +227,19 @@ class PinBackendTests(unittest.IsolatedAsyncioTestCase):
         inner = AsyncMock()
         inner.connect_tcp.return_value = "stream"
         backend = _McpEgressPinBackend(inner)
-        with patch(
-            "app.services.mcp_tool_executor.socket.getaddrinfo",
-            return_value=_addrinfo("93.184.216.34"),
+        with (
+            patch(
+                "app.services.mcp_tool_executor.socket.getaddrinfo",
+                return_value=_addrinfo("93.184.216.34"),
+            ),
+            patch(
+                "app.services.mcp_tool_executor.asyncio.to_thread",
+                new=AsyncMock(side_effect=lambda function, *args: function(*args)),
+            ) as to_thread,
         ):
             result = await backend.connect_tcp("public.example.com", 443)
         self.assertEqual(result, "stream")
+        to_thread.assert_awaited_once_with(_resolve_pinned_mcp_ip, "public.example.com")
         # The socket target is the validated IP, not the attacker-controlled name.
         pinned_host = inner.connect_tcp.call_args.args[0]
         self.assertEqual(pinned_host, "93.184.216.34")

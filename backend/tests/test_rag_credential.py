@@ -195,7 +195,12 @@ class TestEmbeddingConfigFromCredential(unittest.TestCase):
 
 class TestEmbeddingServiceCustomEndpoint(unittest.TestCase):
     def _service(self, config: EmbeddingConfig) -> tuple[EmbeddingService, MagicMock]:
-        with patch("app.services.embedding.create_openai_client") as make_client:
+        factory = (
+            "app.services.embedding.create_guarded_openai_client"
+            if config.base_url
+            else "app.services.embedding.create_openai_client"
+        )
+        with patch(factory) as make_client:
             client = MagicMock()
             make_client.return_value = client
             service = EmbeddingService(config)
@@ -284,7 +289,7 @@ class TestEmbeddingServiceCustomEndpoint(unittest.TestCase):
 
     def test_blank_api_key_uses_placeholder(self):
         config = EmbeddingConfig(base_url="http://localhost:11434/v1", model="m")
-        with patch("app.services.embedding.create_openai_client") as make_client:
+        with patch("app.services.embedding.create_guarded_openai_client") as make_client:
             EmbeddingService(config)
         kwargs = make_client.call_args.kwargs
         self.assertTrue(kwargs["api_key"])
@@ -292,6 +297,13 @@ class TestEmbeddingServiceCustomEndpoint(unittest.TestCase):
 
 
 class TestRagVectorStoreFactory(unittest.TestCase):
+    def setUp(self) -> None:
+        from app.services import ssrf_guard
+
+        patcher = patch.object(ssrf_guard.settings, "http_allow_private_urls", True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_backend_selection_reads_db_type(self):
         self.assertEqual(rag_credential_backend({"db_type": "pgvector"}), "pgvector")
         self.assertEqual(rag_credential_backend({"db_type": "qdrant"}), "qdrant")

@@ -1,21 +1,18 @@
 """SSRF egress guard for outbound fetches the backend performs on a user URL.
 
-Used by the HTTP workflow node (GHSA-8wj7-v2w6-wfcx), the LLM image-edit input
-loader (GHSA-6rph-qqcv-jqh4), and the WebSocket Send and Trigger nodes
-(GHSA-mqw6-g845-w596). They send requests to URLs chosen by the workflow author,
-or by the caller when a field is templated from input. On a multi-tenant or hosted
-deployment those authors are not necessarily trusted, so without a guard they can
-be pointed at loopback, private, link-local, or cloud-metadata endpoints (SSRF,
-CWE-918). This mirrors the protection already applied to the MCP http(s)/SSE
-transports.
+Used by workflow nodes and services that send requests to URLs chosen by a
+workflow author or stored in a credential. On a multi-tenant or hosted deployment
+those authors are not necessarily trusted, so without a guard they can be pointed
+at loopback, private, link-local, or cloud-metadata endpoints (SSRF, CWE-918).
+This mirrors the protection already applied to the MCP http(s)/SSE transports.
 
 Two layers, matching the MCP guard:
 
 * ``guard_http_url`` and ``guard_websocket_url`` are fast pre-connection checks:
   only the matching URL schemes are allowed, and the host must resolve
   exclusively to globally routable addresses.
-* ``get_guarded_http_client`` and ``open_guarded_websocket`` re-check and pin the
-  resolved IP at dial time, so a DNS-rebinding answer cannot bounce the real
+* Guarded HTTP client factories and ``open_guarded_websocket`` re-check and pin
+  the resolved IP at dial time, so a DNS-rebinding answer cannot bounce the real
   connection onto a private address after the pre-connection check passed. The
   guarded transports connect directly rather than trusting environment proxies.
 
@@ -53,6 +50,10 @@ _ALLOWED_WEBSOCKET_SCHEMES = ("ws", "wss")
 _DEFAULT_URL_SUBJECT = "HTTP node URL"
 _PINNED_DIAL_SUBJECT = "Guarded request URL"
 _DEFAULT_WEBSOCKET_SUBJECT = "WebSocket node URL"
+_PRIVATE_URL_OPT_OUT_HINT = (
+    " Set HEYM_HTTP_ALLOW_PRIVATE_URLS=true on a trusted self-hosted instance "
+    "to permit internal targets."
+)
 
 # IPv6 forms that carry an IPv4 destination but that ``is_global`` still reports
 # as globally routable, so the embedded address has to be checked instead.
@@ -189,7 +190,10 @@ def guard_http_url(url: str, subject: str = _DEFAULT_URL_SUBJECT) -> None:
 
     addresses = _resolve_host_addresses(hostname, subject)
     if not all(_is_public_address(address) for address in addresses):
-        raise SsrfBlockedError(f"{subject} is not allowed (resolves to a non-public address)")
+        raise SsrfBlockedError(
+            f"{subject} is not allowed (resolves to a non-public address)."
+            f"{_PRIVATE_URL_OPT_OUT_HINT}"
+        )
 
 
 def _resolve_pinned_addresses(host: str) -> list[tuple[socket.AddressFamily, str]]:
@@ -202,7 +206,8 @@ def _resolve_pinned_addresses(host: str) -> list[tuple[socket.AddressFamily, str
     addresses = _resolve_host_addresses(host, _PINNED_DIAL_SUBJECT)
     if not all(_is_public_address(address) for address in addresses):
         raise SsrfBlockedError(
-            f"{_PINNED_DIAL_SUBJECT} is not allowed (resolves to a non-public address)"
+            f"{_PINNED_DIAL_SUBJECT} is not allowed (resolves to a non-public address)."
+            f"{_PRIVATE_URL_OPT_OUT_HINT}"
         )
     return [
         (
@@ -265,6 +270,43 @@ class _HttpEgressPinBackend(httpcore.NetworkBackend):
         )
 
 
+class _AsyncHttpEgressPinBackend(httpcore.AsyncNetworkBackend):
+    """Async counterpart of :class:`_HttpEgressPinBackend`."""
+
+    def __init__(self, inner: httpcore.AsyncNetworkBackend) -> None:
+        self._inner = inner
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Any = None,
+    ) -> httpcore.AsyncNetworkStream:
+        try:
+            pinned = await asyncio.to_thread(_resolve_pinned_ip, host)
+        except SsrfBlockedError as exc:
+            raise httpcore.ConnectError(str(exc)) from exc
+        return await self._inner.connect_tcp(
+            pinned,
+            port,
+            timeout=timeout,
+            local_address=local_address,
+            socket_options=socket_options,
+        )
+
+    async def connect_unix_socket(
+        self,
+        path: str,
+        timeout: float | None = None,
+        socket_options: Any = None,
+    ) -> httpcore.AsyncNetworkStream:
+        raise httpcore.ConnectError(
+            "The guarded HTTP client does not allow unix-socket connections"
+        )
+
+
 def _install_egress_pin(client: httpx.Client) -> None:
     """Wrap a client's connection pool with the pinning egress backend.
 
@@ -292,16 +334,66 @@ def _install_egress_pin(client: httpx.Client) -> None:
     pool._network_backend = _HttpEgressPinBackend(backend)
 
 
+def _install_async_egress_pin(client: httpx.AsyncClient) -> None:
+    """Install the fail-closed pinning backend on an async HTTP client."""
+    if settings.http_allow_private_urls:
+        return
+    if getattr(client, "_mounts", None):
+        raise RuntimeError(
+            "SSRF egress pin refuses a client with proxy/mount transports "
+            "(a proxy would bypass the pinned backend); build it with trust_env=False"
+        )
+    transport = getattr(client, "_transport", None)
+    pool = getattr(transport, "_pool", None)
+    backend = getattr(pool, "_network_backend", None)
+    if pool is None or backend is None:
+        raise RuntimeError("SSRF egress pin could not be installed (httpx internals unavailable)")
+    if isinstance(backend, _AsyncHttpEgressPinBackend):
+        return
+    pool._network_backend = _AsyncHttpEgressPinBackend(backend)
+
+
+def build_guarded_http_client(**kwargs: Any) -> httpx.Client:
+    """Build a sync HTTP client with the dial-time SSRF pin installed."""
+    if not settings.http_allow_private_urls:
+        kwargs["trust_env"] = False
+        # Environment proxies must stay disabled because they can bypass the
+        # pinned dial. Restore only the operator's CA bundle, which httpx would
+        # otherwise discard together with proxy settings under trust_env=False.
+        if "verify" not in kwargs:
+            kwargs["verify"] = httpx.create_ssl_context(trust_env=True)
+    client = httpx.Client(**kwargs)
+    try:
+        _install_egress_pin(client)
+    except Exception:
+        client.close()
+        raise
+    return client
+
+
+async def build_guarded_async_http_client(**kwargs: Any) -> httpx.AsyncClient:
+    """Build an async HTTP client with the dial-time SSRF pin installed."""
+    if not settings.http_allow_private_urls:
+        kwargs["trust_env"] = False
+        if "verify" not in kwargs:
+            kwargs["verify"] = httpx.create_ssl_context(trust_env=True)
+    client = httpx.AsyncClient(**kwargs)
+    try:
+        _install_async_egress_pin(client)
+    except Exception:
+        await client.aclose()
+        raise
+    return client
+
+
 def get_guarded_http_client() -> httpx.Client:
     """Return the shared guarded client with the SSRF egress pin installed.
 
     Kept separate from ``workflow_executor.get_http_client`` so the guard applies
-    only where the backend dials a user-supplied URL (the HTTP node and the LLM
-    image-edit input loader), not to integration nodes (crawler, Telegram, Slack,
-    Discord) that legitimately reach operator-configured internal hosts. Carriers
-    that fetch on our behalf, such as FlareSolverr and the Playwright runner, are
-    deliberately out of scope: they resolve the target themselves, so their egress
-    belongs to the deployment's network policy rather than to this guard.
+    only where the backend dials a user-controlled URL. Carriers that fetch on our
+    behalf, such as FlareSolverr and the Playwright runner, remain out of scope:
+    they resolve the target themselves, so their egress belongs to the deployment's
+    network policy rather than to this guard.
     """
     from app.services import workflow_executor as _wf
 
@@ -317,18 +409,13 @@ def get_guarded_http_client() -> httpx.Client:
             # the target themselves, so a public URL could be redirected onto an
             # internal host through the proxy. Direct connections keep the pinned
             # egress backend authoritative (matches the MCP guard).
-            client = httpx.Client(
+            client = build_guarded_http_client(
                 limits=limits,
                 timeout=_wf.HTTP_TIMEOUT,
                 follow_redirects=False,
                 headers={"User-Agent": HEYM_USER_AGENT},
                 trust_env=False,
             )
-            try:
-                _install_egress_pin(client)
-            except Exception:
-                client.close()
-                raise
             _GUARDED_CLIENT = client
         return _GUARDED_CLIENT
 
@@ -384,7 +471,10 @@ def guard_websocket_url(url: str, subject: str = _DEFAULT_WEBSOCKET_SUBJECT) -> 
 
     addresses = _resolve_host_addresses(hostname, subject)
     if not all(_is_public_address(address) for address in addresses):
-        raise SsrfBlockedError(f"{subject} is not allowed (resolves to a non-public address)")
+        raise SsrfBlockedError(
+            f"{subject} is not allowed (resolves to a non-public address)."
+            f"{_PRIVATE_URL_OPT_OUT_HINT}"
+        )
 
 
 def reject_reserved_websocket_headers(
