@@ -457,16 +457,12 @@ async function refreshHistory(): Promise<void> {
 }
 
 async function clearAllHistory(): Promise<void> {
-  if (!confirm("Are you sure you want to clear all execution history?")) return;
+  if (!confirm("Are you sure you want to clear all execution history? (History for shared workflows will be retained.)")) return;
   cancelScheduledSearchReload();
   clearing.value = true;
   try {
     await workflowApi.clearAllHistory();
-    executionHistory.value = [];
-    totalCount.value = 0;
-    entryDetailsCache.value = new Map();
-    selectedId.value = null;
-    selectedTriggerSource.value = undefined;
+    await refreshHistory();
   } catch {
     error.value = "Failed to clear history";
   } finally {
