@@ -57,7 +57,7 @@ class LlmBatchProviderTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(model.supports_batch for model in models))
         self.assertTrue(all(model.batch_support_reason for model in models))
 
-    @patch("app.services.llm_provider.httpx.AsyncClient", _FakeAsyncClient)
+    @patch("app.services.llm_provider.build_guarded_async_http_client", _FakeAsyncClient)
     async def test_custom_models_mark_batch_unsupported(self) -> None:
         models = await fetch_custom_models("https://example.com", "test-key")
 

@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 import tiktoken
 
-from app.services.openai_client import create_openai_client
+from app.services.openai_client import create_guarded_openai_client, create_openai_client
 
 EMBEDDING_MODEL = "text-embedding-3-large"
 EMBEDDING_DIMENSIONS = 1536
@@ -63,8 +63,13 @@ class EmbeddingService:
 
         client_kwargs: dict = {"api_key": config.api_key or CUSTOM_ENDPOINT_API_KEY_PLACEHOLDER}
         if config.base_url:
-            client_kwargs["base_url"] = config.base_url
-        self.client = create_openai_client(**client_kwargs)
+            self.client = create_guarded_openai_client(
+                base_url=config.base_url,
+                subject="RAG embedding credential base URL",
+                **client_kwargs,
+            )
+        else:
+            self.client = create_openai_client(**client_kwargs)
 
         try:
             self.encoding = tiktoken.encoding_for_model(config.model)

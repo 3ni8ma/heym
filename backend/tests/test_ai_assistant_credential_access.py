@@ -5,9 +5,15 @@ from unittest.mock import AsyncMock, patch
 from app.api.ai_assistant import get_credential_for_user, get_openai_client
 from app.db.models import Credential, CredentialType
 from app.http_identity import HEYM_USER_AGENT
+from app.services.ssrf_guard import settings
 
 
 class AIAssistantOpenAIClientTests(unittest.TestCase):
+    def setUp(self) -> None:
+        patcher = patch.object(settings, "http_allow_private_urls", True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_all_provider_clients_include_heym_user_agent(self) -> None:
         cases = (
             (CredentialType.openai, {"api_key": "sk-test"}, "OpenAI"),

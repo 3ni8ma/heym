@@ -7,6 +7,7 @@ from urllib.parse import quote
 import httpx
 
 from app.http_identity import merge_outbound_headers
+from app.services.ssrf_guard import build_guarded_http_client, guard_http_url
 
 GITHUB_API_BASE_URL = "https://api.github.com"
 
@@ -16,17 +17,20 @@ class GitHubService:
 
     def __init__(self, config: dict[str, Any], client: httpx.Client | None = None) -> None:
         self._config = config
-        self._client = client or httpx.Client(
-            headers=merge_outbound_headers(
-                {
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                }
-            ),
-            timeout=httpx.Timeout(30.0),
-            follow_redirects=True,
-        )
         self._owns_client = client is None
+        if client is None:
+            guard_http_url(self._base_url(), "GitHub credential base URL")
+            client = build_guarded_http_client(
+                headers=merge_outbound_headers(
+                    {
+                        "Accept": "application/vnd.github+json",
+                        "X-GitHub-Api-Version": "2022-11-28",
+                    }
+                ),
+                timeout=httpx.Timeout(30.0),
+                follow_redirects=True,
+            )
+        self._client = client
 
     def close(self) -> None:
         """Close the internally owned HTTP client, if any."""

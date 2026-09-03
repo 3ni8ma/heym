@@ -103,3 +103,6 @@ vulnerabilities in Heym:
   authorization result fell through to the `localhost:6379` connection defaults
   instead of failing closed (GHSA-fmpw-hj3m-xvj6), and for contributing the
   remediation.
+- [@fatihkaratash](https://github.com/fatihkaratash) for reporting
+  credential-controlled base URL SSRF across Jira, Sentry, GitHub, Grist,
+  Supabase, and custom OpenAI-compatible integrations (GHSA-xchj-mw74-2232).

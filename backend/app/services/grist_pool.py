@@ -4,6 +4,7 @@ from threading import Lock
 import httpx
 
 from app.http_identity import HEYM_USER_AGENT
+from app.services.ssrf_guard import build_guarded_http_client, guard_http_url
 
 POOL_SIZE = 8
 CONNECTION_TIMEOUT = 30.0
@@ -48,6 +49,7 @@ def _get_pool_key(server_url: str, api_key: str) -> str:
 
 
 def get_grist_client(server_url: str, api_key: str) -> httpx.Client:
+    guard_http_url(server_url, "Grist credential server URL")
     pool_key = _get_pool_key(server_url, api_key)
 
     with _lock:
@@ -56,7 +58,7 @@ def get_grist_client(server_url: str, api_key: str) -> httpx.Client:
                 max_connections=POOL_SIZE,
                 max_keepalive_connections=POOL_SIZE,
             )
-            _clients[pool_key] = httpx.Client(
+            _clients[pool_key] = build_guarded_http_client(
                 base_url=server_url,
                 headers={
                     "Authorization": f"Bearer {api_key}",

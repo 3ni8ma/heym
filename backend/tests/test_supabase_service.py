@@ -22,11 +22,19 @@ def _params_to_dict(params) -> dict:
     return {key: value for key, value in params}
 
 
+def _passthrough_client() -> MagicMock:
+    """Return an injected client that preserves the module-level HTTP mocks."""
+    client = MagicMock(spec=httpx.Client)
+    client.get.side_effect = lambda *args, **kwargs: httpx.get(*args, **kwargs)
+    client.request.side_effect = lambda *args, **kwargs: httpx.request(*args, **kwargs)
+    return client
+
+
 class TestSupabaseService(unittest.TestCase):
     def _make_service(self):
         from app.services.supabase_service import SupabaseService
 
-        return SupabaseService(_make_config())
+        return SupabaseService(_make_config(), client=_passthrough_client())
 
     def test_select_rows_returns_rows_and_count(self) -> None:
         svc = self._make_service()
@@ -316,7 +324,8 @@ class TestSupabaseService(unittest.TestCase):
             {
                 "supabase_url": "https://example.supabase.co/  ",
                 "supabase_key": "sb-secret-key",
-            }
+            },
+            client=_passthrough_client(),
         )
         with patch("httpx.get") as mock_get:
             mock_response = MagicMock()
@@ -562,6 +571,14 @@ def _make_supabase_workflow(supabase_data: dict) -> tuple:
 
 class TestSupabaseExecutorBranch(unittest.TestCase):
     """Test the workflow executor Supabase branch via full WorkflowExecutor.execute()."""
+
+    def setUp(self) -> None:
+        from app.services import ssrf_guard
+
+        patcher = patch.object(ssrf_guard.settings, "http_allow_private_urls", True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(ssrf_guard.close_guarded_http_client)
 
     def _run_with_mocked_credential(self, supabase_data: dict):
         import uuid as _uuid

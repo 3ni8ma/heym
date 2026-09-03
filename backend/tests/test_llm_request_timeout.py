@@ -1,12 +1,19 @@
 import unittest
+from unittest.mock import patch
 
 from app.db.models import CredentialType
 from app.http_identity import HEYM_USER_AGENT
 from app.services.llm_service import LLM_REQUEST_TIMEOUT, LLMService
+from app.services.ssrf_guard import settings
 
 
 class LLMRequestTimeoutTest(unittest.TestCase):
     """The per-node request timeout must reach the underlying OpenAI client."""
+
+    def setUp(self) -> None:
+        patcher = patch.object(settings, "http_allow_private_urls", True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_default_request_timeout_matches_module_constant(self) -> None:
         service = LLMService(CredentialType.openai, "sk-test")

@@ -142,6 +142,14 @@ class SupabaseCredentialConnectionTests(unittest.TestCase):
 
 
 class SupabaseCredentialConnectionApiTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        from app.services import ssrf_guard
+
+        patcher = patch.object(ssrf_guard.settings, "http_allow_private_urls", True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(ssrf_guard.close_guarded_http_client)
+
     async def test_test_connection_returns_success(self) -> None:
         user_id = uuid.uuid4()
         current_user = MagicMock(id=user_id)
