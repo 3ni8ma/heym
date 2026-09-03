@@ -29,13 +29,16 @@ def execute(ctx: NodeExecutionContext) -> object:
     from app.db.session import SessionLocal
     from app.services.encryption import decrypt_config
 
-    redis_config: dict = {}
     with SessionLocal() as db:
         cred = self._get_accessible_credential(db, credential_id)
-        if cred:
-            redis_config = decrypt_config(cred.encrypted_config)
+        if cred is None:
+            raise ValueError("Redis credential not found or invalid")
+        redis_config: dict = decrypt_config(cred.encrypted_config)
 
-    redis_host = redis_config.get("redis_host", "localhost")
+    redis_host = str(redis_config.get("redis_host", "") or "").strip()
+    if not redis_host:
+        raise ValueError("Redis credential requires redis_host")
+
     redis_port = int(redis_config.get("redis_port", 6379))
     redis_password = redis_config.get("redis_password", "") or None
     redis_db = int(redis_config.get("redis_db", 0))
