@@ -163,7 +163,7 @@ class _McpEgressPinBackend(httpcore.AsyncNetworkBackend):
         socket_options: Any = None,
     ) -> httpcore.AsyncNetworkStream:
         try:
-            pinned = _resolve_pinned_mcp_ip(host)
+            pinned = await asyncio.to_thread(_resolve_pinned_mcp_ip, host)
         except ValueError as exc:
             raise httpcore.ConnectError(str(exc)) from exc
         return await self._inner.connect_tcp(
@@ -279,6 +279,7 @@ async def _sse_client_fail_fast(
                 timeout=httpx.Timeout(timeout, read=sse_read_timeout),
                 follow_redirects=False,
                 trust_env=False,
+                verify=httpx.create_ssl_context(trust_env=True),
             ) as client:
                 _install_egress_pin(client)
                 async with aconnect_sse(client, "GET", url) as event_source:
@@ -550,7 +551,11 @@ async def _open_transport(
         # the check; trust_env=False keeps the dial direct so the pinned egress
         # backend (not an env proxy) governs the real connection.
         async with httpx.AsyncClient(
-            headers=headers, timeout=timeout, follow_redirects=False, trust_env=False
+            headers=headers,
+            timeout=timeout,
+            follow_redirects=False,
+            trust_env=False,
+            verify=httpx.create_ssl_context(trust_env=True),
         ) as http_client:
             _install_egress_pin(http_client)
             async with streamable_http_client(url, http_client=http_client) as (

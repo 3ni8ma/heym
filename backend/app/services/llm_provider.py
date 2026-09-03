@@ -5,7 +5,11 @@ import httpx
 from app.db.models import CredentialType
 from app.http_identity import HEYM_USER_AGENT
 from app.models.schemas import LLMModel
-from app.services.ssrf_guard import build_guarded_async_http_client, guard_http_url
+from app.services.ssrf_guard import (
+    SsrfBlockedError,
+    build_guarded_async_http_client,
+    guard_http_url,
+)
 
 OPENAI_BATCH_SUPPORT_MESSAGE = (
     "Batch mode is available for this OpenAI model and runs on the Batch API."
@@ -229,7 +233,7 @@ async def fetch_custom_models(base_url: str, api_key: str) -> list[LLMModel]:
             url = base + "/v1/models"
 
         await asyncio.to_thread(guard_http_url, url, "Custom LLM credential base URL")
-        async with build_guarded_async_http_client(
+        async with await build_guarded_async_http_client(
             timeout=10.0,
             headers={"User-Agent": HEYM_USER_AGENT},
         ) as client:
@@ -252,5 +256,7 @@ async def fetch_custom_models(base_url: str, api_key: str) -> list[LLMModel]:
 
             models.sort(key=lambda m: m.id)
             return models
+    except SsrfBlockedError:
+        raise
     except Exception:
         return []

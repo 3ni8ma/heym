@@ -69,6 +69,7 @@ from app.services.llm_trace import LLMTraceContext, record_llm_trace
 from app.services.openai_client import create_guarded_openai_client, create_openai_client
 from app.services.run_history import record_run_history
 from app.services.schedule_range import resolve_schedule_tool_range
+from app.services.ssrf_guard import SsrfBlockedError
 from app.services.timezone_utils import get_configured_timezone
 from app.services.workflow_dsl_prompt import (
     CLARIFY_PROTOCOL_PROMPT,
@@ -1291,11 +1292,14 @@ def get_openai_client(
         base_url = config.get("base_url", "").rstrip("/")
         if not base_url.endswith("/v1"):
             base_url = base_url + "/v1"
-        return create_guarded_openai_client(
-            api_key=config.get("api_key"),
-            base_url=base_url,
-            subject="AI assistant credential base URL",
-        ), "Custom"
+        try:
+            return create_guarded_openai_client(
+                api_key=config.get("api_key"),
+                base_url=base_url,
+                subject="AI assistant credential base URL",
+            ), "Custom"
+        except SsrfBlockedError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     return create_openai_client(api_key=config.get("api_key")), "OpenAI"
 

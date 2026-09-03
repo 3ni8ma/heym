@@ -50,6 +50,10 @@ _ALLOWED_WEBSOCKET_SCHEMES = ("ws", "wss")
 _DEFAULT_URL_SUBJECT = "HTTP node URL"
 _PINNED_DIAL_SUBJECT = "Guarded request URL"
 _DEFAULT_WEBSOCKET_SUBJECT = "WebSocket node URL"
+_PRIVATE_URL_OPT_OUT_HINT = (
+    " Set HEYM_HTTP_ALLOW_PRIVATE_URLS=true on a trusted self-hosted instance "
+    "to permit internal targets."
+)
 
 # IPv6 forms that carry an IPv4 destination but that ``is_global`` still reports
 # as globally routable, so the embedded address has to be checked instead.
@@ -186,7 +190,10 @@ def guard_http_url(url: str, subject: str = _DEFAULT_URL_SUBJECT) -> None:
 
     addresses = _resolve_host_addresses(hostname, subject)
     if not all(_is_public_address(address) for address in addresses):
-        raise SsrfBlockedError(f"{subject} is not allowed (resolves to a non-public address)")
+        raise SsrfBlockedError(
+            f"{subject} is not allowed (resolves to a non-public address)."
+            f"{_PRIVATE_URL_OPT_OUT_HINT}"
+        )
 
 
 def _resolve_pinned_addresses(host: str) -> list[tuple[socket.AddressFamily, str]]:
@@ -199,7 +206,8 @@ def _resolve_pinned_addresses(host: str) -> list[tuple[socket.AddressFamily, str
     addresses = _resolve_host_addresses(host, _PINNED_DIAL_SUBJECT)
     if not all(_is_public_address(address) for address in addresses):
         raise SsrfBlockedError(
-            f"{_PINNED_DIAL_SUBJECT} is not allowed (resolves to a non-public address)"
+            f"{_PINNED_DIAL_SUBJECT} is not allowed (resolves to a non-public address)."
+            f"{_PRIVATE_URL_OPT_OUT_HINT}"
         )
     return [
         (
@@ -349,6 +357,11 @@ def build_guarded_http_client(**kwargs: Any) -> httpx.Client:
     """Build a sync HTTP client with the dial-time SSRF pin installed."""
     if not settings.http_allow_private_urls:
         kwargs["trust_env"] = False
+        # Environment proxies must stay disabled because they can bypass the
+        # pinned dial. Restore only the operator's CA bundle, which httpx would
+        # otherwise discard together with proxy settings under trust_env=False.
+        if "verify" not in kwargs:
+            kwargs["verify"] = httpx.create_ssl_context(trust_env=True)
     client = httpx.Client(**kwargs)
     try:
         _install_egress_pin(client)
@@ -358,12 +371,18 @@ def build_guarded_http_client(**kwargs: Any) -> httpx.Client:
     return client
 
 
-def build_guarded_async_http_client(**kwargs: Any) -> httpx.AsyncClient:
+async def build_guarded_async_http_client(**kwargs: Any) -> httpx.AsyncClient:
     """Build an async HTTP client with the dial-time SSRF pin installed."""
     if not settings.http_allow_private_urls:
         kwargs["trust_env"] = False
+        if "verify" not in kwargs:
+            kwargs["verify"] = httpx.create_ssl_context(trust_env=True)
     client = httpx.AsyncClient(**kwargs)
-    _install_async_egress_pin(client)
+    try:
+        _install_async_egress_pin(client)
+    except Exception:
+        await client.aclose()
+        raise
     return client
 
 
@@ -452,7 +471,10 @@ def guard_websocket_url(url: str, subject: str = _DEFAULT_WEBSOCKET_SUBJECT) -> 
 
     addresses = _resolve_host_addresses(hostname, subject)
     if not all(_is_public_address(address) for address in addresses):
-        raise SsrfBlockedError(f"{subject} is not allowed (resolves to a non-public address)")
+        raise SsrfBlockedError(
+            f"{subject} is not allowed (resolves to a non-public address)."
+            f"{_PRIVATE_URL_OPT_OUT_HINT}"
+        )
 
 
 def reject_reserved_websocket_headers(

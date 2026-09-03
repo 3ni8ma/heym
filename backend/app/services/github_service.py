@@ -16,10 +16,14 @@ class GitHubService:
     """Small REST client for GitHub and GitHub Enterprise API operations."""
 
     def __init__(self, config: dict[str, Any], client: httpx.Client | None = None) -> None:
-        self._config = config
+        self._config = dict(config)
         self._owns_client = client is None
         if client is None:
-            guard_http_url(self._base_url(), "GitHub credential base URL")
+            base_url = self._base_url()
+            uploads_base_url = self._uploads_base_url()
+            guard_http_url(base_url, "GitHub credential base URL")
+            if uploads_base_url != base_url:
+                guard_http_url(uploads_base_url, "GitHub credential uploads URL")
             client = build_guarded_http_client(
                 headers=merge_outbound_headers(
                     {

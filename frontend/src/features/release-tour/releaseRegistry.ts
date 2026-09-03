@@ -49,6 +49,11 @@ export const RELEASE_REGISTRY: ReleaseEntry[] = [
             markdown:
               "**Document metadata now resolves expressions.** Writing `{ \"url\": \"$start.url\" }` on Insert or Upsert stores what the run actually produced, and a value that is one whole expression keeps its type, so a number stays a number and still matches a search filter.",
           },
+          {
+            type: "prose",
+            markdown:
+              "**Upgrade note for v0.0.105:** the instance-wide SSRF policy controlled by `HEYM_HTTP_ALLOW_PRIVATE_URLS` now also protects credential-derived destinations used by Jira, Sentry, GitHub, Grist, Supabase, custom LLM execution and model discovery, the AI assistant, guardrails, and RAG embeddings. Existing credentials that point to loopback, private, or link-local addresses are refused unless the setting is enabled on a trusted self-hosted instance. Guarded clients ignore `HTTP_PROXY` and `HTTPS_PROXY`, while `SSL_CERT_FILE` and `SSL_CERT_DIR` remain supported.",
+          },
         ],
         tour: {
           description:
